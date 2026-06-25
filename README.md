@@ -1,2 +1,31 @@
-# Suggestify
-Suggestify is a Spotify analytics and recommendation platform that transforms streaming history into actionable insights. By combining Spotify Extended Streaming History data with metadata from the Spotify API, it delivers personalized statistics, listening trends, genre analysis, and intelligent music recommendations.
+# Suggestify 🎵
+
+Suggestify is a Spotify analytics and recommendation platform that transforms your streaming history into meaningful insights.
+
+Using Spotify Extended Streaming History data, Suggestify analyzes listening habits, favorite artists, top tracks, genres, and trends over time. The platform combines historical listening data with Spotify API metadata to provide personalized statistics and intelligent music recommendations.
+
+## Features
+
+* 📊 Detailed listening statistics
+* 🎵 Top tracks and artists analysis
+* 📈 Monthly and yearly listening trends
+* 🎧 Genre distribution and insights
+* 🤝 Collaboration and featured artist tracking
+* 🔍 Deep analysis of Spotify Extended Streaming History
+* 🧠 Personalized recommendation engine
+* ⚡ Fast data processing and caching
+
+## Tech Stack
+
+* **Backend:** Java
+* **Recommendation Engine:** Python
+* **Database:** SQL
+* **Frontend:** HTML, CSS, JavaScript
+
+## Vision
+
+Most music platforms focus on what you're listening to now. Suggestify focuses on your complete listening journey, helping users discover patterns, revisit forgotten favorites, and receive recommendations based on their actual listening behavior.
+
+---
+
+**Suggestify — Understand your music. Discover your next favorite song.** 🎶
