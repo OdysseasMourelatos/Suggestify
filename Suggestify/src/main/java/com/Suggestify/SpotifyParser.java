@@ -42,6 +42,11 @@ public class SpotifyParser {
 
             EntityExtractor extractor = new EntityExtractor();
             extractor.extractEntities(allRecords);
+
+            DatabaseManager.initializeSchema();
+            DatabaseImporter dbImporter = new DatabaseImporter();
+            dbImporter.importRecords(allRecords);
+
         } catch (Exception e) {
             System.err.println("Error reading ZIP file. Please verify the file path.");
             e.printStackTrace();
