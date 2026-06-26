@@ -15,17 +15,22 @@ public class DatabaseManager {
     }
 
     public static void initializeSchema() {
-        String createArtistsTable = """
-            CREATE TABLE IF NOT EXISTS artists (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) UNIQUE NOT NULL
-            );
+        String createArtistsTable = "CREATE TABLE IF NOT EXISTS artists (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL);";
+        String dropTables = "DROP TABLE IF EXISTS streams, song_artists, songs, artists, albums CASCADE;";
+
+
+        String createAlbumsTable = """
+            CREATE TABLE IF NOT EXISTS albums (
+                id SERIAL PRIMARY KEY, 
+                title VARCHAR(255) UNIQUE NOT NULL
+                );
         """;
 
         String createSongsTable = """
             CREATE TABLE IF NOT EXISTS songs (
                 id SERIAL PRIMARY KEY,
-                title VARCHAR(255) NOT NULL
+                title VARCHAR(255) NOT NULL,
+                album_id INT REFERENCES albums(id)
             );
         """;
 
@@ -49,8 +54,10 @@ public class DatabaseManager {
 
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
+            stmt.execute(dropTables);
 
             stmt.execute(createArtistsTable);
+            stmt.execute(createAlbumsTable);
             stmt.execute(createSongsTable);
             stmt.execute(createSongArtistsTable);
             stmt.execute(createStreamsTable);
@@ -58,9 +65,5 @@ public class DatabaseManager {
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    public static void main(String[] args) {
-        initializeSchema();
     }
 }
