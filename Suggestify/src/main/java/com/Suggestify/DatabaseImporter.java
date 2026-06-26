@@ -110,16 +110,22 @@ public class DatabaseImporter {
         return -1;
     }
 
-    private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds, int albumId) throws Exception {
-        if (songCache.containsKey(songTitle)) return songCache.get(songTitle);
+   private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds, int albumId) throws Exception {
+        // Δημιουργία μοναδικού κλειδιού: Τίτλος + ID Άλμπουμ (ώστε να μην μπερδεύονται τα συνώνυμα)
+        String cacheKey = songTitle.toLowerCase() + "|" + albumId;
+        
+        if (songCache.containsKey(cacheKey)) return songCache.get(cacheKey);
 
-        String selectSQL = "SELECT id FROM songs WHERE title = ?";
+        String selectSQL = "SELECT id FROM songs WHERE title = ? AND (album_id = ? OR (album_id IS NULL AND ? = -1))";
         try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
             stmt.setString(1, songTitle);
+            stmt.setInt(2, albumId);
+            stmt.setInt(3, albumId);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    songCache.put(songTitle, rs.getInt("id"));
-                    return rs.getInt("id");
+                    int foundId = rs.getInt("id");
+                    songCache.put(cacheKey, foundId);
+                    return foundId;
                 }
             }
         }
@@ -153,10 +159,10 @@ public class DatabaseImporter {
             relationStmt.executeBatch();
         }
 
-        songCache.put(songTitle, songId);
+        songCache.put(cacheKey, songId);
         return songId;
     }
-
+    
     private int getOrCreateAlbum(Connection conn, String albumTitle) throws Exception {
         if (albumTitle == null || albumTitle.trim().isEmpty()) return -1; // Handling για null albums
         if (albumCache.containsKey(albumTitle)) return albumCache.get(albumTitle);
