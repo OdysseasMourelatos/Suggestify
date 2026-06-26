@@ -176,7 +176,6 @@ CONNECTION_STRING = "postgresql://postgres:secret@localhost:5432/spotify_db"
 def get_engine():
     return create_engine(CONNECTION_STRING, pool_pre_ping=True)
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
     engine = get_engine()
@@ -191,8 +190,8 @@ def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
 SQL_KPIS = """
 SELECT
     ROUND(SUM(ms_played) / 3600000.0, 1)  AS total_hours,
-    COUNT(DISTINCT s.song_id)              AS unique_songs,
-    COUNT(DISTINCT sa.artist_id)           AS unique_artists
+    COUNT(DISTINCT s.song_id)             AS unique_songs,
+    COUNT(DISTINCT sa.artist_id)          AS unique_artists
 FROM streams s
 JOIN song_artists sa ON sa.song_id = s.song_id
 WHERE sa.is_feature = FALSE;
@@ -210,8 +209,8 @@ ORDER BY 1;
 
 SQL_TOP_ARTISTS = """
 SELECT
-    a.name                                       AS artist,
-    COUNT(s.id)                                  AS stream_count,
+    a.name                                    AS artist,
+    COUNT(s.id)                               AS stream_count,
     ROUND(SUM(s.ms_played) / 3600000.0, 2)      AS hours_played
 FROM streams s
 JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
@@ -230,7 +229,7 @@ ORDER BY a.name;
 
 SQL_ARTIST_TOP_SONGS = """
 SELECT
-    so.title                                         AS song,
+    so.title                                          AS song,
     COUNT(s.id)                                      AS stream_count,
     ROUND(SUM(s.ms_played) / 3600000.0, 3)          AS hours_played
 FROM streams s
@@ -244,7 +243,7 @@ LIMIT 10;
 SQL_ARTIST_PEAK_HOURS = """
 SELECT
     EXTRACT(HOUR FROM played_at)::INT AS hour,
-    COUNT(*)                           AS stream_count
+    COUNT(*)                         AS stream_count
 FROM streams s
 JOIN song_artists sa ON sa.song_id = s.song_id AND sa.artist_id = :artist_id
 GROUP BY 1
@@ -264,7 +263,7 @@ ORDER BY 1, 2;
 SQL_HOURLY = """
 SELECT
     EXTRACT(HOUR FROM played_at)::INT AS hour,
-    COUNT(*)                           AS stream_count
+    COUNT(*)                         AS stream_count
 FROM streams
 GROUP BY 1
 ORDER BY 1;
@@ -279,6 +278,36 @@ GROUP BY 1
 ORDER BY 1;
 """
 
+# ΝΕΑ QUERIES ΓΙΑ ΤΑ ALBUMS
+SQL_TOP_ALBUMS = """
+SELECT 
+    al.title AS album,
+    COUNT(s.id) AS stream_count,
+    ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+FROM streams s
+JOIN songs so ON so.id = s.song_id
+JOIN albums al ON al.id = so.album_id
+GROUP BY al.id, al.title
+ORDER BY hours_played DESC
+LIMIT 10;
+"""
+
+SQL_ALL_ALBUMS = """
+SELECT DISTINCT id, title FROM albums ORDER BY title;
+"""
+
+SQL_ALBUM_TRACKS = """
+SELECT 
+    so.title AS song,
+    COUNT(s.id) AS stream_count,
+    ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+FROM streams s
+JOIN songs so ON so.id = s.song_id
+WHERE so.album_id = :album_id
+GROUP BY so.id, so.title
+ORDER BY hours_played DESC;
+"""
+
 
 # ──────────────────────────────────────────────
 # CHART HELPERS
@@ -287,7 +316,6 @@ ORDER BY 1;
 def apply_theme(fig):
     fig.update_layout(**PLOTLY_TEMPLATE["layout"])
     return fig
-
 
 def streams_trend_chart(df: pd.DataFrame) -> go.Figure:
     df["period"] = pd.to_datetime(df["period"])
@@ -317,7 +345,6 @@ def streams_trend_chart(df: pd.DataFrame) -> go.Figure:
     )
     return apply_theme(fig)
 
-
 def top_artists_chart(df: pd.DataFrame) -> go.Figure:
     df_sorted = df.sort_values("hours_played")
     fig = go.Figure(go.Bar(
@@ -337,6 +364,25 @@ def top_artists_chart(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(xaxis_title="Hours Played", yaxis_title="")
     return apply_theme(fig)
 
+# CHART HELPER ΓΙΑ ΤΑ ALBUMS
+def top_albums_chart(df: pd.DataFrame) -> go.Figure:
+    df_sorted = df.sort_values("hours_played")
+    fig = go.Figure(go.Bar(
+        x=df_sorted["hours_played"],
+        y=df_sorted["album"],
+        orientation="h",
+        marker=dict(
+            color=df_sorted["hours_played"],
+            colorscale=[[0, GREEN_DIM], [1, GREEN]],
+            showscale=False,
+        ),
+        text=df_sorted["hours_played"].apply(lambda v: f"{v:.1f}h"),
+        textposition="outside",
+        textfont=dict(color=TEXT_MID, size=11),
+        hovertemplate="<b>%{y}</b><br>Hours: %{x:.2f}<extra></extra>",
+    ))
+    fig.update_layout(xaxis_title="Hours Played", yaxis_title="")
+    return apply_theme(fig)
 
 def heatmap_chart(df: pd.DataFrame) -> go.Figure:
     DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -357,7 +403,6 @@ def heatmap_chart(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(xaxis_title="Hour of Day", yaxis_title="")
     return apply_theme(fig)
 
-
 def hour_bar_chart(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure(go.Bar(
         x=df["hour"].apply(lambda h: f"{h:02d}:00"),
@@ -366,10 +411,8 @@ def hour_bar_chart(df: pd.DataFrame) -> go.Figure:
                       for v in df["stream_count"]],
         hovertemplate="<b>%{x}</b><br>Streams: %{y:,}<extra></extra>",
     ))
-    fig.update_layout(xaxis_title="Hour of Day", yaxis_title="Streams",
-                      bargap=0.15)
+    fig.update_layout(xaxis_title="Hour of Day", yaxis_title="Streams", bargap=0.15)
     return apply_theme(fig)
-
 
 def dow_bar_chart(df: pd.DataFrame) -> go.Figure:
     DAYS = {1:"Mon",2:"Tue",3:"Wed",4:"Thu",5:"Fri",6:"Sat",7:"Sun"}
@@ -381,10 +424,8 @@ def dow_bar_chart(df: pd.DataFrame) -> go.Figure:
                       for v in df["stream_count"]],
         hovertemplate="<b>%{x}</b><br>Streams: %{y:,}<extra></extra>",
     ))
-    fig.update_layout(xaxis_title="Day of Week", yaxis_title="Streams",
-                      bargap=0.2)
+    fig.update_layout(xaxis_title="Day of Week", yaxis_title="Streams", bargap=0.2)
     return apply_theme(fig)
-
 
 def artist_hours_chart(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure(go.Bar(
@@ -394,8 +435,7 @@ def artist_hours_chart(df: pd.DataFrame) -> go.Figure:
                       for v in df["stream_count"]],
         hovertemplate="<b>%{x}</b><br>Streams: %{y:,}<extra></extra>",
     ))
-    fig.update_layout(xaxis_title="Hour of Day", yaxis_title="Streams",
-                      bargap=0.15)
+    fig.update_layout(xaxis_title="Hour of Day", yaxis_title="Streams", bargap=0.15)
     return apply_theme(fig)
 
 
@@ -417,13 +457,13 @@ st.markdown("""
 # TABS
 # ──────────────────────────────────────────────
 
-tab_overview, tab_artists, tab_habits = st.tabs(
-    ["📊  Overview", "🎤  Artist Analytics", "🕐  Listening Habits"]
+tab_overview, tab_artists, tab_albums, tab_habits = st.tabs(
+    ["📊  Overview", "🎤  Artist Analytics", "💿  Album Analytics", "🕐  Listening Habits"]
 )
 
 
 # ╔══════════════════════════════════════╗
-# ║           TAB 1 – OVERVIEW           ║
+# ║            TAB 1 – OVERVIEW          ║
 # ╚══════════════════════════════════════╝
 with tab_overview:
 
@@ -431,7 +471,6 @@ with tab_overview:
         df_kpi  = run_query(SQL_KPIS)
         df_time = run_query(SQL_STREAMS_OVER_TIME)
 
-    # KPI row
     total_hours    = float(df_kpi["total_hours"].iloc[0])
     unique_songs   = int(df_kpi["unique_songs"].iloc[0])
     unique_artists = int(df_kpi["unique_artists"].iloc[0])
@@ -456,8 +495,7 @@ with tab_overview:
             <div class="kpi-value">{unique_songs:,}</div>
         </div>""", unsafe_allow_html=True)
 
-    st.markdown('<div class="section-title">Streaming Trend Over Time</div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Streaming Trend Over Time</div>', unsafe_allow_html=True)
     st.plotly_chart(
         streams_trend_chart(df_time),
         use_container_width=True, config={"displayModeBar": False}
@@ -465,13 +503,11 @@ with tab_overview:
 
 
 # ╔══════════════════════════════════════╗
-# ║       TAB 2 – ARTIST ANALYTICS       ║
+# ║        TAB 2 – ARTIST ANALYTICS      ║
 # ╚══════════════════════════════════════╝
 with tab_artists:
 
-    # ── Top 10 Artists ──────────────────
-    st.markdown('<div class="section-title">Top 10 Artists by Listening Time</div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Top 10 Artists by Listening Time</div>', unsafe_allow_html=True)
 
     with st.spinner("Loading artist data…"):
         df_top = run_query(SQL_TOP_ARTISTS)
@@ -482,11 +518,7 @@ with tab_artists:
         display_df = df_top.copy()
         display_df.index = range(1, len(display_df) + 1)
         display_df.columns = ["Artist", "Streams", "Hours Played"]
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            height=380,
-        )
+        st.dataframe(display_df, use_container_width=True, height=380)
 
     with col_chart:
         st.plotly_chart(
@@ -494,9 +526,7 @@ with tab_artists:
             use_container_width=True, config={"displayModeBar": False}
         )
 
-    # ── Per-Artist Drill-down ────────────
-    st.markdown('<div class="section-title">Artist Deep-Dive</div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Artist Deep-Dive</div>', unsafe_allow_html=True)
 
     with st.spinner("Loading artist list…"):
         df_all_artists = run_query(SQL_ALL_ARTISTS)
@@ -531,7 +561,56 @@ with tab_artists:
 
 
 # ╔══════════════════════════════════════╗
-# ║       TAB 3 – LISTENING HABITS       ║
+# ║        TAB 3 – ALBUM ANALYTICS       ║
+# ╚══════════════════════════════════════╝
+with tab_albums:
+    
+    st.markdown('<div class="section-title">Top 10 Albums by Listening Time</div>', unsafe_allow_html=True)
+
+    with st.spinner("Loading album data…"):
+        df_top_albums = run_query(SQL_TOP_ALBUMS)
+
+    alb_tbl, alb_chart = st.columns([1, 1.6], gap="large")
+
+    with alb_tbl:
+        display_alb = df_top_albums.copy()
+        display_alb.index = range(1, len(display_alb) + 1)
+        display_alb.columns = ["Album", "Streams", "Hours Played"]
+        st.dataframe(display_alb, use_container_width=True, height=380)
+
+    with alb_chart:
+        st.plotly_chart(
+            top_albums_chart(df_top_albums),
+            use_container_width=True, config={"displayModeBar": False}
+        )
+
+    st.markdown('<div class="section-title">Album Track Breakdown</div>', unsafe_allow_html=True)
+
+    with st.spinner("Loading album list…"):
+        df_all_albums = run_query(SQL_ALL_ALBUMS)
+
+    album_map   = dict(zip(df_all_albums["title"], df_all_albums["id"]))
+    selected_album = st.selectbox(
+        "Select an album",
+        options=list(album_map.keys()),
+        label_visibility="collapsed",
+    )
+    album_id = int(album_map[selected_album])
+
+    with st.spinner(f"Loading tracks for {selected_album}…"):
+        df_tracks = run_query(SQL_ALBUM_TRACKS, {"album_id": album_id})
+
+    if df_tracks.empty:
+        st.info("No listening records found for this album.")
+    else:
+        display_tracks = df_tracks.copy()
+        display_tracks.index = range(1, len(display_tracks) + 1)
+        display_tracks.columns = ["Song Title", "Streams", "Hours Played"]
+        st.dataframe(display_tracks, use_container_width=True, height=350)
+
+
+# ╔══════════════════════════════════════╗
+# ║        TAB 4 – LISTENING HABITS      ║
 # ╚══════════════════════════════════════╝
 with tab_habits:
 
@@ -540,8 +619,7 @@ with tab_habits:
         df_hourly  = run_query(SQL_HOURLY)
         df_dow     = run_query(SQL_DOW)
 
-    st.markdown('<div class="section-title">Activity Heatmap — Hour × Day</div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Activity Heatmap — Hour × Day</div>', unsafe_allow_html=True)
     st.plotly_chart(
         heatmap_chart(df_heatmap),
         use_container_width=True, config={"displayModeBar": False}
@@ -549,15 +627,13 @@ with tab_habits:
 
     col_h, col_d = st.columns(2, gap="large")
     with col_h:
-        st.markdown('<div class="section-title">Peak Hours of the Day</div>',
-                    unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Peak Hours of the Day</div>', unsafe_allow_html=True)
         st.plotly_chart(
             hour_bar_chart(df_hourly),
             use_container_width=True, config={"displayModeBar": False}
         )
     with col_d:
-        st.markdown('<div class="section-title">Most Active Days of the Week</div>',
-                    unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Most Active Days of the Week</div>', unsafe_allow_html=True)
         st.plotly_chart(
             dow_bar_chart(df_dow),
             use_container_width=True, config={"displayModeBar": False}
