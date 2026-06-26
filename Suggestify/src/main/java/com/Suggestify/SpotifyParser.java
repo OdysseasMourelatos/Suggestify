@@ -40,12 +40,8 @@ public class SpotifyParser {
                 zis.closeEntry();
             }
 
-            System.out.println("\nSUCCESS! Parsed a total of " + allRecords.size() + " streaming records.");
-
-            if (!allRecords.isEmpty()) {
-                System.out.println("Sample record: " + allRecords.get(0).getTrackName() + " by " + allRecords.get(0).getArtistName());
-            }
-
+            EntityExtractor extractor = new EntityExtractor();
+            extractor.extractEntities(allRecords);
         } catch (Exception e) {
             System.err.println("Error reading ZIP file. Please verify the file path.");
             e.printStackTrace();

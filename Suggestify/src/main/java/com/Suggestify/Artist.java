@@ -11,5 +11,19 @@ public class Artist {
         this.name = name;
     }
 
-    // Getters and Setters...
+    public String getId() {
+        return id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public List<String> getGenres() {
+        return genres;
+    }
+
+    public int getPopularity() {
+        return popularity;
+    }
 }
