@@ -40,7 +40,6 @@ public class EntityExtractor {
         System.out.println("Total Unique Artists: " + uniqueArtists.size());
         System.out.println("Total Unique Albums: " + uniqueAlbums.size());
         System.out.println("Total Unique Songs: " + uniqueSongs.size());
-        System.out.println(getUniqueArtists());
     }
 
     // Getters so we can retrieve the maps later
