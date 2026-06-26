@@ -19,6 +19,7 @@ public class DatabaseImporter {
 
     private final Map<String, Integer> artistCache = new HashMap<>();
     private final Map<String, Integer> songCache = new HashMap<>();
+    private final Map<String, Integer> albumCache = new HashMap<>();
 
     public void importRecords(List<StreamingRecord> records) {
         String insertStreamSQL = "INSERT INTO streams (song_id, played_at, ms_played) VALUES (?, ?, ?)";
@@ -57,7 +58,8 @@ public class DatabaseImporter {
                     artistIds.add(getOrCreateArtist(conn, artistName));
                 }
 
-                int songId = getOrCreateSong(conn, cleanTrackName, artistIds);
+                int albumId = getOrCreateAlbum(conn, record.getAlbumName());
+                int songId = getOrCreateSong(conn, cleanTrackName, artistIds, albumId);
 
                 streamStmt.setInt(1, songId);
                 streamStmt.setTimestamp(2, Timestamp.from(record.getTimestamp()));
@@ -108,7 +110,7 @@ public class DatabaseImporter {
         return -1;
     }
 
-    private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds) throws Exception {
+    private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds, int albumId) throws Exception {
         if (songCache.containsKey(songTitle)) return songCache.get(songTitle);
 
         String selectSQL = "SELECT id FROM songs WHERE title = ?";
@@ -122,13 +124,21 @@ public class DatabaseImporter {
             }
         }
 
-        String insertSongSQL = "INSERT INTO songs (title) VALUES (?)";
+        String insertSongSQL = "INSERT INTO songs (title, album_id) VALUES (?, ?)";
         int songId = -1;
         try (PreparedStatement stmt = conn.prepareStatement(insertSongSQL, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setString(1, songTitle);
+            if (albumId != -1) {
+                stmt.setInt(2, albumId);
+            } else {
+                stmt.setNull(2, java.sql.Types.INTEGER);
+            }
+
             stmt.executeUpdate();
             try (ResultSet rs = stmt.getGeneratedKeys()) {
-                if (rs.next()) songId = rs.getInt(1);
+                if (rs.next()) {
+                    songId = rs.getInt(1);
+                }
             }
         }
 
@@ -145,5 +155,42 @@ public class DatabaseImporter {
 
         songCache.put(songTitle, songId);
         return songId;
+    }
+
+    private int getOrCreateAlbum(Connection conn, String albumTitle) throws Exception {
+        if (albumTitle == null || albumTitle.trim().isEmpty()) return -1; // Handling για null albums
+        if (albumCache.containsKey(albumTitle)) return albumCache.get(albumTitle);
+
+        String selectSQL = "SELECT id FROM albums WHERE title = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
+            stmt.setString(1, albumTitle);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    albumCache.put(albumTitle, rs.getInt("id"));
+                    return rs.getInt("id");
+                }
+            }
+        }
+
+        String insertSQL = "INSERT INTO albums (title) VALUES (?) ON CONFLICT (title) DO NOTHING";
+        try (PreparedStatement stmt = conn.prepareStatement(insertSQL, Statement.RETURN_GENERATED_KEYS)) {
+            stmt.setString(1, albumTitle);
+            stmt.executeUpdate();
+            try (ResultSet rs = stmt.getGeneratedKeys()) {
+                if (rs.next()) {
+                    int id = rs.getInt(1);
+                    albumCache.put(albumTitle, id);
+                    return id;
+                }
+            }
+        }
+
+        try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
+            stmt.setString(1, albumTitle);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) return rs.getInt("id");
+            }
+        }
+        return -1;
     }
 }
