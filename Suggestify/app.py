@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Spotify Analytics | Ody",
+    page_title="Suggestify | Ody",
     page_icon="🎧",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -201,7 +201,6 @@ div[data-testid="stDateInput"] input:focus {{
     box-shadow: 0 0 0 2px {GREEN_XLO} !important;
 }}
 
-/* Hide default streamlit radio */
 div.row-widget.stRadio {{ display: none !important; }}
 
 /* ─── KPI CARDS — Glass Effect ─── */
@@ -334,6 +333,7 @@ div.row-widget.stRadio {{ display: none !important; }}
     font-size: 1.4rem;
     margin-right: 1rem;
     flex-shrink: 0;
+    overflow: hidden;
 }}
 
 .item-info {{
@@ -394,16 +394,14 @@ div.row-widget.stRadio {{ display: none !important; }}
 }}
 
 /* ─── CLICKABLE LIST ITEM WRAPPER ─── */
-/* The st.button sits visually behind the card and acts as a transparent click target */
 .list-item-wrap {{
     position: relative;
     margin-bottom: 0.6rem;
 }}
 .list-item-wrap .list-item {{
     margin-bottom: 0;
-    pointer-events: none;  /* card is visual only; button underneath catches clicks */
+    pointer-events: none;
 }}
-/* Make the Streamlit button inside the wrap absolutely cover the card */
 .list-item-wrap [data-testid="stBaseButton-secondary"] {{
     position: absolute !important;
     top: 0 !important;
@@ -418,7 +416,6 @@ div.row-widget.stRadio {{ display: none !important; }}
     background: transparent !important;
     padding: 0 !important;
 }}
-/* Simulate hover by targeting the wrapper */
 .list-item-wrap:hover .list-item {{
     background: {CARD_HOVER};
     border-color: {BORDER_HL};
@@ -475,6 +472,7 @@ div.row-widget.stRadio {{ display: none !important; }}
     justify-content: center;
     font-size: 3rem;
     flex-shrink: 0;
+    overflow: hidden;
 }}
 .detail-info {{ flex: 1; }}
 .detail-type {{
@@ -647,8 +645,8 @@ def get_item_icon(link_type: str) -> str:
     icons = {"song": "🎵", "artist": "🎤", "album": "💿"}
     return icons.get(link_type, "🎵")
 
-def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str, id_col: str = None, link_type: str = None):
-    """Modern list renderer with same-page navigation via session_state buttons."""
+def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str, id_col: str = None, link_type: str = None, image_col: str = "image_url"):
+    """Modern list renderer with same-page navigation via session_state buttons and real images."""
     for i, row in df.iterrows():
         rank = i + 1
         rank_class = get_rank_class(rank)
@@ -656,12 +654,20 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         subtitle = escape(str(row[sub_col]))[:50]
         streams = f"{int(row[streams_col]):,}"
         hours = f"{float(row[hours_col]):.1f}"
-        icon = get_item_icon(link_type) if link_type else "🎵"
         can_navigate = link_type and id_col and id_col in row.index
-
+        
+        # Λογική για την εμφάνιση εικόνας ή emoji
+        image_url = row.get(image_col) if image_col in row else None
+        if pd.notnull(image_url) and str(image_url).startswith("http"):
+            # Αν είναι καλλιτέχνης, κάνουμε την εικόνα ΣΤΡΟΓΓΥΛΗ!
+            radius = "50%" if link_type == "artist" else "8px"
+            art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover; border-radius:{radius};">'
+        else:
+            art_html = get_item_icon(link_type) if link_type else "🎵"
+        
         card_html = f'''
         <div class="item-rank {rank_class}">{rank}</div>
-        <div class="item-art">{icon}</div>
+        <div class="item-art">{art_html}</div>
         <div class="item-info">
             <div class="item-title">{title}</div>
             <div class="item-subtitle">{subtitle}</div>
@@ -682,8 +688,6 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         if can_navigate:
             item_id = str(row[id_col])
             btn_key = f"nav_{link_type}_{item_id}_{rank}"
-            # Render the styled card, then a full-width ghost button beneath it
-            # CSS makes the button absolutely fill its container with zero opacity
             st.markdown(f'<div class="list-item-wrap"><div class="list-item">{card_html}</div>', unsafe_allow_html=True)
             if st.button(f"{title}", key=btn_key, use_container_width=True):
                 st.query_params["view"] = link_type
@@ -695,7 +699,6 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
 
 
 def render_kpi_grid(kpis: list[dict]):
-    """Render KPI cards using st.columns so HTML is never dropped by Streamlit."""
     cols = st.columns(len(kpis))
     for col, kpi in zip(cols, kpis):
         unit_html = f'<span class="kpi-unit">{kpi.get("unit", "")}</span>' if kpi.get("unit") else ""
@@ -708,20 +711,21 @@ def render_kpi_grid(kpis: list[dict]):
         ''', unsafe_allow_html=True)
 
 
-def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, stats: list[dict]):
-    """Render a detail page header with stats."""
-    stats_html = ""
-    for s in stats:
-        stats_html += f'''
-        <div class="detail-stat">
-            <div class="detail-stat-value">{s["value"]}</div>
-            <div class="detail-stat-label">{s["label"]}</div>
-        </div>
-        '''
+def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, stats: list[dict], image_url: str = None):
+    """Render a detail page header with stats and real image."""
+    stats_html = "".join([
+        f'<div class="detail-stat"><div class="detail-stat-value">{s["value"]}</div><div class="detail-stat-label">{s["label"]}</div></div>'
+        for s in stats
+    ])
+        
+    if pd.notnull(image_url) and str(image_url).startswith("http"):
+        art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover;">'
+    else:
+        art_html = icon
     
     st.markdown(f'''
     <div class="detail-header">
-        <div class="detail-art">{icon}</div>
+        <div class="detail-art">{art_html}</div>
         <div class="detail-info">
             <div class="detail-type">{type_label}</div>
             <div class="detail-title">{escape(title)}</div>
@@ -802,7 +806,6 @@ def chart_bar(x, y, xlabel: str) -> go.Figure:
 # ══════════════════════════════════════════════════════════════════
 
 def get_current_view() -> dict:
-    """Parse query params for view state."""
     params = st.query_params
     return {
         "type": params.get("view", None),
@@ -811,7 +814,6 @@ def get_current_view() -> dict:
     }
 
 def navigate_to(tab: str = None, view_type: str = None, view_id: str = None):
-    """Update URL without full page reload."""
     new_params = {}
     if tab:
         new_params["tab"] = tab
@@ -821,7 +823,6 @@ def navigate_to(tab: str = None, view_type: str = None, view_id: str = None):
     st.query_params.update(new_params)
 
 def go_back():
-    """Clear detail view."""
     current = get_current_view()
     st.query_params.clear()
     if current.get("type") == "song":
@@ -963,7 +964,7 @@ if detail_type and detail_id:
     
     if detail_type == "song":
         song_info = run_query("""
-            SELECT so.title, COALESCE(a.name, 'Unknown') as artist, 
+            SELECT so.title, COALESCE(a.name, 'Unknown') as artist, so.image_url,
                    COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
                    MIN(s.played_at) as first_play
             FROM songs so
@@ -971,7 +972,7 @@ if detail_type and detail_id:
             LEFT JOIN artists a ON a.id = sa.artist_id
             LEFT JOIN streams s ON s.song_id = so.id AND s.played_at::date BETWEEN :start_date AND :end_date
             WHERE so.id = :id
-            GROUP BY so.id, so.title, a.name
+            GROUP BY so.id, so.title, a.name, so.image_url
         """, {"id": detail_id, **F})
         
         if not song_info.empty:
@@ -984,7 +985,8 @@ if detail_type and detail_id:
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
                     {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
-                ]
+                ],
+                image_url=row.get("image_url")
             )
             
             if pd.notnull(row['first_play']):
@@ -1019,11 +1021,12 @@ if detail_type and detail_id:
     
     elif detail_type == "artist":
         art_info = run_query("""
-            SELECT a.name, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+            SELECT a.name, a.image_url as image_url, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
                    COUNT(DISTINCT s.song_id) as unique_tracks
             FROM artists a
             LEFT JOIN song_artists sa ON sa.artist_id = a.id
             LEFT JOIN streams s ON s.song_id = sa.song_id AND s.played_at::date BETWEEN :start_date AND :end_date
+            LEFT JOIN songs so ON so.id = sa.song_id
             WHERE a.id = :id
             GROUP BY a.id, a.name
         """, {"id": detail_id, **F})
@@ -1038,7 +1041,8 @@ if detail_type and detail_id:
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
                     {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
-                ]
+                ],
+                image_url=row.get("image_url")
             )
             
             c1, c2 = st.columns([1.2, 1])
@@ -1046,13 +1050,13 @@ if detail_type and detail_id:
             with c1:
                 st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
                 df_tracks = run_query("""
-                    SELECT so.id AS song_id, so.title as song_title, 'Track' as sub, 
+                    SELECT so.id AS song_id, so.title as song_title, 'Track' as sub, so.image_url,
                            COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 3) as hours_played 
                     FROM streams s 
                     JOIN songs so ON so.id = s.song_id 
                     JOIN song_artists sa ON sa.song_id = s.song_id 
                     WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date 
-                    GROUP BY so.id, so.title ORDER BY streams DESC LIMIT 10
+                    GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 10
                 """, {**F, "aid": detail_id})
                 if not df_tracks.empty:
                     render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
@@ -1088,7 +1092,7 @@ if detail_type and detail_id:
     
     elif detail_type == "album":
         alb_info = run_query("""
-            SELECT al.title, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+            SELECT al.title, MAX(so.image_url) as image_url, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
                    COUNT(DISTINCT s.song_id) as track_count
             FROM albums al
             LEFT JOIN songs so ON so.album_id = al.id
@@ -1107,19 +1111,20 @@ if detail_type and detail_id:
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
                     {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
-                ]
+                ],
+                image_url=row.get("image_url")
             )
             
             st.markdown('<div class="section-header"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
             df_tracks = run_query("""
-                SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, 
+                SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
                        COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
                 FROM streams s 
                 JOIN songs so ON so.id = s.song_id 
                 LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
                 LEFT JOIN artists a ON a.id = sa.artist_id 
                 WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
-                GROUP BY so.id, so.title, a.name ORDER BY streams DESC
+                GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
             """, {**F, "aid": detail_id})
             
             if not df_tracks.empty:
@@ -1182,14 +1187,14 @@ elif current_tab == "overview":
     with c1:
         st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
         df_top_tracks = run_query("""
-            SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, 
+            SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
                    COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
             FROM streams s 
             JOIN songs so ON so.id = s.song_id 
             LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
             LEFT JOIN artists a ON a.id = sa.artist_id 
             WHERE s.played_at::date BETWEEN :start_date AND :end_date 
-            GROUP BY so.id, so.title, a.name ORDER BY streams DESC LIMIT 5;
+            GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 5;
         """, F)
         if not df_top_tracks.empty:
             render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
@@ -1197,11 +1202,12 @@ elif current_tab == "overview":
     with c2:
         st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
         df_top_artists = run_query("""
-            SELECT a.id AS artist_id, a.name AS artist_name, COUNT(s.id) AS streams, 
+            SELECT a.id AS artist_id, a.name AS artist_name, a.image_url as image_url, COUNT(s.id) AS streams, 
                    ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
             FROM streams s 
             JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE 
             JOIN artists a ON a.id = sa.artist_id 
+            JOIN songs so ON so.id = s.song_id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date 
             GROUP BY a.id, a.name ORDER BY streams DESC LIMIT 5;
         """, F)
@@ -1224,14 +1230,14 @@ elif current_tab == "tracks":
         query_params["search"] = f"%{search_term}%"
     
     df_songs = run_query(f"""
-        SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, 
+        SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
                COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
         FROM streams s 
         JOIN songs so ON so.id = s.song_id 
         LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
         LEFT JOIN artists a ON a.id = sa.artist_id 
         WHERE s.played_at::date BETWEEN :start_date AND :end_date {search_clause}
-        GROUP BY so.id, so.title, a.name ORDER BY streams DESC LIMIT :limit;
+        GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT :limit;
     """, query_params)
     
     if not df_songs.empty:
@@ -1247,11 +1253,12 @@ elif current_tab == "artists":
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
     
     df_artists = run_query(f"""
-        SELECT a.id AS artist_id, a.name AS artist_name, COUNT(s.id) AS streams, 
+        SELECT a.id AS artist_id, a.name AS artist_name, a.image_url as image_url, COUNT(s.id) AS streams, 
                ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
         FROM streams s 
         JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE 
         JOIN artists a ON a.id = sa.artist_id 
+        JOIN songs so ON so.id = s.song_id
         WHERE s.played_at::date BETWEEN :start_date AND :end_date 
         GROUP BY a.id, a.name ORDER BY hours_played DESC LIMIT {display_limit};
     """, F)
@@ -1270,7 +1277,7 @@ elif current_tab == "albums":
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
     
     df_albums = run_query(f"""
-        SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title, 
+        SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title, MAX(so.image_url) as image_url,
                COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
         FROM streams s 
         JOIN songs so ON so.id = s.song_id 
