@@ -888,6 +888,7 @@ if detail_type and detail_id:
             
             with c1:
                 st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+                # CHANGE: Display 10 rows instead of 7
                 df_tracks = run_query("""
                     SELECT so.id AS song_id, so.title as song_title, 'Track' as sub, so.image_url,
                            COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 3) as hours_played
@@ -895,7 +896,7 @@ if detail_type and detail_id:
                     JOIN songs so ON so.id = s.song_id
                     JOIN song_artists sa ON sa.song_id = s.song_id
                     WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
-                    GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 7
+                    GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 10
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
@@ -905,12 +906,12 @@ if detail_type and detail_id:
                     if st.button("See Full List →", key=f"btn_full_tracks_{detail_id}", use_container_width=True):
                         st.query_params.clear()
                         st.query_params["tab"] = "tracks"
-                        # Set session state so it's picked up by the input key on next render
                         st.session_state["search_tracks"] = artist_name
                         st.rerun()
 
             with c2:
                 st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
+                # CHANGE: Display 10 rows instead of 7
                 df_albums = run_query("""
                     SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
                            MAX(so.image_url) AS image_url,
@@ -920,7 +921,7 @@ if detail_type and detail_id:
                     JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
                     LEFT JOIN albums al ON al.id = so.album_id
                     WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
-                    GROUP BY al.id, al.title ORDER BY streams DESC LIMIT 7
+                    GROUP BY al.id, al.title ORDER BY streams DESC LIMIT 10
                 """, {"aid": detail_id, **F})
                 
                 if not df_albums.empty:
@@ -931,7 +932,6 @@ if detail_type and detail_id:
                     if st.button("See Full List →", key=f"btn_full_albums_{detail_id}", use_container_width=True):
                         st.query_params.clear()
                         st.query_params["tab"] = "albums"
-                        # Set session state so it's picked up by the input key on next render
                         st.session_state["search_albums"] = artist_name
                         st.rerun()
 
@@ -1094,24 +1094,29 @@ elif current_tab == "tracks":
 
     if search_term:
         query_params["search"] = f"%{search_term}%"
+        # CHANGE: Removed the 'ranked' CTE to drastically speed up searches 
+        # and naturally fallback to local rank (1, 2, 3...) when searching
         df_songs = run_query("""
-            WITH ranked AS (
-                SELECT so.id AS song_id, so.title AS song_title,
-                       COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
-                       COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played,
-                       ROW_NUMBER() OVER (ORDER BY COUNT(s.id) DESC) AS global_rank
-                FROM streams s
-                JOIN songs so ON so.id = s.song_id
-                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                LEFT JOIN artists a ON a.id = sa.artist_id
-                WHERE s.played_at::date BETWEEN :start_date AND :end_date
-                GROUP BY so.id, so.title, a.name, so.image_url
-            )
-            SELECT * FROM ranked
-            WHERE song_title ILIKE :search OR main_artist ILIKE :search
-            ORDER BY global_rank
+            SELECT so.id AS song_id, so.title AS song_title,
+                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            LEFT JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND (so.title ILIKE :search OR a.name ILIKE :search)
+            GROUP BY so.id, so.title, a.name, so.image_url
+            ORDER BY streams DESC
             LIMIT :limit;
         """, query_params)
+        
+        if not df_songs.empty:
+            render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
+                           "song_id", "song") # rank_col is omitted, so it defaults to local rank!
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
+
     else:
         df_songs = run_query("""
             SELECT so.id AS song_id, so.title AS song_title,
@@ -1127,11 +1132,11 @@ elif current_tab == "tracks":
             ORDER BY streams DESC LIMIT :limit;
         """, query_params)
 
-    if not df_songs.empty:
-        render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
-                       "song_id", "song", rank_col="global_rank")
-    else:
-        st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
+        if not df_songs.empty:
+            render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
+                           "song_id", "song", rank_col="global_rank")
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
 
 
 elif current_tab == "artists":
@@ -1145,23 +1150,28 @@ elif current_tab == "artists":
 
     if search_term:
         query_params["search"] = f"%{search_term}%"
+        # CHANGE: Removed CTE for local ranking on search
         df_artists = run_query("""
-            WITH ranked AS (
-                SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
-                       COUNT(s.id) AS streams,
-                       ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played,
-                       ROW_NUMBER() OVER (ORDER BY SUM(s.ms_played) DESC) AS global_rank
-                FROM streams s
-                JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
-                JOIN artists a ON a.id = sa.artist_id
-                WHERE s.played_at::date BETWEEN :start_date AND :end_date
-                GROUP BY a.id, a.name, a.image_url
-            )
-            SELECT * FROM ranked
-            WHERE artist_name ILIKE :search
-            ORDER BY global_rank
+            SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
+                   COUNT(s.id) AS streams,
+                   ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+            FROM streams s
+            JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+            JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND a.name ILIKE :search
+            GROUP BY a.id, a.name, a.image_url
+            ORDER BY streams DESC
             LIMIT :limit;
         """, query_params)
+        
+        if not df_artists.empty:
+            df_artists["subtitle"] = "Artist"
+            render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
+                           "artist_id", "artist") # Defaults to local rank
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
+
     else:
         df_artists = run_query("""
             SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
@@ -1176,12 +1186,12 @@ elif current_tab == "artists":
             ORDER BY hours_played DESC LIMIT :limit;
         """, query_params)
 
-    if not df_artists.empty:
-        df_artists["subtitle"] = "Artist"
-        render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
-                       "artist_id", "artist", rank_col="global_rank")
-    else:
-        st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
+        if not df_artists.empty:
+            df_artists["subtitle"] = "Artist"
+            render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
+                           "artist_id", "artist", rank_col="global_rank")
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
 
 
 elif current_tab == "albums":
@@ -1195,24 +1205,29 @@ elif current_tab == "albums":
 
     if search_term:
         query_params["search"] = f"%{search_term}%"
+        # CHANGE: Removed CTE for local ranking on search
         df_albums = run_query("""
-            WITH ranked AS (
-                SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
-                       MAX(so.image_url) AS image_url,
-                       COUNT(s.id) AS streams,
-                       ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played,
-                       ROW_NUMBER() OVER (ORDER BY SUM(s.ms_played) DESC) AS global_rank
-                FROM streams s
-                JOIN songs so ON so.id = s.song_id
-                LEFT JOIN albums al ON al.id = so.album_id
-                WHERE s.played_at::date BETWEEN :start_date AND :end_date
-                GROUP BY al.id, al.title
-            )
-            SELECT * FROM ranked
-            WHERE album_title ILIKE :search
-            ORDER BY global_rank
+            SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
+                   MAX(so.image_url) AS image_url,
+                   COUNT(s.id) AS streams,
+                   ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN albums al ON al.id = so.album_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND al.title ILIKE :search
+            GROUP BY al.id, al.title
+            ORDER BY streams DESC
             LIMIT :limit;
         """, query_params)
+        
+        if not df_albums.empty:
+            df_albums["subtitle"] = "Album"
+            render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played",
+                           "album_id", "album") # Defaults to local rank
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
+
     else:
         df_albums = run_query("""
             SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
@@ -1228,12 +1243,12 @@ elif current_tab == "albums":
             ORDER BY hours_played DESC LIMIT :limit;
         """, query_params)
 
-    if not df_albums.empty:
-        df_albums["subtitle"] = "Album"
-        render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played",
-                       "album_id", "album", rank_col="global_rank")
-    else:
-        st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
+        if not df_albums.empty:
+            df_albums["subtitle"] = "Album"
+            render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played",
+                           "album_id", "album", rank_col="global_rank")
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
 
 
 elif current_tab == "habits":
