@@ -67,7 +67,6 @@ html, body, [class*="css"] {{
 .animate-in {{
     animation: fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }}
-.stale {{ opacity: 0.3; transition: opacity 0.2s; }}
 
 /* ─── STICKY NAVBAR ─── */
 .navbar {{
@@ -102,106 +101,6 @@ html, body, [class*="css"] {{
     color: {TEXT};
 }}
 .nav-brand span {{ font-size: 1.8rem; }}
-
-/* ─── NAV TABS — Pill Style ─── */
-.nav-tabs {{
-    display: flex;
-    gap: 6px;
-    background: rgba(255,255,255,0.04);
-    border-radius: 12px;
-    padding: 5px;
-    border: 1px solid {BORDER};
-}}
-
-.nav-tab {{
-    padding: 0.6rem 1.4rem;
-    border-radius: 9px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: {TEXT_DIM};
-    cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    border: none;
-    background: transparent;
-    white-space: nowrap;
-}}
-.nav-tab:hover {{
-    color: {TEXT_MID};
-    background: rgba(255,255,255,0.05);
-}}
-.nav-tab.active {{
-    color: {BG};
-    background: {GREEN};
-    font-weight: 700;
-    box-shadow: 0 2px 12px {GREEN_GLOW};
-}}
-
-/* ─── DATE CONTROLS ─── */
-.date-controls {{
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}}
-
-.date-preset {{
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: 1px solid {BORDER};
-    background: transparent;
-    color: {TEXT_MID};
-}}
-.date-preset:hover {{
-    background: rgba(255,255,255,0.06);
-    border-color: {BORDER_HL};
-    color: {TEXT};
-}}
-.date-preset.active {{
-    background: {GREEN_XLO};
-    border-color: {GREEN};
-    color: {GREEN};
-}}
-.date-preset.wrapped {{
-    background: linear-gradient(135deg, rgba(29,185,84,0.15) 0%, rgba(29,185,84,0.05) 100%);
-    border-color: {GREEN};
-    color: {GREEN};
-}}
-.date-preset.wrapped:hover {{
-    background: linear-gradient(135deg, rgba(29,185,84,0.25) 0%, rgba(29,185,84,0.1) 100%);
-}}
-
-.date-divider {{
-    width: 1px;
-    height: 28px;
-    background: {BORDER};
-    margin: 0 0.5rem;
-}}
-
-/* ─── STREAMLIT OVERRIDES FOR INPUTS ─── */
-div[data-baseweb="select"] > div,
-div[data-testid="stDateInput"] input {{
-    background: rgba(255,255,255,0.04) !important;
-    border: 1px solid {BORDER} !important;
-    border-radius: 8px !important;
-    color: {TEXT} !important;
-    font-size: 0.85rem !important;
-    padding: 0.4rem 0.75rem !important;
-    transition: all 0.2s ease !important;
-}}
-div[data-baseweb="select"] > div:hover,
-div[data-testid="stDateInput"] input:hover {{
-    border-color: {BORDER_HL} !important;
-}}
-div[data-baseweb="select"] > div:focus-within,
-div[data-testid="stDateInput"] input:focus {{
-    border-color: {GREEN} !important;
-    box-shadow: 0 0 0 2px {GREEN_XLO} !important;
-}}
-
-div.row-widget.stRadio {{ display: none !important; }}
 
 /* ─── KPI CARDS — Glass Effect ─── */
 .kpi-grid {{
@@ -283,14 +182,7 @@ div.row-widget.stRadio {{ display: none !important; }}
     opacity: 0.9;
 }}
 
-/* ─── LIST ITEMS — Modern Cards ─── */
-.list-container {{
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    animation: fadeSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}}
-
+/* ─── LIST ITEM — static (non-clickable) card ─── */
 .list-item {{
     display: flex;
     align-items: center;
@@ -299,15 +191,95 @@ div.row-widget.stRadio {{ display: none !important; }}
     border: 1px solid {BORDER};
     border-radius: 14px;
     padding: 1rem 1.5rem;
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    cursor: pointer;
-    text-decoration: none !important;
+    margin-bottom: 0.6rem;
+    transition: background 0.25s ease, border-color 0.25s ease,
+                transform 0.25s ease, box-shadow 0.25s ease;
 }}
-.list-item:hover {{
-    background: {CARD_HOVER};
-    border-color: {BORDER_HL};
-    transform: translateX(6px);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+
+/* ─── CLICKABLE CARD PAIR ─── */
+/*
+   How Streamlit actually renders this in the DOM:
+
+   stVerticalBlock (parent)
+   ├── element-container          ← from st.markdown (our .card-btn-pair div lives inside)
+   │     └── div.card-btn-pair
+   │           └── div.list-item
+   └── element-container          ← from st.button (SIBLING of the markdown container)
+         └── div
+               └── button
+
+   So .card-btn-pair can't select the button at all — they're in different branches.
+   The ONLY selector that works: target the st.button element-container that is an
+   ADJACENT SIBLING of the element-container holding .card-btn-pair.
+
+   We use:  :has(.card-btn-pair) + [data-testid="element-container"]
+   to pull the button's container up over the card.
+*/
+
+/* The markdown container that holds our card */
+[data-testid="element-container"]:has(.card-btn-pair) {{
+    margin-bottom: 0 !important;
+}}
+[data-testid="element-container"]:has(.card-btn-pair) .list-item {{
+    margin-bottom: 0 !important;
+    pointer-events: none !important;
+}}
+
+/* The NEXT sibling element-container = the button's wrapper — pull it up */
+[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] {{
+    margin-top: -78px !important;
+    position: relative !important;
+    z-index: 2 !important;
+    height: 78px !important;
+    min-height: 0 !important;
+}}
+[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] > div {{
+    height: 78px !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+}}
+
+/* The actual button — transparent overlay */
+[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button {{
+    display: block !important;
+    width: 100% !important;
+    height: 78px !important;
+    min-height: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 14px !important;
+    cursor: pointer !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    color: transparent !important;
+    font-size: 0 !important;
+}}
+[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button:hover {{
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}}
+[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button p,
+[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button span {{
+    display: none !important;
+}}
+
+/* Hover: use :has() going back UP to the card via the parent stVerticalBlock */
+[data-testid="stVerticalBlock"]:has([data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button:hover) .list-item {{
+    background: {CARD_HOVER} !important;
+    border-color: {BORDER_HL} !important;
+    transform: translateX(6px) !important;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important;
+}}
+[data-testid="stVerticalBlock"]:has([data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button:hover) .item-arrow {{
+    transform: translateX(4px) !important;
+    color: {GREEN} !important;
+}}
+
+/* Bottom spacing after each pair */
+[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] {{
+    margin-bottom: 0.6rem !important;
 }}
 
 .item-rank {{
@@ -386,46 +358,7 @@ div.row-widget.stRadio {{ display: none !important; }}
     color: {TEXT_DIM};
     font-size: 1.2rem;
     margin-left: 1rem;
-    transition: transform 0.2s ease;
-}}
-.list-item:hover .item-arrow {{
-    transform: translateX(4px);
-    color: {GREEN};
-}}
-
-/* ─── CLICKABLE LIST ITEM WRAPPER ─── */
-.list-item-wrap {{
-    position: relative;
-    margin-bottom: 0.6rem;
-}}
-.list-item-wrap .list-item {{
-    margin-bottom: 0;
-    pointer-events: none;
-}}
-.list-item-wrap [data-testid="stBaseButton-secondary"] {{
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    opacity: 0 !important;
-    cursor: pointer !important;
-    z-index: 10 !important;
-    border: none !important;
-    border-radius: 14px !important;
-    background: transparent !important;
-    padding: 0 !important;
-}}
-.list-item-wrap:hover .list-item {{
-    background: {CARD_HOVER};
-    border-color: {BORDER_HL};
-    transform: translateX(6px);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-    pointer-events: none;
-}}
-.list-item-wrap:hover .item-arrow {{
-    transform: translateX(4px);
-    color: {GREEN};
+    transition: transform 0.2s ease, color 0.2s ease;
 }}
 
 /* ─── BACK BUTTON ─── */
@@ -443,11 +376,6 @@ div.row-widget.stRadio {{ display: none !important; }}
     cursor: pointer;
     transition: all 0.2s ease;
     margin-bottom: 1.5rem;
-}}
-.back-btn:hover {{
-    background: rgba(255,255,255,0.08);
-    border-color: {BORDER_HL};
-    color: {TEXT};
 }}
 
 /* ─── DETAIL PAGE HEADER ─── */
@@ -583,18 +511,19 @@ div.row-widget.stRadio {{ display: none !important; }}
     opacity: 0.5;
 }}
 
-/* ─── SUPPRESS BUTTON CHROME INSIDE LIST WRAP ─── */
-.list-item-wrap > div[data-testid="stVerticalBlockBorderWrapper"],
-.list-item-wrap > div[data-testid="element-container"] {{
-    margin: 0 !important;
-    padding: 0 !important;
-    min-height: 0 !important;
+/* ─── STREAMLIT OVERRIDES FOR INPUTS ─── */
+div[data-baseweb="select"] > div,
+div[data-testid="stDateInput"] input {{
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 8px !important;
+    color: {TEXT} !important;
+    font-size: 0.85rem !important;
+    padding: 0.4rem 0.75rem !important;
+    transition: all 0.2s ease !important;
 }}
-.list-item-wrap [data-testid="stBaseButton-secondary"] p {{
-    display: none !important;
-}}
+div.row-widget.stRadio {{ display: none !important; }}
 
-/* ─── SEARCH INPUT ─── */
 div[data-testid="stTextInput"] input {{
     background: rgba(255,255,255,0.04) !important;
     border: 1px solid {BORDER} !important;
@@ -645,57 +574,63 @@ def get_item_icon(link_type: str) -> str:
     icons = {"song": "🎵", "artist": "🎤", "album": "💿"}
     return icons.get(link_type, "🎵")
 
-def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str, id_col: str = None, link_type: str = None, image_col: str = "image_url"):
-    """Modern list renderer with same-page navigation via session_state buttons and real images."""
+def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str,
+                   id_col: str = None, link_type: str = None, image_col: str = "image_url",
+                   rank_col: str = None):
+    """
+    Modern list renderer. Supports:
+    - rank_col: column with global rank number (if None, uses row index)
+    - Clickable cards via an invisible overlay button (no duplicate bar)
+    """
     for i, row in df.iterrows():
-        rank = i + 1
+        # Use global rank if provided, otherwise use sequential index
+        rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
         rank_class = get_rank_class(rank)
         title = escape(str(row[title_col]))[:60]
         subtitle = escape(str(row[sub_col]))[:50]
         streams = f"{int(row[streams_col]):,}"
         hours = f"{float(row[hours_col]):.1f}"
         can_navigate = link_type and id_col and id_col in row.index
-        
-        # Λογική για την εμφάνιση εικόνας ή emoji
+
         image_url = row.get(image_col) if image_col in row else None
-        if pd.notnull(image_url) and str(image_url).startswith("http"):
-            # Αν είναι καλλιτέχνης, κάνουμε την εικόνα ΣΤΡΟΓΓΥΛΗ!
+        if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
             radius = "50%" if link_type == "artist" else "8px"
             art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover; border-radius:{radius};">'
         else:
             art_html = get_item_icon(link_type) if link_type else "🎵"
-        
+
         card_html = f'''
-        <div class="item-rank {rank_class}">{rank}</div>
-        <div class="item-art">{art_html}</div>
-        <div class="item-info">
-            <div class="item-title">{title}</div>
-            <div class="item-subtitle">{subtitle}</div>
-        </div>
-        <div class="item-stats">
-            <div class="stat">
-                <div class="stat-value">{streams}</div>
-                <div class="stat-label">Streams</div>
+        <div class="list-item">
+            <div class="item-rank {rank_class}">{rank}</div>
+            <div class="item-art">{art_html}</div>
+            <div class="item-info">
+                <div class="item-title">{title}</div>
+                <div class="item-subtitle">{subtitle}</div>
             </div>
-            <div class="stat">
-                <div class="stat-value green">{hours}h</div>
-                <div class="stat-label">Time</div>
+            <div class="item-stats">
+                <div class="stat">
+                    <div class="stat-value">{streams}</div>
+                    <div class="stat-label">Streams</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value green">{hours}h</div>
+                    <div class="stat-label">Time</div>
+                </div>
             </div>
+            {"<div class='item-arrow'>→</div>" if can_navigate else ""}
         </div>
-        {"<div class=\'item-arrow\'>→</div>" if can_navigate else ""}
         '''
 
         if can_navigate:
             item_id = str(row[id_col])
             btn_key = f"nav_{link_type}_{item_id}_{rank}"
-            st.markdown(f'<div class="list-item-wrap"><div class="list-item">{card_html}</div>', unsafe_allow_html=True)
-            if st.button(f"{title}", key=btn_key, use_container_width=True):
+            st.markdown(f'<div class="card-btn-pair">{card_html}</div>', unsafe_allow_html=True)
+            if st.button(" ", key=btn_key, use_container_width=True):
                 st.query_params["view"] = link_type
                 st.query_params["id"] = item_id
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="list-item">{card_html}</div>', unsafe_allow_html=True)
+            st.markdown(card_html, unsafe_allow_html=True)
 
 
 def render_kpi_grid(kpis: list[dict]):
@@ -712,17 +647,15 @@ def render_kpi_grid(kpis: list[dict]):
 
 
 def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, stats: list[dict], image_url: str = None):
-    """Render a detail page header with stats and real image."""
     stats_html = "".join([
         f'<div class="detail-stat"><div class="detail-stat-value">{s["value"]}</div><div class="detail-stat-label">{s["label"]}</div></div>'
         for s in stats
     ])
-        
-    if pd.notnull(image_url) and str(image_url).startswith("http"):
+    if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
         art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover;">'
     else:
         art_html = icon
-    
+
     st.markdown(f'''
     <div class="detail-header">
         <div class="detail-art">{art_html}</div>
@@ -813,15 +746,6 @@ def get_current_view() -> dict:
         "tab": params.get("tab", "overview")
     }
 
-def navigate_to(tab: str = None, view_type: str = None, view_id: str = None):
-    new_params = {}
-    if tab:
-        new_params["tab"] = tab
-    if view_type and view_id:
-        new_params["view"] = view_type
-        new_params["id"] = view_id
-    st.query_params.update(new_params)
-
 def go_back():
     current = get_current_view()
     st.query_params.clear()
@@ -837,7 +761,6 @@ def go_back():
 # MAIN APP
 # ══════════════════════════════════════════════════════════════════
 
-# Initialize state
 min_date, max_date = get_date_bounds()
 if "start_date" not in st.session_state:
     st.session_state.start_date = min_date
@@ -853,11 +776,8 @@ detail_id = view_state["id"]
 
 # ─── NAVBAR ───
 st.markdown('<div class="navbar"><div class="navbar-content">', unsafe_allow_html=True)
-
-# Brand
 st.markdown('<div class="nav-brand"><span>🎧</span>Suggestify</div>', unsafe_allow_html=True)
 
-# Navigation tabs via columns
 nav_col, date_col = st.columns([3, 2])
 
 with nav_col:
@@ -868,7 +788,6 @@ with nav_col:
         ("albums", "💿 Albums"),
         ("habits", "🕐 Habits"),
     ]
-    
     cols = st.columns(len(tabs))
     for i, (tab_id, tab_label) in enumerate(tabs):
         with cols[i]:
@@ -885,7 +804,7 @@ with nav_col:
 
 with date_col:
     preset_col, d1_col, d2_col = st.columns([1.4, 1, 1])
-    
+
     with preset_col:
         preset_options = {
             "all": "♾️ All Time",
@@ -901,7 +820,6 @@ with date_col:
             label_visibility="collapsed",
             key="preset_select"
         )
-        
         if selected_preset != st.session_state.date_preset:
             st.session_state.date_preset = selected_preset
             if selected_preset == "all":
@@ -917,27 +835,15 @@ with date_col:
                 st.session_state.start_date = max_date - datetime.timedelta(days=7)
                 st.session_state.end_date = max_date
             st.rerun()
-    
+
     with d1_col:
-        new_start = st.date_input(
-            "From",
-            value=st.session_state.start_date,
-            min_value=min_date,
-            max_value=max_date,
-            label_visibility="collapsed",
-            key="start_input"
-        )
-    
+        new_start = st.date_input("From", value=st.session_state.start_date,
+            min_value=min_date, max_value=max_date, label_visibility="collapsed", key="start_input")
+
     with d2_col:
-        new_end = st.date_input(
-            "To",
-            value=st.session_state.end_date,
-            min_value=min_date,
-            max_value=max_date,
-            label_visibility="collapsed",
-            key="end_input"
-        )
-    
+        new_end = st.date_input("To", value=st.session_state.end_date,
+            min_value=min_date, max_value=max_date, label_visibility="collapsed", key="end_input")
+
     if new_start != st.session_state.start_date or new_end != st.session_state.end_date:
         if new_start <= new_end:
             st.session_state.start_date = new_start
@@ -947,7 +853,6 @@ with date_col:
 
 st.markdown('</div></div>', unsafe_allow_html=True)
 
-# Date filter params
 F = {"start_date": st.session_state.start_date, "end_date": st.session_state.end_date}
 
 
@@ -956,12 +861,11 @@ F = {"start_date": st.session_state.start_date, "end_date": st.session_state.end
 # ══════════════════════════════════════════════════════════════════
 
 if detail_type and detail_id:
-    
-    # Back button
+
     if st.button("← Back", key="back_btn"):
         go_back()
         st.rerun()
-    
+
     if detail_type == "song":
         song_info = run_query("""
             SELECT so.title, COALESCE(a.name, 'Unknown') as artist, so.image_url,
@@ -974,42 +878,39 @@ if detail_type and detail_id:
             WHERE so.id = :id
             GROUP BY so.id, so.title, a.name, so.image_url
         """, {"id": detail_id, **F})
-        
+
         if not song_info.empty:
             row = song_info.iloc[0]
             render_detail_header(
-                type_label="Track",
-                title=str(row["title"]),
-                subtitle=f"by {row['artist']}",
-                icon="🎵",
+                type_label="Track", title=str(row["title"]),
+                subtitle=f"by {row['artist']}", icon="🎵",
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
                     {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
                 ],
                 image_url=row.get("image_url")
             )
-            
             if pd.notnull(row['first_play']):
                 st.info(f"✨ **First played:** {row['first_play'].strftime('%B %d, %Y')}")
-            
+
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown('<div class="chart-container"><div class="chart-title">📈 Listening Timeline</div>', unsafe_allow_html=True)
                 df_t = run_query("""
-                    SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, 
-                           ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played 
-                    FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date 
+                    SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
+                           ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played
+                    FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date
                     GROUP BY 1 ORDER BY 1
                 """, {"id": detail_id, **F})
                 if not df_t.empty:
                     st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
                 st.markdown('</div>', unsafe_allow_html=True)
-            
+
             with c2:
                 st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
                 df_h = run_query("""
-                    SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count 
-                    FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date 
+                    SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count
+                    FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date
                     GROUP BY 1 ORDER BY 1
                 """, {"id": detail_id, **F})
                 if not df_h.empty:
@@ -1018,69 +919,63 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
-    
+
     elif detail_type == "artist":
         art_info = run_query("""
-            SELECT a.name, a.image_url as image_url, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+            SELECT a.name, a.image_url, COUNT(s.id) as streams,
+                   ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
                    COUNT(DISTINCT s.song_id) as unique_tracks
             FROM artists a
             LEFT JOIN song_artists sa ON sa.artist_id = a.id
             LEFT JOIN streams s ON s.song_id = sa.song_id AND s.played_at::date BETWEEN :start_date AND :end_date
-            LEFT JOIN songs so ON so.id = sa.song_id
             WHERE a.id = :id
-            GROUP BY a.id, a.name
+            GROUP BY a.id, a.name, a.image_url
         """, {"id": detail_id, **F})
-        
+
         if not art_info.empty:
             row = art_info.iloc[0]
             render_detail_header(
-                type_label="Artist",
-                title=str(row["name"]),
-                subtitle=f"{int(row['unique_tracks'] or 0)} tracks played",
-                icon="🎤",
+                type_label="Artist", title=str(row["name"]),
+                subtitle=f"{int(row['unique_tracks'] or 0)} tracks played", icon="🎤",
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
                     {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
                 ],
                 image_url=row.get("image_url")
             )
-            
             c1, c2 = st.columns([1.2, 1])
-            
             with c1:
                 st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
                 df_tracks = run_query("""
                     SELECT so.id AS song_id, so.title as song_title, 'Track' as sub, so.image_url,
-                           COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 3) as hours_played 
-                    FROM streams s 
-                    JOIN songs so ON so.id = s.song_id 
-                    JOIN song_artists sa ON sa.song_id = s.song_id 
-                    WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date 
+                           COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 3) as hours_played
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    JOIN song_artists sa ON sa.song_id = s.song_id
+                    WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
                     GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 10
                 """, {**F, "aid": detail_id})
                 if not df_tracks.empty:
                     render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
-            
+
             with c2:
                 st.markdown('<div class="chart-container"><div class="chart-title">📈 Timeline</div>', unsafe_allow_html=True)
                 df_t = run_query("""
-                    SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, 
-                           ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played 
-                    FROM streams s 
-                    JOIN song_artists sa ON sa.song_id = s.song_id 
-                    WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date 
+                    SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
+                           ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played
+                    FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id
+                    WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date
                     GROUP BY 1 ORDER BY 1
                 """, {"aid": detail_id, **F})
                 if not df_t.empty:
                     st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
                 st.markdown('</div>', unsafe_allow_html=True)
-                
+
                 st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
                 df_h = run_query("""
-                    SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count 
-                    FROM streams s 
-                    JOIN song_artists sa ON sa.song_id = s.song_id 
-                    WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date 
+                    SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count
+                    FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id
+                    WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date
                     GROUP BY 1 ORDER BY 1
                 """, {"aid": detail_id, **F})
                 if not df_h.empty:
@@ -1089,10 +984,11 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
-    
+
     elif detail_type == "album":
         alb_info = run_query("""
-            SELECT al.title, MAX(so.image_url) as image_url, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+            SELECT al.title, MAX(so.image_url) as image_url, COUNT(s.id) as streams,
+                   ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
                    COUNT(DISTINCT s.song_id) as track_count
             FROM albums al
             LEFT JOIN songs so ON so.album_id = al.id
@@ -1100,45 +996,43 @@ if detail_type and detail_id:
             WHERE al.id = :id
             GROUP BY al.id, al.title
         """, {"id": detail_id, **F})
-        
+
         if not alb_info.empty:
             row = alb_info.iloc[0]
             render_detail_header(
                 type_label="Album",
                 title=str(row["title"]) if row["title"] else "Unknown Album",
-                subtitle=f"{int(row['track_count'] or 0)} tracks played",
-                icon="💿",
+                subtitle=f"{int(row['track_count'] or 0)} tracks played", icon="💿",
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
                     {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
                 ],
                 image_url=row.get("image_url")
             )
-            
             st.markdown('<div class="section-header"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
             df_tracks = run_query("""
-                SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
-                       COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
-                FROM streams s 
-                JOIN songs so ON so.id = s.song_id 
-                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
-                LEFT JOIN artists a ON a.id = sa.artist_id 
+                SELECT so.id AS song_id, so.title AS song_title,
+                       COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                       COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+                FROM streams s
+                JOIN songs so ON so.id = s.song_id
+                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                LEFT JOIN artists a ON a.id = sa.artist_id
                 WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
                 GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
             """, {**F, "aid": detail_id})
-            
             if not df_tracks.empty:
                 render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
             else:
                 st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════
 # TAB VIEWS
 # ══════════════════════════════════════════════════════════════════
 
 elif current_tab == "overview":
-    
-    # Wrapped banner if in wrapped mode
+
     if st.session_state.date_preset == "wrapped":
         st.markdown(f'''
         <div class="wrapped-banner">
@@ -1146,19 +1040,18 @@ elif current_tab == "overview":
             <div class="wrapped-subtitle">Your year in music so far • {st.session_state.start_date.strftime("%b %d")} — {st.session_state.end_date.strftime("%b %d, %Y")}</div>
         </div>
         ''', unsafe_allow_html=True)
-    
-    # KPIs
+
     df_kpi = run_query("""
-        SELECT 
+        SELECT
             ROUND(SUM(s.ms_played) / 3600000.0, 1) AS total_hours,
             COUNT(DISTINCT sa.artist_id) AS unique_artists,
             COUNT(DISTINCT s.song_id) AS unique_songs,
             COUNT(s.id) AS total_streams
-        FROM streams s 
+        FROM streams s
         JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
         WHERE s.played_at::date BETWEEN :start_date AND :end_date;
     """, F)
-    
+
     if not df_kpi.empty:
         row = df_kpi.iloc[0]
         render_kpi_grid([
@@ -1167,48 +1060,46 @@ elif current_tab == "overview":
             {"icon": "🎤", "title": "Unique Artists", "value": f"{int(row['unique_artists'] or 0):,}"},
             {"icon": "🎶", "title": "Unique Songs", "value": f"{int(row['unique_songs'] or 0):,}"},
         ])
-    
-    # Trend chart
+
     st.markdown('<div class="section-header"><span class="icon">📈</span>Listening Trend</div>', unsafe_allow_html=True)
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
     df_trend = run_query("""
-        SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, 
-               ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played 
-        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+        SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
+               ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date
         GROUP BY 1 ORDER BY 1;
     """, F)
     if not df_trend.empty:
         st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False})
     st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Top items preview
+
     c1, c2 = st.columns(2)
-    
     with c1:
         st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
         df_top_tracks = run_query("""
-            SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
-                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
-            FROM streams s 
-            JOIN songs so ON so.id = s.song_id 
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
-            LEFT JOIN artists a ON a.id = sa.artist_id 
-            WHERE s.played_at::date BETWEEN :start_date AND :end_date 
+            SELECT so.id AS song_id, so.title AS song_title,
+                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            LEFT JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
             GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 5;
         """, F)
         if not df_top_tracks.empty:
             render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
-    
+
     with c2:
         st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
         df_top_artists = run_query("""
-            SELECT a.id AS artist_id, a.name AS artist_name, a.image_url as image_url, COUNT(s.id) AS streams, 
-                   ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
-            FROM streams s 
-            JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE 
-            JOIN artists a ON a.id = sa.artist_id 
+            SELECT a.id AS artist_id, a.name AS artist_name, a.image_url, COUNT(s.id) AS streams,
+                   ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+            FROM streams s
+            JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+            JOIN artists a ON a.id = sa.artist_id
             JOIN songs so ON so.id = s.song_id
-            WHERE s.played_at::date BETWEEN :start_date AND :end_date 
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
             GROUP BY a.id, a.name ORDER BY streams DESC LIMIT 5;
         """, F)
         if not df_top_artists.empty:
@@ -1218,103 +1109,179 @@ elif current_tab == "overview":
 
 elif current_tab == "tracks":
     st.markdown('<div class="section-header"><span class="icon">🎵</span>Track Explorer</div>', unsafe_allow_html=True)
-    
+
     col_search, col_limit = st.columns([3, 1])
-    search_term = col_search.text_input("🔍 Search tracks or artists...", placeholder="e.g. Drake, Starboy...", label_visibility="collapsed")
+    search_term = col_search.text_input("🔍 Search tracks...", placeholder="e.g. Starboy, Red Moon...", label_visibility="collapsed")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200, 500], index=0, label_visibility="collapsed")
-    
+
+    # ── FIX 2: Use ROW_NUMBER() so rank reflects global position even when searching ──
     query_params = {**F, "limit": display_limit}
-    search_clause = ""
+
     if search_term:
-        search_clause = "AND (so.title ILIKE :search OR a.name ILIKE :search)"
+        # Build full ranked list, then filter by title only — showing global rank
         query_params["search"] = f"%{search_term}%"
-    
-    df_songs = run_query(f"""
-        SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
-               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
-        FROM streams s 
-        JOIN songs so ON so.id = s.song_id 
-        LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
-        LEFT JOIN artists a ON a.id = sa.artist_id 
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date {search_clause}
-        GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT :limit;
-    """, query_params)
-    
+        df_songs = run_query("""
+            WITH ranked AS (
+                SELECT so.id AS song_id, so.title AS song_title,
+                       COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                       COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played,
+                       ROW_NUMBER() OVER (ORDER BY COUNT(s.id) DESC) AS global_rank
+                FROM streams s
+                JOIN songs so ON so.id = s.song_id
+                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                LEFT JOIN artists a ON a.id = sa.artist_id
+                WHERE s.played_at::date BETWEEN :start_date AND :end_date
+                GROUP BY so.id, so.title, a.name, so.image_url
+            )
+            SELECT * FROM ranked
+            WHERE song_title ILIKE :search
+            ORDER BY global_rank
+            LIMIT :limit;
+        """, query_params)
+    else:
+        df_songs = run_query("""
+            SELECT so.id AS song_id, so.title AS song_title,
+                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played,
+                   ROW_NUMBER() OVER (ORDER BY COUNT(s.id) DESC) AS global_rank
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            LEFT JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+            GROUP BY so.id, so.title, a.name, so.image_url
+            ORDER BY streams DESC LIMIT :limit;
+        """, query_params)
+
     if not df_songs.empty:
-        render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+        render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
+                       "song_id", "song", rank_col="global_rank")
     else:
         st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
 
 
 elif current_tab == "artists":
     st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
-    
-    col_limit = st.columns([3, 1])[1]
+
+    col_search, col_limit = st.columns([3, 1])
+    search_term = col_search.text_input("🔍 Search artists...", placeholder="e.g. Drake, Nicki Minaj...", label_visibility="collapsed")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
-    
-    df_artists = run_query(f"""
-        SELECT a.id AS artist_id, a.name AS artist_name, a.image_url as image_url, COUNT(s.id) AS streams, 
-               ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
-        FROM streams s 
-        JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE 
-        JOIN artists a ON a.id = sa.artist_id 
-        JOIN songs so ON so.id = s.song_id
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date 
-        GROUP BY a.id, a.name ORDER BY hours_played DESC LIMIT {display_limit};
-    """, F)
-    
+
+    query_params = {**F, "limit": display_limit}
+
+    if search_term:
+        query_params["search"] = f"%{search_term}%"
+        df_artists = run_query("""
+            WITH ranked AS (
+                SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
+                       COUNT(s.id) AS streams,
+                       ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played,
+                       ROW_NUMBER() OVER (ORDER BY SUM(s.ms_played) DESC) AS global_rank
+                FROM streams s
+                JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE s.played_at::date BETWEEN :start_date AND :end_date
+                GROUP BY a.id, a.name, a.image_url
+            )
+            SELECT * FROM ranked
+            WHERE artist_name ILIKE :search
+            ORDER BY global_rank
+            LIMIT :limit;
+        """, query_params)
+    else:
+        df_artists = run_query("""
+            SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
+                   COUNT(s.id) AS streams,
+                   ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played,
+                   ROW_NUMBER() OVER (ORDER BY SUM(s.ms_played) DESC) AS global_rank
+            FROM streams s
+            JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+            JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+            GROUP BY a.id, a.name, a.image_url
+            ORDER BY hours_played DESC LIMIT :limit;
+        """, query_params)
+
     if not df_artists.empty:
         df_artists["subtitle"] = "Artist"
-        render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played", "artist_id", "artist")
+        render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
+                       "artist_id", "artist", rank_col="global_rank")
     else:
         st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
 
 
 elif current_tab == "albums":
     st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
-    
-    col_limit = st.columns([3, 1])[1]
+
+    col_search, col_limit = st.columns([3, 1])
+    search_term = col_search.text_input("🔍 Search albums...", placeholder="e.g. Take Care, UTOPIA...", label_visibility="collapsed")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
-    
-    df_albums = run_query(f"""
-        SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title, MAX(so.image_url) as image_url,
-               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
-        FROM streams s 
-        JOIN songs so ON so.id = s.song_id 
-        LEFT JOIN albums al ON al.id = so.album_id 
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date 
-        GROUP BY al.id, al.title ORDER BY hours_played DESC LIMIT {display_limit};
-    """, F)
-    
+
+    query_params = {**F, "limit": display_limit}
+
+    if search_term:
+        query_params["search"] = f"%{search_term}%"
+        df_albums = run_query("""
+            WITH ranked AS (
+                SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
+                       MAX(so.image_url) AS image_url,
+                       COUNT(s.id) AS streams,
+                       ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played,
+                       ROW_NUMBER() OVER (ORDER BY SUM(s.ms_played) DESC) AS global_rank
+                FROM streams s
+                JOIN songs so ON so.id = s.song_id
+                LEFT JOIN albums al ON al.id = so.album_id
+                WHERE s.played_at::date BETWEEN :start_date AND :end_date
+                GROUP BY al.id, al.title
+            )
+            SELECT * FROM ranked
+            WHERE album_title ILIKE :search
+            ORDER BY global_rank
+            LIMIT :limit;
+        """, query_params)
+    else:
+        df_albums = run_query("""
+            SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
+                   MAX(so.image_url) AS image_url,
+                   COUNT(s.id) AS streams,
+                   ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played,
+                   ROW_NUMBER() OVER (ORDER BY SUM(s.ms_played) DESC) AS global_rank
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN albums al ON al.id = so.album_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+            GROUP BY al.id, al.title
+            ORDER BY hours_played DESC LIMIT :limit;
+        """, query_params)
+
     if not df_albums.empty:
         df_albums["subtitle"] = "Album"
-        render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album")
+        render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played",
+                       "album_id", "album", rank_col="global_rank")
     else:
         st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
 
 
 elif current_tab == "habits":
     st.markdown('<div class="section-header"><span class="icon">🕐</span>Listening Habits</div>', unsafe_allow_html=True)
-    
-    # Heatmap
+
     st.markdown('<div class="chart-container"><div class="chart-title">📊 Activity Heatmap (Day × Hour)</div>', unsafe_allow_html=True)
     df_heatmap = run_query("""
-        SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, EXTRACT(HOUR FROM played_at)::INT AS hour, 
-               COUNT(*) AS stream_count 
-        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+        SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, EXTRACT(HOUR FROM played_at)::INT AS hour,
+               COUNT(*) AS stream_count
+        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date
         GROUP BY 1, 2;
     """, F)
     if not df_heatmap.empty:
         st.plotly_chart(chart_heatmap(df_heatmap), use_container_width=True, config={"displayModeBar": False})
     st.markdown('</div>', unsafe_allow_html=True)
-    
+
     c1, c2 = st.columns(2)
-    
     with c1:
         st.markdown('<div class="chart-container"><div class="chart-title">⏰ Peak Hours</div>', unsafe_allow_html=True)
         df_hours = run_query("""
-            SELECT EXTRACT(HOUR FROM played_at)::INT AS hour, COUNT(*) AS stream_count 
-            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+            SELECT EXTRACT(HOUR FROM played_at)::INT AS hour, COUNT(*) AS stream_count
+            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date
             GROUP BY 1 ORDER BY 1;
         """, F)
         if not df_hours.empty:
@@ -1323,12 +1290,12 @@ elif current_tab == "habits":
                 use_container_width=True, config={"displayModeBar": False}
             )
         st.markdown('</div>', unsafe_allow_html=True)
-    
+
     with c2:
         st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
         df_days = run_query("""
-            SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, COUNT(*) AS stream_count 
-            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+            SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, COUNT(*) AS stream_count
+            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date
             GROUP BY 1 ORDER BY 1;
         """, F)
         if not df_days.empty:
