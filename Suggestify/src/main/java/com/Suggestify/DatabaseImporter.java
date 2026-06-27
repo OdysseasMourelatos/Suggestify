@@ -1,5 +1,9 @@
 package com.Suggestify;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -59,7 +63,7 @@ public class DatabaseImporter {
                 }
 
                 int albumId = getOrCreateAlbum(conn, record.getAlbumName());
-                int songId = getOrCreateSong(conn, cleanTrackName, artistIds, albumId);
+                int songId = getOrCreateSong(conn, cleanTrackName, artistIds, albumId, record.getTrackUri());
 
                 streamStmt.setInt(1, songId);
                 streamStmt.setTimestamp(2, Timestamp.from(record.getTimestamp()));
@@ -110,10 +114,9 @@ public class DatabaseImporter {
         return -1;
     }
 
-   private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds, int albumId) throws Exception {
-        // Δημιουργία μοναδικού κλειδιού: Τίτλος + ID Άλμπουμ (ώστε να μην μπερδεύονται τα συνώνυμα)
+    private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds, int albumId, String trackUri) throws Exception {
         String cacheKey = songTitle.toLowerCase() + "|" + albumId;
-        
+
         if (songCache.containsKey(cacheKey)) return songCache.get(cacheKey);
 
         String selectSQL = "SELECT id FROM songs WHERE title = ? AND (album_id = ? OR (album_id IS NULL AND ? = -1))";
@@ -130,15 +133,18 @@ public class DatabaseImporter {
             }
         }
 
-        String insertSongSQL = "INSERT INTO songs (title, album_id) VALUES (?, ?)";
+        String insertSongSQL = "INSERT INTO songs (title, album_id, track_uri) VALUES (?, ?, ?)";
         int songId = -1;
         try (PreparedStatement stmt = conn.prepareStatement(insertSongSQL, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setString(1, songTitle);
+
             if (albumId != -1) {
                 stmt.setInt(2, albumId);
             } else {
                 stmt.setNull(2, java.sql.Types.INTEGER);
             }
+
+            stmt.setString(3, trackUri);
 
             stmt.executeUpdate();
             try (ResultSet rs = stmt.getGeneratedKeys()) {
@@ -198,5 +204,32 @@ public class DatabaseImporter {
             }
         }
         return -1;
+    }
+
+    private String fetchImageUrl(String trackUri) {
+        if (trackUri == null || trackUri.isEmpty()) return null;
+
+        String oembedUrl = "https://open.spotify.com/oembed?url=" + trackUri;
+
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(oembedUrl))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            // Αν το response είναι 200 OK, τραβάμε το thumbnail_url
+            if (response.statusCode() == 200) {
+                Matcher m = Pattern.compile("\"thumbnail_url\"\\s*:\\s*\"([^\"]+)\"").matcher(response.body());
+                if (m.find()) {
+                    return m.group(1);
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Failed to fetch image for: " + trackUri);
+        }
+        return null;
     }
 }
