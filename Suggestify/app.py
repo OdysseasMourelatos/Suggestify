@@ -182,7 +182,7 @@ html, body, [class*="css"] {{
     opacity: 0.9;
 }}
 
-/* ─── LIST ITEM — static (non-clickable) card ─── */
+/* ─── LIST ITEM — Modern Cards ─── */
 .list-item {{
     display: flex;
     align-items: center;
@@ -196,90 +196,25 @@ html, body, [class*="css"] {{
                 transform 0.25s ease, box-shadow 0.25s ease;
 }}
 
-/* ─── CLICKABLE CARD PAIR ─── */
-/*
-   How Streamlit actually renders this in the DOM:
-
-   stVerticalBlock (parent)
-   ├── element-container          ← from st.markdown (our .card-btn-pair div lives inside)
-   │     └── div.card-btn-pair
-   │           └── div.list-item
-   └── element-container          ← from st.button (SIBLING of the markdown container)
-         └── div
-               └── button
-
-   So .card-btn-pair can't select the button at all — they're in different branches.
-   The ONLY selector that works: target the st.button element-container that is an
-   ADJACENT SIBLING of the element-container holding .card-btn-pair.
-
-   We use:  :has(.card-btn-pair) + [data-testid="element-container"]
-   to pull the button's container up over the card.
-*/
-
-/* The markdown container that holds our card */
-[data-testid="element-container"]:has(.card-btn-pair) {{
-    margin-bottom: 0 !important;
+/* CLEAN NATIVE CLICKABLE LINKS */
+a.custom-link {{
+    text-decoration: none !important;
+    color: inherit !important;
+    display: block;
+    margin-bottom: 0.6rem;
 }}
-[data-testid="element-container"]:has(.card-btn-pair) .list-item {{
-    margin-bottom: 0 !important;
-    pointer-events: none !important;
+a.custom-link .list-item {{
+    margin-bottom: 0 !important; /* Margin is handled by the <a> wrapper */
 }}
-
-/* The NEXT sibling element-container = the button's wrapper — pull it up */
-[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] {{
-    margin-top: -78px !important;
-    position: relative !important;
-    z-index: 2 !important;
-    height: 78px !important;
-    min-height: 0 !important;
+a.custom-link:hover .list-item {{
+    background: {CARD_HOVER};
+    border-color: {BORDER_HL};
+    transform: translateX(6px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
 }}
-[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] > div {{
-    height: 78px !important;
-    min-height: 0 !important;
-    padding: 0 !important;
-}}
-
-/* The actual button — transparent overlay */
-[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button {{
-    display: block !important;
-    width: 100% !important;
-    height: 78px !important;
-    min-height: 0 !important;
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    border-radius: 14px !important;
-    cursor: pointer !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    color: transparent !important;
-    font-size: 0 !important;
-}}
-[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button:hover {{
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-}}
-[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button p,
-[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button span {{
-    display: none !important;
-}}
-
-/* Hover: use :has() going back UP to the card via the parent stVerticalBlock */
-[data-testid="stVerticalBlock"]:has([data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button:hover) .list-item {{
-    background: {CARD_HOVER} !important;
-    border-color: {BORDER_HL} !important;
-    transform: translateX(6px) !important;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important;
-}}
-[data-testid="stVerticalBlock"]:has([data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] button:hover) .item-arrow {{
-    transform: translateX(4px) !important;
-    color: {GREEN} !important;
-}}
-
-/* Bottom spacing after each pair */
-[data-testid="element-container"]:has(.card-btn-pair) + [data-testid="element-container"] {{
-    margin-bottom: 0.6rem !important;
+a.custom-link:hover .item-arrow {{
+    transform: translateX(4px);
+    color: {GREEN};
 }}
 
 .item-rank {{
@@ -578,12 +513,13 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                    id_col: str = None, link_type: str = None, image_col: str = "image_url",
                    rank_col: str = None):
     """
-    Modern list renderer. Supports:
-    - rank_col: column with global rank number (if None, uses row index)
-    - Clickable cards via an invisible overlay button (no duplicate bar)
+    Modern list renderer using pure HTML <a> tags.
+    No more CSS hacks or ghost buttons!
     """
+    # Grab current tab so navigation keeps user on the same tab conceptually
+    current_tab = st.query_params.get("tab", "overview")
+
     for i, row in df.iterrows():
-        # Use global rank if provided, otherwise use sequential index
         rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
         rank_class = get_rank_class(rank)
         title = escape(str(row[title_col]))[:60]
@@ -623,12 +559,9 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
 
         if can_navigate:
             item_id = str(row[id_col])
-            btn_key = f"nav_{link_type}_{item_id}_{rank}"
-            st.markdown(f'<div class="card-btn-pair">{card_html}</div>', unsafe_allow_html=True)
-            if st.button(" ", key=btn_key, use_container_width=True):
-                st.query_params["view"] = link_type
-                st.query_params["id"] = item_id
-                st.rerun()
+            # By generating a clean HTML link we eliminate the double-box issue entirely!
+            href = f"?tab={current_tab}&view={link_type}&id={item_id}"
+            st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
         else:
             st.markdown(card_html, unsafe_allow_html=True)
 
@@ -766,8 +699,20 @@ if "start_date" not in st.session_state:
     st.session_state.start_date = min_date
 if "end_date" not in st.session_state:
     st.session_state.end_date = max_date
+
+# Safe assignment for the date_preset selection
 if "date_preset" not in st.session_state:
     st.session_state.date_preset = "all"
+
+preset_options = {
+    "all": "♾️ All Time",
+    "wrapped": "🎁 Wrapped",
+    "month": "📅 Month",
+    "week": "📅 Week"
+}
+
+# Provide safe fallback in case st.session_state.date_preset gets out of sync
+safe_preset = st.session_state.date_preset if st.session_state.date_preset in preset_options else "all"
 
 view_state = get_current_view()
 current_tab = view_state["tab"]
@@ -806,17 +751,11 @@ with date_col:
     preset_col, d1_col, d2_col = st.columns([1.4, 1, 1])
 
     with preset_col:
-        preset_options = {
-            "all": "♾️ All Time",
-            "wrapped": "🎁 Wrapped",
-            "month": "📅 Month",
-            "week": "📅 Week"
-        }
         selected_preset = st.selectbox(
             "Period",
             options=list(preset_options.keys()),
             format_func=lambda x: preset_options[x],
-            index=list(preset_options.keys()).index(st.session_state.date_preset),
+            index=list(preset_options.keys()).index(safe_preset),
             label_visibility="collapsed",
             key="preset_select"
         )
@@ -1100,7 +1039,7 @@ elif current_tab == "overview":
             JOIN artists a ON a.id = sa.artist_id
             JOIN songs so ON so.id = s.song_id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
-            GROUP BY a.id, a.name ORDER BY streams DESC LIMIT 5;
+            GROUP BY a.id, a.name, a.image_url ORDER BY streams DESC LIMIT 5;
         """, F)
         if not df_top_artists.empty:
             df_top_artists["subtitle"] = "Artist"
@@ -1114,11 +1053,9 @@ elif current_tab == "tracks":
     search_term = col_search.text_input("🔍 Search tracks...", placeholder="e.g. Starboy, Red Moon...", label_visibility="collapsed")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200, 500], index=0, label_visibility="collapsed")
 
-    # ── FIX 2: Use ROW_NUMBER() so rank reflects global position even when searching ──
     query_params = {**F, "limit": display_limit}
 
     if search_term:
-        # Build full ranked list, then filter by title only — showing global rank
         query_params["search"] = f"%{search_term}%"
         df_songs = run_query("""
             WITH ranked AS (
