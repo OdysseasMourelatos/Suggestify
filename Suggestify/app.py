@@ -514,9 +514,8 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                    rank_col: str = None):
     """
     Modern list renderer using pure HTML <a> tags.
-    No more CSS hacks or ghost buttons!
+    Target "_top" bypasses the iframe container and opens in the SAME browser tab smoothly!
     """
-    # Grab current tab so navigation keeps user on the same tab conceptually
     current_tab = st.query_params.get("tab", "overview")
 
     for i, row in df.iterrows():
@@ -559,9 +558,8 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
 
         if can_navigate:
             item_id = str(row[id_col])
-            # By generating a clean HTML link we eliminate the double-box issue entirely!
             href = f"?tab={current_tab}&view={link_type}&id={item_id}"
-            st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="{href}" class="custom-link" target="_top">{card_html}</a>', unsafe_allow_html=True)
         else:
             st.markdown(card_html, unsafe_allow_html=True)
 
@@ -873,8 +871,10 @@ if detail_type and detail_id:
 
         if not art_info.empty:
             row = art_info.iloc[0]
+            artist_name = str(row["name"])
+            
             render_detail_header(
-                type_label="Artist", title=str(row["name"]),
+                type_label="Artist", title=artist_name,
                 subtitle=f"{int(row['unique_tracks'] or 0)} tracks played", icon="🎤",
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
@@ -882,7 +882,10 @@ if detail_type and detail_id:
                 ],
                 image_url=row.get("image_url")
             )
-            c1, c2 = st.columns([1.2, 1])
+            
+            # --- Changed Layout: 3 Columns for Artist View ---
+            c1, c2, c3 = st.columns([1.1, 1.1, 1])
+            
             with c1:
                 st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
                 df_tracks = run_query("""
@@ -892,12 +895,47 @@ if detail_type and detail_id:
                     JOIN songs so ON so.id = s.song_id
                     JOIN song_artists sa ON sa.song_id = s.song_id
                     WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
-                    GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 10
-                """, {**F, "aid": detail_id})
+                    GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 7
+                """, {"aid": detail_id, **F})
+                
                 if not df_tracks.empty:
                     render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("See Full List →", key=f"btn_full_tracks_{detail_id}", use_container_width=True):
+                        st.query_params.clear()
+                        st.query_params["tab"] = "tracks"
+                        # Set session state so it's picked up by the input key on next render
+                        st.session_state["search_tracks"] = artist_name
+                        st.rerun()
 
             with c2:
+                st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
+                df_albums = run_query("""
+                    SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
+                           MAX(so.image_url) AS image_url,
+                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                    LEFT JOIN albums al ON al.id = so.album_id
+                    WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
+                    GROUP BY al.id, al.title ORDER BY streams DESC LIMIT 7
+                """, {"aid": detail_id, **F})
+                
+                if not df_albums.empty:
+                    df_albums["subtitle"] = "Album"
+                    render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album")
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("See Full List →", key=f"btn_full_albums_{detail_id}", use_container_width=True):
+                        st.query_params.clear()
+                        st.query_params["tab"] = "albums"
+                        # Set session state so it's picked up by the input key on next render
+                        st.session_state["search_albums"] = artist_name
+                        st.rerun()
+
+            with c3:
                 st.markdown('<div class="chart-container"><div class="chart-title">📈 Timeline</div>', unsafe_allow_html=True)
                 df_t = run_query("""
                     SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
@@ -959,7 +997,7 @@ if detail_type and detail_id:
                 LEFT JOIN artists a ON a.id = sa.artist_id
                 WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
                 GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
-            """, {**F, "aid": detail_id})
+            """, {"aid": detail_id, **F})
             if not df_tracks.empty:
                 render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
             else:
@@ -1037,7 +1075,6 @@ elif current_tab == "overview":
             FROM streams s
             JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
             JOIN artists a ON a.id = sa.artist_id
-            JOIN songs so ON so.id = s.song_id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
             GROUP BY a.id, a.name, a.image_url ORDER BY streams DESC LIMIT 5;
         """, F)
@@ -1050,7 +1087,7 @@ elif current_tab == "tracks":
     st.markdown('<div class="section-header"><span class="icon">🎵</span>Track Explorer</div>', unsafe_allow_html=True)
 
     col_search, col_limit = st.columns([3, 1])
-    search_term = col_search.text_input("🔍 Search tracks...", placeholder="e.g. Starboy, Red Moon...", label_visibility="collapsed")
+    search_term = col_search.text_input("🔍 Search tracks...", placeholder="e.g. Starboy, Red Moon...", label_visibility="collapsed", key="search_tracks")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200, 500], index=0, label_visibility="collapsed")
 
     query_params = {**F, "limit": display_limit}
@@ -1071,7 +1108,7 @@ elif current_tab == "tracks":
                 GROUP BY so.id, so.title, a.name, so.image_url
             )
             SELECT * FROM ranked
-            WHERE song_title ILIKE :search
+            WHERE song_title ILIKE :search OR main_artist ILIKE :search
             ORDER BY global_rank
             LIMIT :limit;
         """, query_params)
@@ -1101,7 +1138,7 @@ elif current_tab == "artists":
     st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
 
     col_search, col_limit = st.columns([3, 1])
-    search_term = col_search.text_input("🔍 Search artists...", placeholder="e.g. Drake, Nicki Minaj...", label_visibility="collapsed")
+    search_term = col_search.text_input("🔍 Search artists...", placeholder="e.g. Drake, Nicki Minaj...", label_visibility="collapsed", key="search_artists")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
 
     query_params = {**F, "limit": display_limit}
@@ -1151,7 +1188,7 @@ elif current_tab == "albums":
     st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
 
     col_search, col_limit = st.columns([3, 1])
-    search_term = col_search.text_input("🔍 Search albums...", placeholder="e.g. Take Care, UTOPIA...", label_visibility="collapsed")
+    search_term = col_search.text_input("🔍 Search albums...", placeholder="e.g. Take Care, UTOPIA...", label_visibility="collapsed", key="search_albums")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
 
     query_params = {**F, "limit": display_limit}
