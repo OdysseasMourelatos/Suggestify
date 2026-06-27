@@ -18,118 +18,601 @@ st.set_page_config(
 )
 
 # ══════════════════════════════════════════════════════════════════
-# DESIGN TOKENS & PREMIUM UX CSS
+# DESIGN TOKENS — MODERN GLASSMORPHISM
 # ══════════════════════════════════════════════════════════════════
-BG        = "#0A0A0A"
-SURFACE   = "#141414"
-CARD      = "#1C1C1C"
-CARD_HOVER= "#282828"
-BORDER    = "#2C2C2C"
+BG        = "#050505"
+SURFACE   = "rgba(18, 18, 18, 0.85)"
+CARD      = "rgba(28, 28, 28, 0.75)"
+CARD_HOVER= "rgba(45, 45, 45, 0.85)"
+BORDER    = "rgba(255, 255, 255, 0.08)"
+BORDER_HL = "rgba(255, 255, 255, 0.15)"
 GREEN     = "#1DB954"
-GREEN_DIM = "#169C45"
-GREEN_XLO = "#083B1A"
+GREEN_DIM = "#169C46"
+GREEN_GLOW= "rgba(29, 185, 84, 0.35)"
+GREEN_XLO = "rgba(29, 185, 84, 0.08)"
 TEXT      = "#FFFFFF"
-TEXT_MID  = "#E0E0E0"
-TEXT_DIM  = "#8A8A8A"
+TEXT_MID  = "#B3B3B3"
+TEXT_DIM  = "#727272"
 
 st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
+/* ─── BASE RESET ─── */
 html, body, [class*="css"] {{
-    font-family: 'Inter', sans-serif !important;
-    background-color: {BG} !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    background: {BG} !important;
     color: {TEXT} !important;
 }}
 #MainMenu, footer, header {{ visibility: hidden; }}
 .block-container {{
-    padding: 1.5rem 2.5rem 4rem !important;
+    padding: 0.5rem 2rem 4rem !important;
     max-width: 100% !important;
 }}
 
-/* TABS (Οριζόντια premium κουμπιά) */
-div.row-widget.stRadio > div {{
-    flex-direction: row !important;
-    gap: 10px !important;
-    background: {SURFACE} !important;
-    border-radius: 14px !important;
-    padding: 8px !important;
+/* ─── PAGE TRANSITIONS ─── */
+@keyframes fadeSlideIn {{
+    from {{ opacity: 0; transform: translateY(12px); }}
+    to {{ opacity: 1; transform: translateY(0); }}
+}}
+@keyframes fadeIn {{
+    from {{ opacity: 0; }}
+    to {{ opacity: 1; }}
+}}
+@keyframes pulseGlow {{
+    0%, 100% {{ box-shadow: 0 0 20px {GREEN_GLOW}; }}
+    50% {{ box-shadow: 0 0 35px {GREEN_GLOW}, 0 0 60px rgba(29,185,84,0.15); }}
+}}
+
+.animate-in {{
+    animation: fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}}
+.stale {{ opacity: 0.3; transition: opacity 0.2s; }}
+
+/* ─── STICKY NAVBAR ─── */
+.navbar {{
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: rgba(5, 5, 5, 0.92);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid {BORDER};
+    padding: 0.75rem 0;
+    margin: 0 -2rem 1.5rem -2rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}}
+
+.navbar-content {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}}
+
+.nav-brand {{
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: {TEXT};
+}}
+.nav-brand span {{ font-size: 1.8rem; }}
+
+/* ─── NAV TABS — Pill Style ─── */
+.nav-tabs {{
+    display: flex;
+    gap: 6px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 12px;
+    padding: 5px;
+    border: 1px solid {BORDER};
+}}
+
+.nav-tab {{
+    padding: 0.6rem 1.4rem;
+    border-radius: 9px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: {TEXT_DIM};
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    border: none;
+    background: transparent;
+    white-space: nowrap;
+}}
+.nav-tab:hover {{
+    color: {TEXT_MID};
+    background: rgba(255,255,255,0.05);
+}}
+.nav-tab.active {{
+    color: {BG};
+    background: {GREEN};
+    font-weight: 700;
+    box-shadow: 0 2px 12px {GREEN_GLOW};
+}}
+
+/* ─── DATE CONTROLS ─── */
+.date-controls {{
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}}
+
+.date-preset {{
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid {BORDER};
+    background: transparent;
+    color: {TEXT_MID};
+}}
+.date-preset:hover {{
+    background: rgba(255,255,255,0.06);
+    border-color: {BORDER_HL};
+    color: {TEXT};
+}}
+.date-preset.active {{
+    background: {GREEN_XLO};
+    border-color: {GREEN};
+    color: {GREEN};
+}}
+.date-preset.wrapped {{
+    background: linear-gradient(135deg, rgba(29,185,84,0.15) 0%, rgba(29,185,84,0.05) 100%);
+    border-color: {GREEN};
+    color: {GREEN};
+}}
+.date-preset.wrapped:hover {{
+    background: linear-gradient(135deg, rgba(29,185,84,0.25) 0%, rgba(29,185,84,0.1) 100%);
+}}
+
+.date-divider {{
+    width: 1px;
+    height: 28px;
+    background: {BORDER};
+    margin: 0 0.5rem;
+}}
+
+/* ─── STREAMLIT OVERRIDES FOR INPUTS ─── */
+div[data-baseweb="select"] > div,
+div[data-testid="stDateInput"] input {{
+    background: rgba(255,255,255,0.04) !important;
     border: 1px solid {BORDER} !important;
-    margin-bottom: 2rem !important;
-    justify-content: center;
+    border-radius: 8px !important;
+    color: {TEXT} !important;
+    font-size: 0.85rem !important;
+    padding: 0.4rem 0.75rem !important;
+    transition: all 0.2s ease !important;
+}}
+div[data-baseweb="select"] > div:hover,
+div[data-testid="stDateInput"] input:hover {{
+    border-color: {BORDER_HL} !important;
+}}
+div[data-baseweb="select"] > div:focus-within,
+div[data-testid="stDateInput"] input:focus {{
+    border-color: {GREEN} !important;
+    box-shadow: 0 0 0 2px {GREEN_XLO} !important;
 }}
 
-/* Αισθητική επιλεγμένων tab-κουμπιών */
-div.row-widget.stRadio label {{
-    background: transparent !important;
-    border-radius: 10px !important;
-    padding: 0.6rem 1.8rem !important;
-    color: {TEXT_DIM} !important;
-    font-weight: 700 !important;
-    font-size: 0.95rem !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.05em !important;
-    border: none !important;
+/* Hide default streamlit radio */
+div.row-widget.stRadio {{ display: none !important; }}
+
+/* ─── KPI CARDS — Glass Effect ─── */
+.kpi-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0 2rem;
+    animation: fadeSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }}
 
-/* KPI CARDS */
-.kpi-container {{ display: flex; gap: 1.25rem; margin: 1.5rem 0 2.5rem; }}
 .kpi-card {{
-    flex: 1; background: {CARD}; border: 1px solid {BORDER}; border-radius: 16px;
-    padding: 1.5rem 1.8rem; position: relative; overflow: hidden;
+    background: {CARD};
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid {BORDER};
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }}
-.kpi-card::after {{
-    content: ''; position: absolute; top: 0; left: 0;
-    width: 4px; height: 100%; background: {GREEN};
+.kpi-card::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(90deg, {GREEN} 0%, transparent 100%);
 }}
-.kpi-title {{ font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: {TEXT_DIM}; margin-bottom: 0.5rem; }}
-.kpi-val {{ font-size: 2.8rem; font-weight: 800; color: {TEXT}; line-height: 1; letter-spacing: -0.03em; }}
-.kpi-unit {{ font-size: 0.95rem; color: {TEXT_MID}; margin-left: 5px; font-weight: 500; }}
+.kpi-card:hover {{
+    transform: translateY(-4px);
+    border-color: {BORDER_HL};
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}}
 
-/* PREMIUM LIST CARDS */
-.list-container {{ display: flex; flex-direction: column; gap: 0.8rem; margin-top: 1rem; }}
-.list-item {{ 
-    display: flex; align-items: center; justify-content: space-between; 
-    background: {CARD}; border: 1px solid {BORDER}; border-radius: 14px; 
-    padding: 1.2rem 2rem; transition: all 0.25s ease; width: 100%;
+.kpi-icon {{
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+    filter: grayscale(30%);
+}}
+.kpi-title {{
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: {TEXT_DIM};
+    margin-bottom: 0.4rem;
+}}
+.kpi-value {{
+    font-size: 2.2rem;
+    font-weight: 800;
+    color: {TEXT};
+    line-height: 1;
+    letter-spacing: -0.03em;
+}}
+.kpi-unit {{
+    font-size: 0.9rem;
+    color: {TEXT_MID};
+    margin-left: 4px;
+    font-weight: 500;
+}}
+
+/* ─── SECTION HEADERS ─── */
+.section-header {{
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: {TEXT};
+    margin: 2.5rem 0 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid {BORDER};
+    animation: fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}}
+.section-header .icon {{
+    font-size: 1.1rem;
+    opacity: 0.9;
+}}
+
+/* ─── LIST ITEMS — Modern Cards ─── */
+.list-container {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    animation: fadeSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}}
+
+.list-item {{
+    display: flex;
+    align-items: center;
+    background: {CARD};
+    backdrop-filter: blur(10px);
+    border: 1px solid {BORDER};
+    border-radius: 14px;
+    padding: 1rem 1.5rem;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    cursor: pointer;
+    text-decoration: none !important;
 }}
 .list-item:hover {{
-    background: {CARD_HOVER}; transform: translateY(-2px);
-    border-color: {TEXT_DIM}; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    background: {CARD_HOVER};
+    border-color: {BORDER_HL};
+    transform: translateX(6px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
 }}
 
-/* Πλαίσιο για τριψήφιους αριθμούς */
-.item-rank {{ font-size: 1.8rem; font-weight: 800; color: {TEXT_DIM}; width: 95px; min-width: 95px; text-align: center; }}
-.item-rank.top-3 {{ color: {GREEN}; }}
+.item-rank {{
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: {TEXT_DIM};
+    width: 50px;
+    min-width: 50px;
+    text-align: center;
+}}
+.item-rank.gold {{ color: #FFD700; }}
+.item-rank.silver {{ color: #C0C0C0; }}
+.item-rank.bronze {{ color: #CD7F32; }}
 
-.item-main {{ flex: 1; display: flex; flex-direction: column; gap: 0.25rem; margin-left: 0.5rem; }}
-.item-title {{ font-size: 1.25rem; font-weight: 700; color: {TEXT}; letter-spacing: -0.02em; }}
-.item-subtitle {{ font-size: 1rem; font-weight: 400; color: {TEXT_MID}; }}
+.item-art {{
+    width: 52px;
+    height: 52px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, {GREEN_XLO} 0%, rgba(0,0,0,0.3) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    margin-right: 1rem;
+    flex-shrink: 0;
+}}
 
-.item-stats {{ display: flex; gap: 3rem; align-items: center; text-align: right; }}
-.stat-box {{ display: flex; flex-direction: column; }}
-.stat-val {{ font-size: 1.6rem; font-weight: 700; color: {TEXT}; line-height: 1.1; }}
-.stat-lbl {{ font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: {TEXT_DIM}; letter-spacing: 0.05em; }}
+.item-info {{
+    flex: 1;
+    min-width: 0;
+}}
+.item-title {{
+    font-size: 1rem;
+    font-weight: 600;
+    color: {TEXT};
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.15rem;
+}}
+.item-subtitle {{
+    font-size: 0.85rem;
+    color: {TEXT_MID};
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}}
 
-/* HEADER & TITLES */
-.page-title {{ font-size: 2.8rem; font-weight: 800; color: {TEXT}; letter-spacing: -0.04em; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem; }}
-.section-title {{ font-size: 1.35rem; font-weight: 700; color: {TEXT}; margin: 2rem 0 1.5rem; border-bottom: 1px solid {BORDER}; padding-bottom: 0.6rem; display: flex; align-items: center; gap: 0.5rem; }}
+.item-stats {{
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+    margin-left: auto;
+    padding-left: 1rem;
+}}
+.stat {{
+    text-align: right;
+}}
+.stat-value {{
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: {TEXT};
+    line-height: 1.1;
+}}
+.stat-value.green {{ color: {GREEN}; }}
+.stat-label {{
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: {TEXT_DIM};
+}}
 
-/* INPUTS */
-div[data-baseweb="select"] > div, div[data-testid="stDateInput"] input, div[data-testid="stTextInput"] input {{ background: {CARD} !important; border-color: {BORDER} !important; color: {TEXT} !important; border-radius: 10px !important; font-size: 0.95rem !important; }}
+.item-arrow {{
+    color: {TEXT_DIM};
+    font-size: 1.2rem;
+    margin-left: 1rem;
+    transition: transform 0.2s ease;
+}}
+.list-item:hover .item-arrow {{
+    transform: translateX(4px);
+    color: {GREEN};
+}}
 
-/* DATE CONTAINER */
-.date-container {{ display: flex; gap: 2rem; background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 14px; padding: 1.2rem 2rem; margin-bottom: 2rem; align-items: center; }}
-.date-label {{ font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: {TEXT_DIM}; margin-bottom: 0.3rem; }}
+/* ─── CLICKABLE LIST ITEM WRAPPER ─── */
+/* The st.button sits visually behind the card and acts as a transparent click target */
+.list-item-wrap {{
+    position: relative;
+    margin-bottom: 0.6rem;
+}}
+.list-item-wrap .list-item {{
+    margin-bottom: 0;
+    pointer-events: none;  /* card is visual only; button underneath catches clicks */
+}}
+/* Make the Streamlit button inside the wrap absolutely cover the card */
+.list-item-wrap [data-testid="stBaseButton-secondary"] {{
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    opacity: 0 !important;
+    cursor: pointer !important;
+    z-index: 10 !important;
+    border: none !important;
+    border-radius: 14px !important;
+    background: transparent !important;
+    padding: 0 !important;
+}}
+/* Simulate hover by targeting the wrapper */
+.list-item-wrap:hover .list-item {{
+    background: {CARD_HOVER};
+    border-color: {BORDER_HL};
+    transform: translateX(6px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    pointer-events: none;
+}}
+.list-item-wrap:hover .item-arrow {{
+    transform: translateX(4px);
+    color: {GREEN};
+}}
 
-/* CUSTOM LINKS */
-a.custom-link {{ text-decoration: none !important; color: inherit !important; display: block; width: 100%; }}
+/* ─── BACK BUTTON ─── */
+.back-btn {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.2rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    color: {TEXT_MID};
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-bottom: 1.5rem;
+}}
+.back-btn:hover {{
+    background: rgba(255,255,255,0.08);
+    border-color: {BORDER_HL};
+    color: {TEXT};
+}}
+
+/* ─── DETAIL PAGE HEADER ─── */
+.detail-header {{
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 20px;
+    margin-bottom: 2rem;
+    animation: fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}}
+.detail-art {{
+    width: 120px;
+    height: 120px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, {GREEN_DIM} 0%, {GREEN_XLO} 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    flex-shrink: 0;
+}}
+.detail-info {{ flex: 1; }}
+.detail-type {{
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: {GREEN};
+    margin-bottom: 0.3rem;
+}}
+.detail-title {{
+    font-size: 2rem;
+    font-weight: 800;
+    color: {TEXT};
+    letter-spacing: -0.03em;
+    margin-bottom: 0.25rem;
+}}
+.detail-subtitle {{
+    font-size: 1rem;
+    color: {TEXT_MID};
+}}
+.detail-stats {{
+    display: flex;
+    gap: 2rem;
+}}
+.detail-stat {{
+    text-align: center;
+    padding: 1rem 1.5rem;
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+}}
+.detail-stat-value {{
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: {TEXT};
+}}
+.detail-stat-label {{
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: {TEXT_DIM};
+    letter-spacing: 0.05em;
+}}
+
+/* ─── CHARTS CONTAINER ─── */
+.chart-container {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 16px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    animation: fadeIn 0.5s ease forwards;
+}}
+.chart-title {{
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: {TEXT};
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}}
+
+/* ─── WRAPPED BANNER ─── */
+.wrapped-banner {{
+    background: linear-gradient(135deg, rgba(29,185,84,0.2) 0%, rgba(29,185,84,0.05) 50%, rgba(0,0,0,0) 100%);
+    border: 1px solid {GREEN};
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+    animation: fadeSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}}
+.wrapped-banner::before {{
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 50%;
+    height: 200%;
+    background: radial-gradient(ellipse, {GREEN_GLOW} 0%, transparent 70%);
+    animation: pulseGlow 3s infinite;
+}}
+.wrapped-title {{
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, {GREEN} 0%, #1ed760 50%, {GREEN} 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+}}
+.wrapped-subtitle {{
+    font-size: 1.1rem;
+    color: {TEXT_MID};
+}}
+
+/* ─── EMPTY STATE ─── */
+.empty-state {{
+    text-align: center;
+    padding: 4rem 2rem;
+    color: {TEXT_DIM};
+}}
+.empty-state .icon {{
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}}
+
+/* ─── SUPPRESS BUTTON CHROME INSIDE LIST WRAP ─── */
+.list-item-wrap > div[data-testid="stVerticalBlockBorderWrapper"],
+.list-item-wrap > div[data-testid="element-container"] {{
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+}}
+.list-item-wrap [data-testid="stBaseButton-secondary"] p {{
+    display: none !important;
+}}
+
+/* ─── SEARCH INPUT ─── */
+div[data-testid="stTextInput"] input {{
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 12px !important;
+    padding: 0.8rem 1rem !important;
+    font-size: 0.95rem !important;
+}}
+div[data-testid="stTextInput"] input::placeholder {{
+    color: {TEXT_DIM} !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
-# DATABASE & GLOBALS
+# DATABASE
 # ══════════════════════════════════════════════════════════════════
 CONNECTION_STRING = "postgresql://postgres:secret@localhost:5432/spotify_db"
 
@@ -153,52 +636,112 @@ def get_date_bounds() -> tuple[datetime.date, datetime.date]:
 # ══════════════════════════════════════════════════════════════════
 # UI COMPONENTS
 # ══════════════════════════════════════════════════════════════════
-def render_custom_list(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str, id_col: str = None, link_type: str = None):
-    html = '<div class="list-container">\n'
+
+def get_rank_class(rank: int) -> str:
+    if rank == 1: return "gold"
+    if rank == 2: return "silver"
+    if rank == 3: return "bronze"
+    return ""
+
+def get_item_icon(link_type: str) -> str:
+    icons = {"song": "🎵", "artist": "🎤", "album": "💿"}
+    return icons.get(link_type, "🎵")
+
+def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str, id_col: str = None, link_type: str = None):
+    """Modern list renderer with same-page navigation via session_state buttons."""
     for i, row in df.iterrows():
         rank = i + 1
-        rank_class = "top-3" if rank <= 3 else ""
-        title = escape(str(row[title_col]))
-        subtitle = escape(str(row[sub_col]))
+        rank_class = get_rank_class(rank)
+        title = escape(str(row[title_col]))[:60]
+        subtitle = escape(str(row[sub_col]))[:50]
         streams = f"{int(row[streams_col]):,}"
         hours = f"{float(row[hours_col]):.1f}"
+        icon = get_item_icon(link_type) if link_type else "🎵"
+        can_navigate = link_type and id_col and id_col in row.index
 
-        card_html = f"""<div class="list-item">
-<div class="item-rank {rank_class}">#{rank}</div>
-<div class="item-main">
-<div class="item-title">{title}</div>
-<div class="item-subtitle">{subtitle}</div>
-</div>
-<div class="item-stats">
-<div class="stat-box">
-<span class="stat-val">{streams}</span>
-<span class="stat-lbl">Streams</span>
-</div>
-<div class="stat-box" style="width: 80px;">
-<span class="stat-val" style="color:{GREEN};">{hours}h</span>
-<span class="stat-lbl">Duration</span>
-</div>
-</div>
-</div>
-"""
-        if link_type and id_col and id_col in row:
-            item_id = escape(str(row[id_col]))
-            html += f'<a class="custom-link" href="?view_{link_type}={item_id}" target="_self">{card_html}</a>\n'
+        card_html = f'''
+        <div class="item-rank {rank_class}">{rank}</div>
+        <div class="item-art">{icon}</div>
+        <div class="item-info">
+            <div class="item-title">{title}</div>
+            <div class="item-subtitle">{subtitle}</div>
+        </div>
+        <div class="item-stats">
+            <div class="stat">
+                <div class="stat-value">{streams}</div>
+                <div class="stat-label">Streams</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value green">{hours}h</div>
+                <div class="stat-label">Time</div>
+            </div>
+        </div>
+        {"<div class=\'item-arrow\'>→</div>" if can_navigate else ""}
+        '''
+
+        if can_navigate:
+            item_id = str(row[id_col])
+            btn_key = f"nav_{link_type}_{item_id}_{rank}"
+            # Render the styled card, then a full-width ghost button beneath it
+            # CSS makes the button absolutely fill its container with zero opacity
+            st.markdown(f'<div class="list-item-wrap"><div class="list-item">{card_html}</div>', unsafe_allow_html=True)
+            if st.button(f"{title}", key=btn_key, use_container_width=True):
+                st.query_params["view"] = link_type
+                st.query_params["id"] = item_id
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
         else:
-            html += card_html + "\n"
-            
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
+            st.markdown(f'<div class="list-item">{card_html}</div>', unsafe_allow_html=True)
+
+
+def render_kpi_grid(kpis: list[dict]):
+    """Render KPI cards using st.columns so HTML is never dropped by Streamlit."""
+    cols = st.columns(len(kpis))
+    for col, kpi in zip(cols, kpis):
+        unit_html = f'<span class="kpi-unit">{kpi.get("unit", "")}</span>' if kpi.get("unit") else ""
+        col.markdown(f'''
+        <div class="kpi-card">
+            <div class="kpi-icon">{kpi["icon"]}</div>
+            <div class="kpi-title">{kpi["title"]}</div>
+            <div class="kpi-value">{kpi["value"]}{unit_html}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+
+def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, stats: list[dict]):
+    """Render a detail page header with stats."""
+    stats_html = ""
+    for s in stats:
+        stats_html += f'''
+        <div class="detail-stat">
+            <div class="detail-stat-value">{s["value"]}</div>
+            <div class="detail-stat-label">{s["label"]}</div>
+        </div>
+        '''
+    
+    st.markdown(f'''
+    <div class="detail-header">
+        <div class="detail-art">{icon}</div>
+        <div class="detail-info">
+            <div class="detail-type">{type_label}</div>
+            <div class="detail-title">{escape(title)}</div>
+            <div class="detail-subtitle">{escape(subtitle)}</div>
+        </div>
+        <div class="detail-stats">{stats_html}</div>
+    </div>
+    ''', unsafe_allow_html=True)
+
 
 # ── Plotly Helpers ──
 _LAYOUT_BASE = dict(
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
     font=dict(family="Inter, sans-serif", color=TEXT_DIM, size=12),
-    xaxis=dict(gridcolor=BORDER, linecolor=BORDER),
-    yaxis=dict(gridcolor=BORDER, linecolor=BORDER),
-    margin=dict(t=40, b=40, l=20, r=20),
-    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=BORDER),
-    hoverlabel=dict(bgcolor=SURFACE, bordercolor=BORDER, font=dict(color=TEXT))
+    xaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False),
+    yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False),
+    margin=dict(t=30, b=40, l=50, r=20),
+    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)"),
+    hoverlabel=dict(bgcolor="#1C1C1C", bordercolor="rgba(255,255,255,0.1)", font=dict(color=TEXT, size=13))
 )
 
 def themed(fig: go.Figure, **extra) -> go.Figure:
@@ -210,321 +753,581 @@ def chart_trend(df: pd.DataFrame) -> go.Figure:
     df = df.copy()
     df["period"] = pd.to_datetime(df["period"])
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["period"], y=df["stream_count"], name="Streams", mode="lines+markers", line=dict(color=GREEN, width=3), marker=dict(size=6, color=GREEN), fill="tozeroy", fillcolor="rgba(30,215,96,0.08)"))
-    fig.add_trace(go.Bar(x=df["period"], y=df["hours_played"], name="Hours", marker_color="rgba(30,215,96,0.25)", yaxis="y2"))
-    return themed(fig, yaxis=dict(title="Streams"), yaxis2=dict(title="Hours Played", overlaying="y", side="right", showgrid=False), hovermode="x unified", legend=dict(orientation="h", y=1.15, x=0))
+    fig.add_trace(go.Scatter(
+        x=df["period"], y=df["stream_count"],
+        name="Streams", mode="lines+markers",
+        line=dict(color=GREEN, width=3, shape='spline'),
+        marker=dict(size=7, color=GREEN, line=dict(width=2, color=BG)),
+        fill="tozeroy", fillcolor=GREEN_XLO
+    ))
+    fig.add_trace(go.Bar(
+        x=df["period"], y=df["hours_played"],
+        name="Hours", marker_color="rgba(29,185,84,0.2)",
+        yaxis="y2"
+    ))
+    return themed(fig,
+        yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))),
+        yaxis2=dict(title=dict(text="Hours", font=dict(color=TEXT_MID)), overlaying="y", side="right", showgrid=False),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center")
+    )
 
 def chart_heatmap(df: pd.DataFrame) -> go.Figure:
     DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     pivot = df.pivot(index="dow", columns="hour", values="stream_count").reindex(index=range(1, 8), columns=range(24)).fillna(0)
-    fig = go.Figure(go.Heatmap(z=pivot.values, x=[f"{h:02d}:00" for h in range(24)], y=DOW, colorscale=[[0, BG], [0.25, GREEN_XLO], [0.65, GREEN_DIM], [1, GREEN]]))
-    return themed(fig, xaxis_title="Hour of Day", yaxis_title="", margin=dict(t=20, b=40, l=50, r=20))
+    fig = go.Figure(go.Heatmap(
+        z=pivot.values,
+        x=[f"{h:02d}" for h in range(24)],
+        y=DOW,
+        colorscale=[[0, BG], [0.15, "rgba(29,185,84,0.1)"], [0.4, GREEN_DIM], [1, GREEN]],
+        hoverongaps=False,
+        hovertemplate="<b>%{y}</b> at <b>%{x}:00</b><br>%{z} streams<extra></extra>"
+    ))
+    return themed(fig, xaxis_title="Hour", yaxis_title="", margin=dict(t=20, b=50, l=60, r=20))
 
 def chart_bar(x, y, xlabel: str) -> go.Figure:
-    fig = go.Figure(go.Bar(x=x, y=y, marker_color=[GREEN if v == max(y) else "rgba(29,185,84,0.38)" for v in y]))
-    return themed(fig, xaxis_title=xlabel, yaxis_title="Streams", bargap=0.18)
+    max_val = max(y) if y else 0
+    colors = [GREEN if v == max_val else "rgba(29,185,84,0.35)" for v in y]
+    fig = go.Figure(go.Bar(
+        x=x, y=y,
+        marker_color=colors,
+        marker_line=dict(width=0),
+        hovertemplate="<b>%{x}</b><br>%{y:,} streams<extra></extra>"
+    ))
+    return themed(fig, xaxis_title=xlabel, yaxis_title="Streams", bargap=0.25)
 
 
 # ══════════════════════════════════════════════════════════════════
-# MAIN RENDER INTERFACE
+# NAVIGATION HANDLING
 # ══════════════════════════════════════════════════════════════════
-st.markdown('<div class="page-title"><span>🎧</span> Spotify Intelligence</div>', unsafe_allow_html=True)
 
-# 1. State Variables Setup
-if "wrapped_view" not in st.session_state:
-    st.session_state.wrapped_view = False
+def get_current_view() -> dict:
+    """Parse query params for view state."""
+    params = st.query_params
+    return {
+        "type": params.get("view", None),
+        "id": params.get("id", None),
+        "tab": params.get("tab", "overview")
+    }
 
+def navigate_to(tab: str = None, view_type: str = None, view_id: str = None):
+    """Update URL without full page reload."""
+    new_params = {}
+    if tab:
+        new_params["tab"] = tab
+    if view_type and view_id:
+        new_params["view"] = view_type
+        new_params["id"] = view_id
+    st.query_params.update(new_params)
+
+def go_back():
+    """Clear detail view."""
+    current = get_current_view()
+    st.query_params.clear()
+    if current.get("type") == "song":
+        st.query_params["tab"] = "tracks"
+    elif current.get("type") == "artist":
+        st.query_params["tab"] = "artists"
+    elif current.get("type") == "album":
+        st.query_params["tab"] = "albums"
+
+
+# ══════════════════════════════════════════════════════════════════
+# MAIN APP
+# ══════════════════════════════════════════════════════════════════
+
+# Initialize state
 min_date, max_date = get_date_bounds()
-
 if "start_date" not in st.session_state:
     st.session_state.start_date = min_date
 if "end_date" not in st.session_state:
     st.session_state.end_date = max_date
+if "date_preset" not in st.session_state:
+    st.session_state.date_preset = "all"
 
-# 2. Wrapped View Logic
-if st.session_state.wrapped_view:
-    st.markdown('<div class="page-title" style="color:#1DB954;">🎁 Your Early Spotify Wrapped</div>', unsafe_allow_html=True)
+view_state = get_current_view()
+current_tab = view_state["tab"]
+detail_type = view_state["type"]
+detail_id = view_state["id"]
+
+# ─── NAVBAR ───
+st.markdown('<div class="navbar"><div class="navbar-content">', unsafe_allow_html=True)
+
+# Brand
+st.markdown('<div class="nav-brand"><span>🎧</span>Suggestify</div>', unsafe_allow_html=True)
+
+# Navigation tabs via columns
+nav_col, date_col = st.columns([3, 2])
+
+with nav_col:
+    tabs = [
+        ("overview", "📊 Overview"),
+        ("tracks", "🎵 Tracks"),
+        ("artists", "🎤 Artists"),
+        ("albums", "💿 Albums"),
+        ("habits", "🕐 Habits"),
+    ]
     
-    if st.button("🔙 Back to Main Dashboard"):
-        st.session_state.wrapped_view = False
-        st.rerun()
-
-    # Params for queries in Wrapped mode
-    F = {"start_date": st.session_state.start_date, "end_date": st.session_state.end_date}
-    opts = {5: "Top 5", 50: "Top 50", 100: "Top 100", 150: "Top 150", 999999: "Full List"}
-
-    # --- Wrapped: Top Songs ---
-    st.markdown('<div class="section-title">🎵 Top Songs</div>', unsafe_allow_html=True)
-    col1, col2 = st.columns([3, 1])
-    w_lim_s = col2.selectbox("Show limit", options=list(opts.keys()), format_func=lambda x: opts[x], index=0, key="w_lim_s", label_visibility="collapsed")
-    df_ws = run_query(f"""
-        SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
-        FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE LEFT JOIN artists a ON a.id = sa.artist_id 
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date 
-        GROUP BY so.id, so.title, a.name ORDER BY streams DESC LIMIT :limit;
-    """, {**F, "limit": w_lim_s})
-    if not df_ws.empty:
-        render_custom_list(df_ws, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
-    else:
-        st.info("No track data found for this year.")
-
-    # --- Wrapped: Top Artists ---
-    st.markdown('<div class="section-title">🎤 Top Artists</div>', unsafe_allow_html=True)
-    col3, col4 = st.columns([3, 1])
-    w_lim_a = col4.selectbox("Show limit", options=list(opts.keys()), format_func=lambda x: opts[x], index=0, key="w_lim_a", label_visibility="collapsed")
-    df_wa = run_query(f"""
-        SELECT a.id AS artist_id, a.name AS artist_name, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
-        FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE JOIN artists a ON a.id = sa.artist_id 
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date 
-        GROUP BY a.id, a.name ORDER BY streams DESC LIMIT :limit;
-    """, {**F, "limit": w_lim_a})
-    if not df_wa.empty:
-        df_wa["subtitle"] = "Artist"
-        render_custom_list(df_wa, "artist_name", "subtitle", "streams", "hours_played", "artist_id", "artist")
-    else:
-        st.info("No artist data found for this year.")
-
-    # --- Wrapped: Top Albums ---
-    st.markdown('<div class="section-title">💿 Top Albums</div>', unsafe_allow_html=True)
-    col5, col6 = st.columns([3, 1])
-    w_lim_al = col6.selectbox("Show limit", options=list(opts.keys()), format_func=lambda x: opts[x], index=0, key="w_lim_al", label_visibility="collapsed")
-    df_wal = run_query(f"""
-        SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
-        FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN albums al ON al.id = so.album_id 
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date 
-        GROUP BY al.id, al.title ORDER BY streams DESC LIMIT :limit;
-    """, {**F, "limit": w_lim_al})
-    if not df_wal.empty:
-        df_wal["subtitle"] = "Album"
-        render_custom_list(df_wal, "album_title", "subtitle", "streams", "hours_played", "album_id", "album")
-    else:
-        st.info("No album data found for this year.")
-
-# 3. Main Dashboard Logic
-else:
-    # 3a. Global Controls
-    with st.container():
-        st.markdown('<div class="date-container">', unsafe_allow_html=True)
-        
-        c_btn1, c_btn2, col_d1, col_d2 = st.columns([1, 1, 1.5, 1.5])
-        
-        with c_btn1:
-            if st.button("🎁 Early Wrapped", use_container_width=True):
-                # Wrapped Logic: From Jan 1st of the max_date's year, up to max_date
-                st.session_state.start_date = datetime.date(max_date.year, 1, 1)
-                st.session_state.end_date = max_date
-                st.session_state.wrapped_view = True
+    cols = st.columns(len(tabs))
+    for i, (tab_id, tab_label) in enumerate(tabs):
+        with cols[i]:
+            is_active = (current_tab == tab_id) and not detail_type
+            if st.button(
+                tab_label,
+                key=f"nav_{tab_id}",
+                type="primary" if is_active else "secondary",
+                use_container_width=True
+            ):
+                st.query_params.clear()
+                st.query_params["tab"] = tab_id
                 st.rerun()
-                
-        with c_btn2:
-            if st.button("♾️ All Time", use_container_width=True):
+
+with date_col:
+    preset_col, d1_col, d2_col = st.columns([1.4, 1, 1])
+    
+    with preset_col:
+        preset_options = {
+            "all": "♾️ All Time",
+            "wrapped": "🎁 Wrapped",
+            "month": "📅 Month",
+            "week": "📅 Week"
+        }
+        selected_preset = st.selectbox(
+            "Period",
+            options=list(preset_options.keys()),
+            format_func=lambda x: preset_options[x],
+            index=list(preset_options.keys()).index(st.session_state.date_preset),
+            label_visibility="collapsed",
+            key="preset_select"
+        )
+        
+        if selected_preset != st.session_state.date_preset:
+            st.session_state.date_preset = selected_preset
+            if selected_preset == "all":
                 st.session_state.start_date = min_date
                 st.session_state.end_date = max_date
-                st.session_state.wrapped_view = False
-                st.rerun()
-
-        with col_d1:
-            st.markdown('<div class="date-label">📅 From Date</div>', unsafe_allow_html=True)
-            start_date_input = st.date_input("From Date", value=st.session_state.start_date, min_value=min_date, max_value=max_date, label_visibility="collapsed")
-        with col_d2:
-            st.markdown('<div class="date-label">📅 To Date</div>', unsafe_allow_html=True)
-            end_date_input = st.date_input("To Date", value=st.session_state.end_date, min_value=min_date, max_value=max_date, label_visibility="collapsed")
-        
-        if start_date_input > end_date_input:
-            st.error("Start date must be before end date.")
-            st.stop()
-            
-        if start_date_input != st.session_state.start_date or end_date_input != st.session_state.end_date:
-            st.session_state.start_date = start_date_input
-            st.session_state.end_date = end_date_input
-            st.session_state.wrapped_view = False # Exit wrapped view if user modifies dates manually
+            elif selected_preset == "wrapped":
+                st.session_state.start_date = datetime.date(max_date.year, 1, 1)
+                st.session_state.end_date = max_date
+            elif selected_preset == "month":
+                st.session_state.start_date = max_date - datetime.timedelta(days=30)
+                st.session_state.end_date = max_date
+            elif selected_preset == "week":
+                st.session_state.start_date = max_date - datetime.timedelta(days=7)
+                st.session_state.end_date = max_date
             st.rerun()
-            
-        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with d1_col:
+        new_start = st.date_input(
+            "From",
+            value=st.session_state.start_date,
+            min_value=min_date,
+            max_value=max_date,
+            label_visibility="collapsed",
+            key="start_input"
+        )
+    
+    with d2_col:
+        new_end = st.date_input(
+            "To",
+            value=st.session_state.end_date,
+            min_value=min_date,
+            max_value=max_date,
+            label_visibility="collapsed",
+            key="end_input"
+        )
+    
+    if new_start != st.session_state.start_date or new_end != st.session_state.end_date:
+        if new_start <= new_end:
+            st.session_state.start_date = new_start
+            st.session_state.end_date = new_end
+            st.session_state.date_preset = "custom"
+            st.rerun()
 
-    F = {"start_date": st.session_state.start_date, "end_date": st.session_state.end_date}
+st.markdown('</div></div>', unsafe_allow_html=True)
 
-    # 3b. Section Tabs
-    selected_tab = st.radio(
-        "Select Section",
-        options=["📊  Overview", "🎵  Tracks & Search", "🎤  Artists", "💿  Albums", "🕐  Habits"],
-        label_visibility="collapsed",
-        horizontal=True
-    )
+# Date filter params
+F = {"start_date": st.session_state.start_date, "end_date": st.session_state.end_date}
 
-    if selected_tab == "📊  Overview":
-        df_kpi = run_query("""
-            SELECT ROUND(SUM(s.ms_played) / 3600000.0, 1) AS total_hours, COUNT(DISTINCT sa.artist_id) AS unique_artists, COUNT(DISTINCT s.song_id) AS unique_songs, COUNT(s.id) AS total_streams
-            FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
-            WHERE s.played_at::date BETWEEN :start_date AND :end_date;
-        """, F)
+
+# ══════════════════════════════════════════════════════════════════
+# DETAIL VIEWS
+# ══════════════════════════════════════════════════════════════════
+
+if detail_type and detail_id:
+    
+    # Back button
+    if st.button("← Back", key="back_btn"):
+        go_back()
+        st.rerun()
+    
+    if detail_type == "song":
+        song_info = run_query("""
+            SELECT so.title, COALESCE(a.name, 'Unknown') as artist, 
+                   COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+                   MIN(s.played_at) as first_play
+            FROM songs so
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            LEFT JOIN artists a ON a.id = sa.artist_id
+            LEFT JOIN streams s ON s.song_id = so.id AND s.played_at::date BETWEEN :start_date AND :end_date
+            WHERE so.id = :id
+            GROUP BY so.id, so.title, a.name
+        """, {"id": detail_id, **F})
         
-        if not df_kpi.empty:
-            t_hours = float(df_kpi["total_hours"].iloc[0] or 0)
-            t_streams = int(df_kpi["total_streams"].iloc[0] or 0)
-            u_arts = int(df_kpi["unique_artists"].iloc[0] or 0)
-            u_songs = int(df_kpi["unique_songs"].iloc[0] or 0)
-
-            st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
-            st.markdown(f'''<div class="kpi-card"><div class="kpi-title">Listening Time</div><div class="kpi-val">{t_hours:,.1f}<span class="kpi-unit">hrs</span></div></div>''', unsafe_allow_html=True)
-            st.markdown(f'''<div class="kpi-card"><div class="kpi-title">Total Streams</div><div class="kpi-val">{t_streams:,}</div></div>''', unsafe_allow_html=True)
-            st.markdown(f'''<div class="kpi-card"><div class="kpi-title">Unique Artists</div><div class="kpi-val">{u_arts:,}</div></div>''', unsafe_allow_html=True)
-            st.markdown(f'''<div class="kpi-card"><div class="kpi-title">Unique Songs</div><div class="kpi-val">{u_songs:,}</div></div>''', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="section-title">📈 Streaming Trend Over Time</div>', unsafe_allow_html=True)
-        df_t = run_query("SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date GROUP BY 1 ORDER BY 1;", F)
-        if not df_t.empty:
-            st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
-
-    elif selected_tab == "🎵  Tracks & Search":
-        view_song = st.query_params.get("view_song")
-        
-        if view_song:
-            if st.button("🔙 Back to Tracks List"):
-                st.query_params.clear()
-                st.rerun()
-                
-            song_info = run_query("SELECT title, (SELECT name FROM artists a JOIN song_artists sa ON sa.artist_id = a.id WHERE sa.song_id = songs.id LIMIT 1) as artist FROM songs WHERE id = :id", {"id": view_song})
-            if not song_info.empty:
-                st.markdown(f'<div class="section-title">Focus: {escape(song_info["title"].iloc[0])} <span style="font-size:1rem;color:#888;margin-left:10px;">by {escape(str(song_info["artist"].iloc[0]))}</span></div>', unsafe_allow_html=True)
+        if not song_info.empty:
+            row = song_info.iloc[0]
+            render_detail_header(
+                type_label="Track",
+                title=str(row["title"]),
+                subtitle=f"by {row['artist']}",
+                icon="🎵",
+                stats=[
+                    {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
+                    {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                ]
+            )
             
-            fp = run_query("SELECT MIN(played_at) as fp, COUNT(*) as total_plays FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date", {"id": view_song, **F})
-            if not fp.empty and pd.notnull(fp['fp'].iloc[0]):
-                first_play_str = fp['fp'].iloc[0].strftime("%B %Y")
-                st.info(f"✨ **First Time Played in period:** {first_play_str} | **Total Streams in period:** {fp['total_plays'].iloc[0]:,}")
+            if pd.notnull(row['first_play']):
+                st.info(f"✨ **First played:** {row['first_play'].strftime('%B %d, %Y')}")
             
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown("**Timeline (Plays over time)**")
-                df_t = run_query("SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date GROUP BY 1 ORDER BY 1", {"id": view_song, **F})
-                if not df_t.empty: st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
-                else: st.write("No trend data.")
+                st.markdown('<div class="chart-container"><div class="chart-title">📈 Listening Timeline</div>', unsafe_allow_html=True)
+                df_t = run_query("""
+                    SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, 
+                           ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played 
+                    FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date 
+                    GROUP BY 1 ORDER BY 1
+                """, {"id": detail_id, **F})
+                if not df_t.empty:
+                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
+                st.markdown('</div>', unsafe_allow_html=True)
+            
             with c2:
-                st.markdown("**Peak Hours**")
-                df_h = run_query("SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date GROUP BY 1 ORDER BY 1", {"id": view_song, **F})
-                if not df_h.empty: st.plotly_chart(chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"), use_container_width=True, config={"displayModeBar": False})
-                else: st.write("No hours data.")
-
-        else:
-            st.markdown('<div class="section-title">🎵 Track Explorer</div>', unsafe_allow_html=True)
-            col_search, col_limit = st.columns([3, 1])
-            search_term = col_search.text_input("🔍 Search for a song or artist...", placeholder="e.g. Drake, Datura, Starboy...", key="so_search")
-            display_limit = col_limit.selectbox("Results to load", options=[50, 100, 150, 250, 500], index=0, key="so_lim")
-            
-            query_params = {**F, "limit": display_limit}
-            search_clause = ""
-            if search_term:
-                search_clause = "AND (so.title ILIKE :search OR a.name ILIKE :search)"
-                query_params["search"] = f"%{search_term}%"
-
-            SQL_SONGS = f"""
-            SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
-            FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE LEFT JOIN artists a ON a.id = sa.artist_id 
-            WHERE s.played_at::date BETWEEN :start_date AND :end_date {search_clause}
-            GROUP BY so.id, so.title, a.name ORDER BY streams DESC LIMIT :limit;
-            """
-            
-            df_s = run_query(SQL_SONGS, query_params)
-            if not df_s.empty:
-                render_custom_list(df_s, title_col="song_title", sub_col="main_artist", streams_col="streams", hours_col="hours_played", id_col="song_id", link_type="song")
-            else:
-                st.info("No records found in this period.")
-
-
-    elif selected_tab == "🎤  Artists":
-        view_artist = st.query_params.get("view_artist")
+                st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
+                df_h = run_query("""
+                    SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count 
+                    FROM streams WHERE song_id = :id AND played_at::date BETWEEN :start_date AND :end_date 
+                    GROUP BY 1 ORDER BY 1
+                """, {"id": detail_id, **F})
+                if not df_h.empty:
+                    st.plotly_chart(
+                        chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
+                        use_container_width=True, config={"displayModeBar": False}
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
+    
+    elif detail_type == "artist":
+        art_info = run_query("""
+            SELECT a.name, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+                   COUNT(DISTINCT s.song_id) as unique_tracks
+            FROM artists a
+            LEFT JOIN song_artists sa ON sa.artist_id = a.id
+            LEFT JOIN streams s ON s.song_id = sa.song_id AND s.played_at::date BETWEEN :start_date AND :end_date
+            WHERE a.id = :id
+            GROUP BY a.id, a.name
+        """, {"id": detail_id, **F})
         
-        if view_artist:
-            if st.button("🔙 Back to Artists List"):
-                st.query_params.clear()
-                st.rerun()
-                
-            art_info = run_query("SELECT name FROM artists WHERE id = :id", {"id": view_artist})
-            if not art_info.empty:
-                st.markdown(f'<div class="section-title">Focus: {escape(art_info["name"].iloc[0])}</div>', unsafe_allow_html=True)
-                
-            c_left, c_right = st.columns(2)
-            with c_left:
-                st.markdown("**Top Tracks for Artist**")
-                df_tracks = run_query("SELECT so.id AS song_id, so.title as song_title, 'Track' as sub, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 3) as hours_played FROM streams s JOIN songs so ON so.id=s.song_id JOIN song_artists sa ON sa.song_id=s.song_id WHERE sa.artist_id=:aid AND s.played_at::date BETWEEN :start_date AND :end_date GROUP BY so.id, so.title ORDER BY streams DESC LIMIT 10", {**F, "aid": view_artist})
-                if not df_tracks.empty: render_custom_list(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
-                
-            with c_right:
-                st.markdown("**Timeline (Plays over time)**")
-                df_t = run_query("SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date GROUP BY 1 ORDER BY 1", {"aid": view_artist, **F})
-                if not df_t.empty: st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
-                
-                st.markdown("**Peak Hours**")
-                df_h = run_query("SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date GROUP BY 1 ORDER BY 1", {"aid": view_artist, **F})
-                if not df_h.empty: st.plotly_chart(chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"), use_container_width=True, config={"displayModeBar": False})
-
-        else:
-            st.markdown('<div class="section-title">🎤 Top Artists</div>', unsafe_allow_html=True)
-            col_lim = st.columns([3, 1])[1]
-            display_limit = col_lim.selectbox("Results to load", options=[50, 100, 150, 250], index=0, key="art_lim")
+        if not art_info.empty:
+            row = art_info.iloc[0]
+            render_detail_header(
+                type_label="Artist",
+                title=str(row["name"]),
+                subtitle=f"{int(row['unique_tracks'] or 0)} tracks played",
+                icon="🎤",
+                stats=[
+                    {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
+                    {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                ]
+            )
             
-            df_a = run_query(f"SELECT a.id AS artist_id, a.name AS artist_name, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE JOIN artists a ON a.id = sa.artist_id WHERE s.played_at::date BETWEEN :start_date AND :end_date GROUP BY a.id, a.name ORDER BY hours_played DESC LIMIT {display_limit};", F)
+            c1, c2 = st.columns([1.2, 1])
             
-            if not df_a.empty:
-                df_a["subtitle"] = "Artist Profile"
-                render_custom_list(df_a, title_col="artist_name", sub_col="subtitle", streams_col="streams", hours_col="hours_played", id_col="artist_id", link_type="artist")
-            else:
-                st.info("No records found in this period.")
-
-
-    elif selected_tab == "💿  Albums":
-        view_album = st.query_params.get("view_album")
+            with c1:
+                st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+                df_tracks = run_query("""
+                    SELECT so.id AS song_id, so.title as song_title, 'Track' as sub, 
+                           COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 3) as hours_played 
+                    FROM streams s 
+                    JOIN songs so ON so.id = s.song_id 
+                    JOIN song_artists sa ON sa.song_id = s.song_id 
+                    WHERE sa.artist_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date 
+                    GROUP BY so.id, so.title ORDER BY streams DESC LIMIT 10
+                """, {**F, "aid": detail_id})
+                if not df_tracks.empty:
+                    render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
+            
+            with c2:
+                st.markdown('<div class="chart-container"><div class="chart-title">📈 Timeline</div>', unsafe_allow_html=True)
+                df_t = run_query("""
+                    SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, 
+                           ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played 
+                    FROM streams s 
+                    JOIN song_artists sa ON sa.song_id = s.song_id 
+                    WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date 
+                    GROUP BY 1 ORDER BY 1
+                """, {"aid": detail_id, **F})
+                if not df_t.empty:
+                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
+                df_h = run_query("""
+                    SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count 
+                    FROM streams s 
+                    JOIN song_artists sa ON sa.song_id = s.song_id 
+                    WHERE sa.artist_id = :aid AND played_at::date BETWEEN :start_date AND :end_date 
+                    GROUP BY 1 ORDER BY 1
+                """, {"aid": detail_id, **F})
+                if not df_h.empty:
+                    st.plotly_chart(
+                        chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
+                        use_container_width=True, config={"displayModeBar": False}
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
+    
+    elif detail_type == "album":
+        alb_info = run_query("""
+            SELECT al.title, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+                   COUNT(DISTINCT s.song_id) as track_count
+            FROM albums al
+            LEFT JOIN songs so ON so.album_id = al.id
+            LEFT JOIN streams s ON s.song_id = so.id AND s.played_at::date BETWEEN :start_date AND :end_date
+            WHERE al.id = :id
+            GROUP BY al.id, al.title
+        """, {"id": detail_id, **F})
         
-        if view_album:
-            if st.button("🔙 Back to Albums List"):
-                st.query_params.clear()
-                st.rerun()
-                
-            alb_info = run_query("SELECT title FROM albums WHERE id = :id", {"id": view_album})
-            if not alb_info.empty:
-                st.markdown(f'<div class="section-title">Album Focus: {escape(alb_info["title"].iloc[0])}</div>', unsafe_allow_html=True)
-                
-            st.markdown("**Tracks in this Album (Sorted by Streams)**")
+        if not alb_info.empty:
+            row = alb_info.iloc[0]
+            render_detail_header(
+                type_label="Album",
+                title=str(row["title"]) if row["title"] else "Unknown Album",
+                subtitle=f"{int(row['track_count'] or 0)} tracks played",
+                icon="💿",
+                stats=[
+                    {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
+                    {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                ]
+            )
+            
+            st.markdown('<div class="section-header"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
             df_tracks = run_query("""
-                SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
-                FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE LEFT JOIN artists a ON a.id = sa.artist_id 
+                SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, 
+                       COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
+                FROM streams s 
+                JOIN songs so ON so.id = s.song_id 
+                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
+                LEFT JOIN artists a ON a.id = sa.artist_id 
                 WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
                 GROUP BY so.id, so.title, a.name ORDER BY streams DESC
-            """, {**F, "aid": view_album})
+            """, {**F, "aid": detail_id})
             
             if not df_tracks.empty:
-                render_custom_list(df_tracks, title_col="song_title", sub_col="main_artist", streams_col="streams", hours_col="hours_played", id_col="song_id", link_type="song")
+                render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
             else:
-                st.info("No track streams found for this album in this period.")
+                st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
 
-        else:
-            st.markdown('<div class="section-title">💿 Top Albums</div>', unsafe_allow_html=True)
-            col_lim = st.columns([3, 1])[1]
-            display_limit = col_lim.selectbox("Results to load", options=[50, 100, 150, 250], index=0, key="alb_lim")
-            
-            df_al = run_query(f"SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN albums al ON al.id = so.album_id WHERE s.played_at::date BETWEEN :start_date AND :end_date GROUP BY al.id, al.title ORDER BY hours_played DESC LIMIT {display_limit};", F)
-            
-            if not df_al.empty:
-                df_al["subtitle"] = "Album Record"
-                render_custom_list(df_al, title_col="album_title", sub_col="subtitle", streams_col="streams", hours_col="hours_played", id_col="album_id", link_type="album")
-            else:
-                st.info("No records found in this period.")
+# ══════════════════════════════════════════════════════════════════
+# TAB VIEWS
+# ══════════════════════════════════════════════════════════════════
 
-    elif selected_tab == "🕐  Habits":
-        st.markdown('<div class="section-title">Activity Heatmap (Day × Hour)</div>', unsafe_allow_html=True)
-        df_heatmap = run_query("SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, EXTRACT(HOUR FROM played_at)::INT AS hour, COUNT(*) AS stream_count FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date GROUP BY 1, 2;", F)
-        if not df_heatmap.empty:
-            st.plotly_chart(chart_heatmap(df_heatmap), use_container_width=True, config={"displayModeBar": False})
-        
-        h_col, d_col = st.columns(2, gap="large")
-        with h_col:
-            st.markdown('<div class="section-title">Peak Hours</div>', unsafe_allow_html=True)
-            df_hr = run_query("SELECT EXTRACT(HOUR FROM played_at)::INT AS hour, COUNT(*) AS stream_count FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date GROUP BY 1 ORDER BY 1;", F)
-            if not df_hr.empty:
-                st.plotly_chart(chart_bar(df_hr["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hr["stream_count"].tolist(), "Hour of Day"), use_container_width=True, config={"displayModeBar": False})
-        with d_col:
-            st.markdown('<div class="section-title">Most Active Days</div>', unsafe_allow_html=True)
-            df_dw = run_query("SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, COUNT(*) AS stream_count FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date GROUP BY 1 ORDER BY 1;", F)
-            if not df_dw.empty:
-                st.plotly_chart(chart_bar(df_dw["dow"].map({1:"Mon", 2:"Tue", 3:"Wed", 4:"Thu", 5:"Fri", 6:"Sat", 7:"Sun"}).tolist(), df_dw["stream_count"].tolist(), "Day of Week"), use_container_width=True, config={"displayModeBar": False})
+elif current_tab == "overview":
+    
+    # Wrapped banner if in wrapped mode
+    if st.session_state.date_preset == "wrapped":
+        st.markdown(f'''
+        <div class="wrapped-banner">
+            <div class="wrapped-title">🎁 Your {max_date.year} Wrapped</div>
+            <div class="wrapped-subtitle">Your year in music so far • {st.session_state.start_date.strftime("%b %d")} — {st.session_state.end_date.strftime("%b %d, %Y")}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # KPIs
+    df_kpi = run_query("""
+        SELECT 
+            ROUND(SUM(s.ms_played) / 3600000.0, 1) AS total_hours,
+            COUNT(DISTINCT sa.artist_id) AS unique_artists,
+            COUNT(DISTINCT s.song_id) AS unique_songs,
+            COUNT(s.id) AS total_streams
+        FROM streams s 
+        JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date;
+    """, F)
+    
+    if not df_kpi.empty:
+        row = df_kpi.iloc[0]
+        render_kpi_grid([
+            {"icon": "⏱️", "title": "Listening Time", "value": f"{float(row['total_hours'] or 0):,.1f}", "unit": "hrs"},
+            {"icon": "🎵", "title": "Total Streams", "value": f"{int(row['total_streams'] or 0):,}"},
+            {"icon": "🎤", "title": "Unique Artists", "value": f"{int(row['unique_artists'] or 0):,}"},
+            {"icon": "🎶", "title": "Unique Songs", "value": f"{int(row['unique_songs'] or 0):,}"},
+        ])
+    
+    # Trend chart
+    st.markdown('<div class="section-header"><span class="icon">📈</span>Listening Trend</div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    df_trend = run_query("""
+        SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count, 
+               ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played 
+        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+        GROUP BY 1 ORDER BY 1;
+    """, F)
+    if not df_trend.empty:
+        st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False})
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Top items preview
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+        df_top_tracks = run_query("""
+            SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, 
+                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
+            FROM streams s 
+            JOIN songs so ON so.id = s.song_id 
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
+            LEFT JOIN artists a ON a.id = sa.artist_id 
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date 
+            GROUP BY so.id, so.title, a.name ORDER BY streams DESC LIMIT 5;
+        """, F)
+        if not df_top_tracks.empty:
+            render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+    
+    with c2:
+        st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
+        df_top_artists = run_query("""
+            SELECT a.id AS artist_id, a.name AS artist_name, COUNT(s.id) AS streams, 
+                   ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
+            FROM streams s 
+            JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE 
+            JOIN artists a ON a.id = sa.artist_id 
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date 
+            GROUP BY a.id, a.name ORDER BY streams DESC LIMIT 5;
+        """, F)
+        if not df_top_artists.empty:
+            df_top_artists["subtitle"] = "Artist"
+            render_list_v2(df_top_artists, "artist_name", "subtitle", "streams", "hours_played", "artist_id", "artist")
+
+
+elif current_tab == "tracks":
+    st.markdown('<div class="section-header"><span class="icon">🎵</span>Track Explorer</div>', unsafe_allow_html=True)
+    
+    col_search, col_limit = st.columns([3, 1])
+    search_term = col_search.text_input("🔍 Search tracks or artists...", placeholder="e.g. Drake, Starboy...", label_visibility="collapsed")
+    display_limit = col_limit.selectbox("Limit", [50, 100, 200, 500], index=0, label_visibility="collapsed")
+    
+    query_params = {**F, "limit": display_limit}
+    search_clause = ""
+    if search_term:
+        search_clause = "AND (so.title ILIKE :search OR a.name ILIKE :search)"
+        query_params["search"] = f"%{search_term}%"
+    
+    df_songs = run_query(f"""
+        SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, 
+               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played 
+        FROM streams s 
+        JOIN songs so ON so.id = s.song_id 
+        LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE 
+        LEFT JOIN artists a ON a.id = sa.artist_id 
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date {search_clause}
+        GROUP BY so.id, so.title, a.name ORDER BY streams DESC LIMIT :limit;
+    """, query_params)
+    
+    if not df_songs.empty:
+        render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+    else:
+        st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
+
+
+elif current_tab == "artists":
+    st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
+    
+    col_limit = st.columns([3, 1])[1]
+    display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
+    
+    df_artists = run_query(f"""
+        SELECT a.id AS artist_id, a.name AS artist_name, COUNT(s.id) AS streams, 
+               ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
+        FROM streams s 
+        JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE 
+        JOIN artists a ON a.id = sa.artist_id 
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date 
+        GROUP BY a.id, a.name ORDER BY hours_played DESC LIMIT {display_limit};
+    """, F)
+    
+    if not df_artists.empty:
+        df_artists["subtitle"] = "Artist"
+        render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played", "artist_id", "artist")
+    else:
+        st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
+
+
+elif current_tab == "albums":
+    st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
+    
+    col_limit = st.columns([3, 1])[1]
+    display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
+    
+    df_albums = run_query(f"""
+        SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title, 
+               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played 
+        FROM streams s 
+        JOIN songs so ON so.id = s.song_id 
+        LEFT JOIN albums al ON al.id = so.album_id 
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date 
+        GROUP BY al.id, al.title ORDER BY hours_played DESC LIMIT {display_limit};
+    """, F)
+    
+    if not df_albums.empty:
+        df_albums["subtitle"] = "Album"
+        render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album")
+    else:
+        st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
+
+
+elif current_tab == "habits":
+    st.markdown('<div class="section-header"><span class="icon">🕐</span>Listening Habits</div>', unsafe_allow_html=True)
+    
+    # Heatmap
+    st.markdown('<div class="chart-container"><div class="chart-title">📊 Activity Heatmap (Day × Hour)</div>', unsafe_allow_html=True)
+    df_heatmap = run_query("""
+        SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, EXTRACT(HOUR FROM played_at)::INT AS hour, 
+               COUNT(*) AS stream_count 
+        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+        GROUP BY 1, 2;
+    """, F)
+    if not df_heatmap.empty:
+        st.plotly_chart(chart_heatmap(df_heatmap), use_container_width=True, config={"displayModeBar": False})
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        st.markdown('<div class="chart-container"><div class="chart-title">⏰ Peak Hours</div>', unsafe_allow_html=True)
+        df_hours = run_query("""
+            SELECT EXTRACT(HOUR FROM played_at)::INT AS hour, COUNT(*) AS stream_count 
+            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+            GROUP BY 1 ORDER BY 1;
+        """, F)
+        if not df_hours.empty:
+            st.plotly_chart(
+                chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
+                use_container_width=True, config={"displayModeBar": False}
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with c2:
+        st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
+        df_days = run_query("""
+            SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, COUNT(*) AS stream_count 
+            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date 
+            GROUP BY 1 ORDER BY 1;
+        """, F)
+        if not df_days.empty:
+            dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+            st.plotly_chart(
+                chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
+                use_container_width=True, config={"displayModeBar": False}
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
