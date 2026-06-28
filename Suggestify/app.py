@@ -640,6 +640,29 @@ def chart_trend(df: pd.DataFrame) -> go.Figure:
         legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center")
     )
 
+def chart_multi_trend(df: pd.DataFrame) -> go.Figure:
+    df = df.copy()
+    df["period"] = pd.to_datetime(df["period"])
+    fig = go.Figure()
+    
+    colors = [GREEN, "#1ed760", "#A8E4A0", TEXT_MID, TEXT_DIM]
+    
+    for idx, track in enumerate(df["track_title"].unique()):
+        track_df = df[df["track_title"] == track]
+        fig.add_trace(go.Scatter(
+            x=track_df["period"], 
+            y=track_df["stream_count"],
+            name=track, 
+            mode="lines",
+            line=dict(width=2.5, shape='spline', color=colors[idx % len(colors)]),
+        ))
+        
+    return themed(fig, 
+        yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center")
+    )
+    
 def chart_heatmap(df: pd.DataFrame) -> go.Figure:
     DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     pivot = df.pivot(index="dow", columns="hour", values="stream_count").reindex(index=range(1, 8), columns=range(24)).fillna(0)
@@ -986,24 +1009,88 @@ if detail_type and detail_id:
                 ],
                 image_url=row.get("image_url")
             )
-            st.markdown('<div class="section-header"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
-            df_tracks = run_query("""
-                SELECT so.id AS song_id, so.title AS song_title,
-                       COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
-                       COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
-                FROM streams s
-                JOIN songs so ON so.id = s.song_id
-                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                LEFT JOIN artists a ON a.id = sa.artist_id
-                WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
-                GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
-            """, {"aid": detail_id, **F})
-            if not df_tracks.empty:
-                render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
-            else:
-                st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
+            
+            # --- ΔΙΑΧΩΡΙΣΜΟΣ ΣΕ ΔΥΟ ΣΤΗΛΕΣ ---
+            c_left, c_right = st.columns([1.2, 1.0])
+            
+            with c_left:
+                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
+                df_tracks = run_query("""
+                    SELECT so.id AS song_id, so.title AS song_title,
+                           COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                    LEFT JOIN artists a ON a.id = sa.artist_id
+                    WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
+                    GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
+                """, {"aid": detail_id, **F})
+                
+                if not df_tracks.empty:
+                    render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+                else:
+                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
+                    
+            with c_right:
+                # 1. Line Chart για την Εξέλιξη των Top 5 Tracks
+                st.markdown('<div class="chart-container" style="margin-top: 0;"><div class="chart-title">📈 Top 5 Tracks Evolution</div>', unsafe_allow_html=True)
+                df_album_trend = run_query("""
+                    WITH top_tracks AS (
+                        SELECT so.id, so.title
+                        FROM streams s
+                        JOIN songs so ON so.id = s.song_id
+                        WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
+                        GROUP BY so.id, so.title
+                        ORDER BY COUNT(*) DESC
+                        LIMIT 5
+                    )
+                    SELECT DATE_TRUNC('month', s.played_at) AS period, t.title AS track_title, COUNT(*) AS stream_count
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    JOIN top_tracks t ON t.id = so.id
+                    WHERE s.played_at::date BETWEEN :start_date AND :end_date
+                    GROUP BY 1, 2
+                    ORDER BY 1, 2
+                """, {"aid": detail_id, **F})
+                
+                if not df_album_trend.empty:
+                    st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False})
+                st.markdown('</div>', unsafe_allow_html=True)
 
+                # 2. Peak Hours
+                st.markdown('<div class="chart-container"><div class="chart-title">⏰ Peak Hours</div>', unsafe_allow_html=True)
+                df_hours = run_query("""
+                    SELECT EXTRACT(HOUR FROM s.played_at)::INT AS hour, COUNT(*) AS stream_count
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
+                    GROUP BY 1 ORDER BY 1;
+                """, {"aid": detail_id, **F})
+                if not df_hours.empty:
+                    st.plotly_chart(
+                        chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
+                        use_container_width=True, config={"displayModeBar": False}
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
 
+                # 3. Active Days
+                st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
+                df_days = run_query("""
+                    SELECT EXTRACT(ISODOW FROM s.played_at)::INT AS dow, COUNT(*) AS stream_count
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    WHERE so.album_id = :aid AND s.played_at::date BETWEEN :start_date AND :end_date
+                    GROUP BY 1 ORDER BY 1;
+                """, {"aid": detail_id, **F})
+                if not df_days.empty:
+                    dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+                    st.plotly_chart(
+                        chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
+                        use_container_width=True, config={"displayModeBar": False}
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
+                
 # ══════════════════════════════════════════════════════════════════
 # TAB VIEWS
 # ══════════════════════════════════════════════════════════════════
