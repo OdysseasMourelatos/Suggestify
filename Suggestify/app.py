@@ -63,6 +63,23 @@ html, body, [class*="css"] {{
     0%, 100% {{ box-shadow: 0 0 20px {GREEN_GLOW}; }}
     50% {{ box-shadow: 0 0 35px {GREEN_GLOW}, 0 0 60px rgba(29,185,84,0.15); }}
 }}
+@keyframes revealUp {{
+    from {{
+        opacity: 0;
+        transform: translateY(20px) scale(0.97);
+        filter: blur(4px);
+    }}
+    to {{
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0px);
+    }}
+}}
+
+.list-item-reveal {{
+    opacity: 0;
+    animation: revealUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}}
 
 .animate-in {{
     animation: fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -511,10 +528,10 @@ def get_item_icon(link_type: str) -> str:
 
 def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str,
                    id_col: str = None, link_type: str = None, image_col: str = "image_url",
-                   rank_col: str = None):
+                   rank_col: str = None, reveal_top_n: int = 0):
     """
     Modern list renderer using pure HTML <a> tags.
-    Target "_top" bypasses the iframe container and opens in the SAME browser tab smoothly!
+    reveal_top_n: αν > 0, τα πρώτα N items εμφανίζονται με staggered animation (5→1).
     """
     current_tab = st.query_params.get("tab", "overview")
 
@@ -534,8 +551,17 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         else:
             art_html = get_item_icon(link_type) if link_type else "🎵"
 
+        # ── Staggered reveal logic ──
+        # Τα top-N items: rank=5 εμφανίζεται 1ο (μικρό delay), rank=1 τελευταίο (μεγάλο delay)
+        reveal_style = ""
+        if reveal_top_n > 0 and rank <= reveal_top_n:
+            delay = 0.5 + (reveal_top_n - rank) * 0.2
+            reveal_style = f'style="animation-delay: {delay:.1f}s;"'
+
+        reveal_class = "list-item-reveal" if reveal_style else ""
+
         card_html = f'''
-        <div class="list-item">
+        <div class="list-item {reveal_class}" {reveal_style}>
             <div class="item-rank {rank_class}">{rank}</div>
             <div class="item-art">{art_html}</div>
             <div class="item-info">
@@ -562,7 +588,6 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             st.markdown(f'<a href="{href}" class="custom-link" target="_top">{card_html}</a>', unsafe_allow_html=True)
         else:
             st.markdown(card_html, unsafe_allow_html=True)
-
 
 def render_kpi_grid(kpis: list[dict]):
     cols = st.columns(len(kpis))
@@ -987,9 +1012,23 @@ if detail_type and detail_id:
 
     elif detail_type == "album":
         alb_info = run_query("""
+            WITH AlbumPrimaryArtists AS (
+                SELECT a.name, COUNT(DISTINCT so.id) as track_cnt
+                FROM songs so
+                JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE so.album_id = :id
+                GROUP BY a.name
+            ),
+            TopAlbumArtists AS (
+                SELECT STRING_AGG(name, ', ') as artist_names
+                FROM AlbumPrimaryArtists
+                WHERE track_cnt = (SELECT MAX(track_cnt) FROM AlbumPrimaryArtists)
+            )
             SELECT al.title, MAX(so.image_url) as image_url, COUNT(s.id) as streams,
                    ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
-                   COUNT(DISTINCT s.song_id) as track_count
+                   COUNT(DISTINCT s.song_id) as track_count,
+                   (SELECT artist_names FROM TopAlbumArtists) as artist_name
             FROM albums al
             LEFT JOIN songs so ON so.album_id = al.id
             LEFT JOIN streams s ON s.song_id = so.id AND s.played_at::date BETWEEN :start_date AND :end_date
@@ -999,10 +1038,13 @@ if detail_type and detail_id:
 
         if not alb_info.empty:
             row = alb_info.iloc[0]
+            artist_name = row["artist_name"] if pd.notnull(row["artist_name"]) else "Unknown Artist"
+            
             render_detail_header(
                 type_label="Album",
                 title=str(row["title"]) if row["title"] else "Unknown Album",
-                subtitle=f"{int(row['track_count'] or 0)} tracks played", icon="💿",
+                subtitle=f"by {artist_name} • {int(row['track_count'] or 0)} tracks played", 
+                icon="💿",
                 stats=[
                     {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
                     {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
@@ -1090,7 +1132,6 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
-                
 # ══════════════════════════════════════════════════════════════════
 # TAB VIEWS
 # ══════════════════════════════════════════════════════════════════
@@ -1125,18 +1166,7 @@ elif current_tab == "overview":
             {"icon": "🎶", "title": "Unique Songs", "value": f"{int(row['unique_songs'] or 0):,}"},
         ])
 
-    st.markdown('<div class="section-header"><span class="icon">📈</span>Listening Trend</div>', unsafe_allow_html=True)
-    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    df_trend = run_query("""
-        SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
-               ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
-        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date
-        GROUP BY 1 ORDER BY 1;
-    """, F)
-    if not df_trend.empty:
-        st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False})
-    st.markdown('</div>', unsafe_allow_html=True)
-
+    # ── Top Tracks & Artists ΠΡΩΤΑ ──
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
@@ -1152,7 +1182,8 @@ elif current_tab == "overview":
             GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 5;
         """, F)
         if not df_top_tracks.empty:
-            render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+            render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played",
+                           "song_id", "song", reveal_top_n=5)
 
     with c2:
         st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
@@ -1167,8 +1198,21 @@ elif current_tab == "overview":
         """, F)
         if not df_top_artists.empty:
             df_top_artists["subtitle"] = "Artist"
-            render_list_v2(df_top_artists, "artist_name", "subtitle", "streams", "hours_played", "artist_id", "artist")
+            render_list_v2(df_top_artists, "artist_name", "subtitle", "streams", "hours_played",
+                           "artist_id", "artist", reveal_top_n=5)
 
+    # ── Listening Trend ΚΑΤΩ ──
+    st.markdown('<div class="section-header"><span class="icon">📈</span>Listening Trend</div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    df_trend = run_query("""
+        SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
+               ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+        FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date
+        GROUP BY 1 ORDER BY 1;
+    """, F)
+    if not df_trend.empty:
+        st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False})
+    st.markdown('</div>', unsafe_allow_html=True)
 
 elif current_tab == "tracks":
     st.markdown('<div class="section-header"><span class="icon">🎵</span>Track Explorer</div>', unsafe_allow_html=True)
@@ -1290,54 +1334,72 @@ elif current_tab == "albums":
 
     query_params = {**F, "limit": display_limit}
 
+    # Υποερώτημα που βρίσκει τον/τους σωστούς καλλιτέχνες για ΟΛΑ τα albums
+    base_query = """
+        WITH TrueAlbumArtists AS (
+            SELECT album_id, STRING_AGG(name, ', ') as artist_name
+            FROM (
+                SELECT so.album_id, a.name,
+                       RANK() OVER(PARTITION BY so.album_id ORDER BY COUNT(DISTINCT so.id) DESC) as rnk
+                FROM songs so
+                JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE so.album_id IS NOT NULL
+                GROUP BY so.album_id, a.name
+            ) ranked
+            WHERE rnk = 1
+            GROUP BY album_id
+        )
+    """
+
     if search_term:
         query_params["search"] = f"%{search_term}%"
-        # CHANGE: Removed CTE for local ranking on search
-        df_albums = run_query("""
+        df_albums = run_query(base_query + """
             SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
+                   COALESCE(aa.artist_name, 'Unknown Artist') AS artist_name,
                    MAX(so.image_url) AS image_url,
                    COUNT(s.id) AS streams,
                    ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
             FROM streams s
             JOIN songs so ON so.id = s.song_id
             LEFT JOIN albums al ON al.id = so.album_id
+            LEFT JOIN TrueAlbumArtists aa ON aa.album_id = al.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND al.title ILIKE :search
-            GROUP BY al.id, al.title
+            GROUP BY al.id, al.title, aa.artist_name
             ORDER BY streams DESC
             LIMIT :limit;
         """, query_params)
         
         if not df_albums.empty:
-            df_albums["subtitle"] = "Album"
-            render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played",
-                           "album_id", "album") # Defaults to local rank
+            render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
+                           "album_id", "album")
         else:
             st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
 
     else:
-        df_albums = run_query("""
+        df_albums = run_query(base_query + """
             SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
+                   COALESCE(aa.artist_name, 'Unknown Artist') AS artist_name,
                    MAX(so.image_url) AS image_url,
                    COUNT(s.id) AS streams,
                    ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played,
-                   ROW_NUMBER() OVER (ORDER BY SUM(s.ms_played) DESC) AS global_rank
+                   ROW_NUMBER() OVER (ORDER BY COUNT(s.id) DESC) AS global_rank
             FROM streams s
             JOIN songs so ON so.id = s.song_id
             LEFT JOIN albums al ON al.id = so.album_id
+            LEFT JOIN TrueAlbumArtists aa ON aa.album_id = al.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
-            GROUP BY al.id, al.title
-            ORDER BY hours_played DESC LIMIT :limit;
+            GROUP BY al.id, al.title, aa.artist_name
+            ORDER BY streams DESC LIMIT :limit;
         """, query_params)
 
         if not df_albums.empty:
-            df_albums["subtitle"] = "Album"
-            render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played",
+            render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
                            "album_id", "album", rank_col="global_rank")
         else:
             st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
-
-
+            
 elif current_tab == "habits":
     st.markdown('<div class="section-header"><span class="icon">🕐</span>Listening Habits</div>', unsafe_allow_html=True)
 
