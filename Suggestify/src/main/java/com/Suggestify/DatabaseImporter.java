@@ -115,15 +115,34 @@ public class DatabaseImporter {
     }
 
     private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds, int albumId, String trackUri) throws Exception {
-        String cacheKey = songTitle.toLowerCase() + "|" + albumId;
+        String cacheKey = (trackUri != null && !trackUri.isEmpty()) ?
+                trackUri :
+                (songTitle.toLowerCase() + "|" + (artistIds.isEmpty() ? -1 : artistIds.get(0)));
 
         if (songCache.containsKey(cacheKey)) return songCache.get(cacheKey);
 
-        String selectSQL = "SELECT id FROM songs WHERE title = ? AND (album_id = ? OR (album_id IS NULL AND ? = -1))";
-        try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
+        if (trackUri != null && !trackUri.isEmpty()) {
+            String selectUriSQL = "SELECT id FROM songs WHERE track_uri = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(selectUriSQL)) {
+                stmt.setString(1, trackUri);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        int foundId = rs.getInt("id");
+                        songCache.put(cacheKey, foundId);
+                        return foundId;
+                    }
+                }
+            }
+        }
+
+        int primaryArtistId = artistIds.isEmpty() ? -1 : artistIds.get(0);
+        String selectFallbackSQL = "SELECT s.id FROM songs s " +
+                "JOIN song_artists sa ON s.id = sa.song_id " +
+                "WHERE s.title = ? AND sa.artist_id = ? AND sa.is_feature = FALSE";
+
+        try (PreparedStatement stmt = conn.prepareStatement(selectFallbackSQL)) {
             stmt.setString(1, songTitle);
-            stmt.setInt(2, albumId);
-            stmt.setInt(3, albumId);
+            stmt.setInt(2, primaryArtistId);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     int foundId = rs.getInt("id");
