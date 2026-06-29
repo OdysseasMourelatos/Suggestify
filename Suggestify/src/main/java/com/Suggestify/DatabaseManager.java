@@ -15,9 +15,17 @@ public class DatabaseManager {
     }
 
     public static void initializeSchema() {
-        String createArtistsTable = "CREATE TABLE IF NOT EXISTS artists (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL, image_url VARCHAR(500));";
-        String dropTables = "DROP TABLE IF EXISTS streams, song_artists, songs, artists, albums, genres, artist_genres CASCADE;";
+        String dropTables = "DROP TABLE IF EXISTS streams, album_genres, genres, song_artists, songs, artists, albums, users CASCADE;";
 
+        String createUsersTable = """
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """;
+
+        String createArtistsTable = "CREATE TABLE IF NOT EXISTS artists (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL, image_url VARCHAR(500));";
 
         String createAlbumsTable = """
             CREATE TABLE IF NOT EXISTS albums (
@@ -35,21 +43,13 @@ public class DatabaseManager {
                 image_url VARCHAR(500)
             );
         """;
+
         String createSongArtistsTable = """
             CREATE TABLE IF NOT EXISTS song_artists (
                 song_id INT REFERENCES songs(id),
                 artist_id INT REFERENCES artists(id),
                 is_feature BOOLEAN DEFAULT FALSE,
                 PRIMARY KEY (song_id, artist_id)
-            );
-        """;
-
-        String createStreamsTable = """
-            CREATE TABLE IF NOT EXISTS streams (
-                id SERIAL PRIMARY KEY,
-                song_id INT REFERENCES songs(id),
-                played_at TIMESTAMP NOT NULL,
-                ms_played INT
             );
         """;
 
@@ -60,25 +60,37 @@ public class DatabaseManager {
             );
         """;
 
-        String createArtistGenresTable = """
-            CREATE TABLE IF NOT EXISTS artist_genres (
-                artist_id INT REFERENCES artists(id) ON DELETE CASCADE,
+        String createAlbumGenresTable = """
+            CREATE TABLE IF NOT EXISTS album_genres (
+                album_id INT REFERENCES albums(id) ON DELETE CASCADE,
                 genre_id INT REFERENCES genres(id) ON DELETE CASCADE,
-                PRIMARY KEY (artist_id, genre_id)
+                PRIMARY KEY (album_id, genre_id)
+            );
+        """;
+
+        String createStreamsTable = """
+            CREATE TABLE IF NOT EXISTS streams (
+                id SERIAL PRIMARY KEY,
+                user_id INT REFERENCES users(id) ON DELETE CASCADE,
+                song_id INT REFERENCES songs(id),
+                played_at TIMESTAMP NOT NULL,
+                ms_played INT
             );
         """;
 
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
+
             stmt.execute(dropTables);
 
+            stmt.execute(createUsersTable);
             stmt.execute(createArtistsTable);
             stmt.execute(createAlbumsTable);
             stmt.execute(createSongsTable);
             stmt.execute(createSongArtistsTable);
-            stmt.execute(createStreamsTable);
             stmt.execute(createGenresTable);
-            stmt.execute(createArtistGenresTable);
+            stmt.execute(createAlbumGenresTable);
+            stmt.execute(createStreamsTable);
 
         } catch (Exception e) {
             e.printStackTrace();
