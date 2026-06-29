@@ -18,6 +18,14 @@ public class SpotifyParser {
         mapper.configure(JsonParser.Feature.AUTO_CLOSE_SOURCE, false);
 
         String zipFilePath = args.length > 0 ? args[0] : "C:\\Users\\spmou\\Downloads\\my_spotify_data.zip";
+
+        if (zipFilePath == null) {
+            System.err.println("Error: No ZIP file path provided!");
+            System.exit(1);
+        }
+
+        String username = args.length > 1 ? args[1] : "Ody"; // <--- Παίρνουμε το username
+
         List<StreamingRecord> allRecords = new ArrayList<>();
 
         System.out.println("Opening ZIP file in memory...");
@@ -44,8 +52,8 @@ public class SpotifyParser {
             extractor.extractEntities(allRecords);
 
             DatabaseManager.initializeSchema();
-            DatabaseImporter dbImporter = new DatabaseImporter();
-            dbImporter.importRecords(allRecords);
+            DatabaseImporter importer = new DatabaseImporter();
+            importer.importRecords(allRecords, username);
 
         } catch (Exception e) {
             System.err.println("Error reading ZIP file. Please verify the file path.");

@@ -25,11 +25,13 @@ public class DatabaseImporter {
     private final Map<String, Integer> songCache = new HashMap<>();
     private final Map<String, Integer> albumCache = new HashMap<>();
 
-    public void importRecords(List<StreamingRecord> records) {
-        String insertStreamSQL = "INSERT INTO streams (song_id, played_at, ms_played) VALUES (?, ?, ?)";
+    public void importRecords(List<StreamingRecord> records, String username) {
+        String insertStreamSQL = "INSERT INTO streams (user_id, song_id, played_at, ms_played) VALUES (?, ?, ?, ?)";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement streamStmt = conn.prepareStatement(insertStreamSQL)) {
+
+            int userId = getOrCreateUser(conn, username);
 
             conn.setAutoCommit(false);
             int count = 0;
@@ -65,9 +67,10 @@ public class DatabaseImporter {
                 int albumId = getOrCreateAlbum(conn, record.getAlbumName());
                 int songId = getOrCreateSong(conn, cleanTrackName, artistIds, albumId, record.getTrackUri());
 
-                streamStmt.setInt(1, songId);
-                streamStmt.setTimestamp(2, Timestamp.from(record.getTimestamp()));
-                streamStmt.setInt(3, record.getMsPlayed());
+                streamStmt.setInt(1, userId);
+                streamStmt.setInt(2, songId);
+                streamStmt.setTimestamp(3, Timestamp.from(record.getTimestamp()));
+                streamStmt.setInt(4, record.getMsPlayed());
                 streamStmt.addBatch();
 
                 count++;
@@ -250,5 +253,24 @@ public class DatabaseImporter {
             System.out.println("Failed to fetch image for: " + trackUri);
         }
         return null;
+    }
+
+    private int getOrCreateUser(Connection conn, String username) throws Exception {
+        String selectSQL = "SELECT id FROM users WHERE username = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
+            stmt.setString(1, username);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) return rs.getInt("id");
+            }
+        }
+        String insertSQL = "INSERT INTO users (username) VALUES (?)";
+        try (PreparedStatement stmt = conn.prepareStatement(insertSQL, Statement.RETURN_GENERATED_KEYS)) {
+            stmt.setString(1, username);
+            stmt.executeUpdate();
+            try (ResultSet rs = stmt.getGeneratedKeys()) {
+                if (rs.next()) return rs.getInt(1);
+            }
+        }
+        return -1;
     }
 }
