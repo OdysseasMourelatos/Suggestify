@@ -70,6 +70,142 @@ def load_css():
 load_css()
 
 # ══════════════════════════════════════════════════════════════════
+# EXTRA UX TRANSITIONS — hover / entrance polish
+# (δεν αγγίζουμε layout, μόνο transitions / animations / hover states)
+# ══════════════════════════════════════════════════════════════════
+st.markdown(f"""
+<style>
+@keyframes fadeSlideUp {{
+    from {{ opacity: 0; transform: translateY(14px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+}}
+@keyframes fadeIn {{
+    from {{ opacity: 0; }}
+    to   {{ opacity: 1; }}
+}}
+
+/* ─── List items ─── */
+.list-item {{
+    transition: transform 0.22s ease, background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+}}
+.list-item:hover {{
+    transform: translateX(5px);
+    background: rgba(255,255,255,0.045);
+    border-color: rgba(29,185,84,0.35);
+    box-shadow: 0 6px 22px rgba(0,0,0,0.28);
+}}
+.item-art {{
+    transition: transform 0.25s ease;
+}}
+.list-item:hover .item-art {{
+    transform: scale(1.07);
+}}
+.item-arrow {{
+    transition: transform 0.25s ease, color 0.25s ease;
+    display: inline-block;
+}}
+.list-item:hover .item-arrow {{
+    transform: translateX(5px);
+    color: {GREEN};
+}}
+.stat-value {{
+    transition: color 0.2s ease;
+}}
+
+/* ─── KPI cards ─── */
+.kpi-card {{
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+    animation: fadeSlideUp 0.5s ease both;
+}}
+.kpi-card:hover {{
+    transform: translateY(-5px);
+    box-shadow: 0 12px 30px rgba(29,185,84,0.14);
+    border-color: rgba(29,185,84,0.3);
+}}
+.kpi-icon {{
+    transition: transform 0.3s ease;
+    display: inline-block;
+}}
+.kpi-card:hover .kpi-icon {{
+    transform: scale(1.18) rotate(-4deg);
+}}
+
+/* ─── Section headers ─── */
+.section-header {{
+    position: relative;
+    animation: fadeIn 0.4s ease both;
+}}
+
+/* ─── Charts & detail header: smooth entrance ─── */
+.chart-container {{
+    animation: fadeSlideUp 0.45s ease both;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}}
+.chart-container:hover {{
+    border-color: rgba(29,185,84,0.18);
+}}
+.detail-header {{
+    animation: fadeSlideUp 0.4s ease both;
+}}
+.detail-art {{
+    transition: transform 0.3s ease;
+}}
+.detail-header:hover .detail-art {{
+    transform: scale(1.03);
+}}
+.detail-stat {{
+    transition: transform 0.2s ease;
+}}
+.detail-stat:hover {{
+    transform: translateY(-2px);
+}}
+
+/* ─── Wrapped banner ─── */
+.wrapped-banner {{
+    animation: fadeSlideUp 0.5s ease both;
+}}
+
+/* ─── Empty states ─── */
+.empty-state {{
+    animation: fadeIn 0.4s ease both;
+}}
+
+/* ─── Streamlit buttons: smoother nav + secondary hover ─── */
+div[data-testid="stButton"] button {{
+    transition: all 0.2s ease !important;
+}}
+div[data-testid="stButton"] button[kind="secondary"]:hover {{
+    background: rgba(29,185,84,0.08) !important;
+    color: {GREEN} !important;
+    transform: translateY(-1px) !important;
+    border-color: rgba(29,185,84,0.3) !important;
+}}
+div[data-testid="stButton"] button[kind="primary"]:hover {{
+    transform: translateY(-1px) !important;
+    box-shadow: 0 6px 18px rgba(29,185,84,0.3) !important;
+}}
+
+/* ─── Inputs: subtle focus polish ─── */
+div[data-testid="stTextInput"] input,
+div[data-baseweb="select"] > div,
+div[data-testid="stDateInput"] input {{
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}}
+div[data-testid="stTextInput"] input:focus,
+div[data-testid="stDateInput"] input:focus {{
+    border-color: {GREEN} !important;
+    box-shadow: 0 0 0 2px {GREEN_XLO} !important;
+}}
+
+/* ─── Links wrapping list items shouldn't underline/recolor ─── */
+.custom-link {{
+    text-decoration: none !important;
+    display: block;
+}}
+</style>
+""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════════
 CONNECTION_STRING = "postgresql://postgres:secret@localhost:5432/spotify_db"
@@ -110,7 +246,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                    rank_col: str = None, reveal_top_n: int = 0):
     """
     Modern list renderer using pure HTML <a> tags.
-    reveal_top_n: αν > 0, τα πρώτα N items εμφανίζονται με staggered animation (5→1).
+    reveal_top_n: αν > 0, τα πρώτα N items εμφανίζονται με staggered animation (1→N, δηλ. το #1 πρώτο).
     """
     current_tab = st.query_params.get("tab", "overview")
 
@@ -131,10 +267,10 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             art_html = get_item_icon(link_type) if link_type else "🎵"
 
         # ── Staggered reveal logic ──
-        # Τα top-N items: rank=5 εμφανίζεται 1ο (μικρό delay), rank=1 τελευταίο (μεγάλο delay)
+        # Τα top-N items: rank=1 εμφανίζεται 1ο (μικρό delay), rank=N τελευταίο (μεγάλο delay)
         reveal_style = ""
         if reveal_top_n > 0 and rank <= reveal_top_n:
-            delay = 0.5 + (reveal_top_n - rank) * 0.2
+            delay = 0.5 + (rank - 1) * 0.2
             reveal_style = f'style="animation-delay: {delay:.1f}s;"'
 
         reveal_class = "list-item-reveal" if reveal_style else ""
