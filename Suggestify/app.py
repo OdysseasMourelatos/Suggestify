@@ -299,7 +299,22 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
 
         if can_navigate:
             item_id = str(row[id_col])
+            params = st.query_params
+            current_view = params.get("view", "")
+            current_id = params.get("id", "")
+            
+            # Βασικό link
             href = f"?tab={current_tab}&view={link_type}&id={item_id}"
+            
+            # 1. Προσθήκη Ιστορικού (ώστε το Back να ξέρει πού να πάει)
+            if current_view and current_id:
+                href += f"&pview={current_view}&pid={current_id}"
+                
+            # 2. Προσθήκη Ημερομηνιών για να μη χάνονται στο reload
+            if params.get("preset"): href += f"&preset={params.get('preset')}"
+            if params.get("start"): href += f"&start={params.get('start')}"
+            if params.get("end"): href += f"&end={params.get('end')}"
+
             st.markdown(f'<a href="{href}" class="custom-link" target="_top">{card_html}</a>', unsafe_allow_html=True)
         else:
             st.markdown(card_html, unsafe_allow_html=True)
@@ -441,32 +456,45 @@ def get_current_view() -> dict:
     }
 
 def go_back():
-    current = get_current_view()
+    params = st.query_params
+    pview = params.get("pview")
+    pid = params.get("pid")
+    tab = params.get("tab", "overview")
+    
+    preset = params.get("preset")
+    start = params.get("start")
+    end = params.get("end")
+
     st.query_params.clear()
-    if current.get("type") == "song":
-        st.query_params["tab"] = "tracks"
-    elif current.get("type") == "artist":
-        st.query_params["tab"] = "artists"
-    elif current.get("type") == "album":
-        st.query_params["tab"] = "albums"
-    elif current.get("type") == "genre":
-        st.query_params["tab"] = "genres"
-
-# ══════════════════════════════════════════════════════════════════
-# MAIN APP
-# ══════════════════════════════════════════════════════════════════
-
+    st.query_params["tab"] = tab
+    
+    if pview and pid:
+        st.query_params["view"] = pview
+        st.query_params["id"] = pid
+        
+    if preset: st.query_params["preset"] = preset
+    if start: st.query_params["start"] = start
+    if end: st.query_params["end"] = end
+    
 # ══════════════════════════════════════════════════════════════════
 # MAIN APP & STATE MANAGEMENT (CALLBACKS)
 # ══════════════════════════════════════════════════════════════════
 
 min_date, max_date = get_date_bounds()
 
-# 1. Αρχικοποίηση State
+def get_parsed_date(date_str, default_date):
+    if not date_str: return default_date
+    try: return datetime.date.fromisoformat(date_str)
+    except: return default_date
+
+params = st.query_params
+
+# 1. Αρχικοποίηση State (Διαβάζουμε ΠΡΩΤΑ από το URL)
 if "start_date" not in st.session_state:
-    st.session_state.start_date = min_date
-    st.session_state.end_date = max_date
-    st.session_state.date_preset = "all"
+    st.session_state.start_date = get_parsed_date(params.get("start"), min_date)
+    st.session_state.end_date = get_parsed_date(params.get("end"), max_date)
+    url_preset = params.get("preset", "all")
+    st.session_state.date_preset = url_preset if url_preset in ["all", "wrapped", "month", "week"] else None
 
 # 2. Callback όταν αλλάζεις το Dropdown
 def update_dates_from_preset():
@@ -483,11 +511,18 @@ def update_dates_from_preset():
     elif sel == "week":
         st.session_state.start_date = max_date - datetime.timedelta(days=7)
         st.session_state.end_date = max_date
+        
+    # Ενημερώνουμε άμεσα και το URL
+    st.query_params["preset"] = sel
+    st.query_params["start"] = st.session_state.start_date.isoformat()
+    st.query_params["end"] = st.session_state.end_date.isoformat()
 
 # 3. Callback όταν πειράζεις τα ημερολόγια χειροκίνητα
 def mark_manual():
-    # Αδειάζει το dropdown ώστε να φανεί το placeholder "⚙️ Manual"
     st.session_state.date_preset = None
+    st.query_params["preset"] = "manual"
+    st.query_params["start"] = st.session_state.start_date.isoformat()
+    st.query_params["end"] = st.session_state.end_date.isoformat()
 
 preset_options = {
     "all": "♾️ All Time",
@@ -526,8 +561,17 @@ with nav_col:
                 type="primary" if is_active else "secondary",
                 use_container_width=True
             ):
+                curr_preset = st.query_params.get("preset")
+                curr_start = st.query_params.get("start")
+                curr_end = st.query_params.get("end")
+                
                 st.query_params.clear()
                 st.query_params["tab"] = tab_id
+                
+                if curr_preset: st.query_params["preset"] = curr_preset
+                if curr_start: st.query_params["start"] = curr_start
+                if curr_end: st.query_params["end"] = curr_end
+                
                 st.rerun()
 
 with date_col:
