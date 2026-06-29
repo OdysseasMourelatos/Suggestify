@@ -4,6 +4,7 @@ venv/
 
 # IDE settings
 ../.idea/
+.idea/
 .vscode/
 
 # System files
