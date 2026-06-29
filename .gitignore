@@ -25,3 +25,4 @@ dist/
 # Java / Maven build
 target/
 *.jar
+out/
