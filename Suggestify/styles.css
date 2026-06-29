@@ -1,0 +1,486 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+/* ─── BASE RESET ─── */
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    background: VAR_BG !important;
+    color: VAR_TEXT !important;
+}
+#MainMenu, footer, header { visibility: hidden; }
+.block-container {
+    padding: 0.5rem 2rem 4rem !important;
+    max-width: 100% !important;
+}
+
+/* ─── PAGE TRANSITIONS ─── */
+@keyframes pageEnter {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+        filter: blur(3px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0px);
+    }
+}
+
+@keyframes pageExit {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0px);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-10px) scale(0.98);
+        filter: blur(4px);
+    }
+}
+
+/* Animate the main content wrapper on enter */
+.main .block-container {
+    animation: pageEnter 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Force re-trigger animation on every Streamlit re-render */
+.stApp > div {
+    animation: pageEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+section.main > div.block-container {
+    animation: pageEnter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+[data-testid="stVerticalBlock"] > div {
+    animation: pageEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Slide-in for the section headers */
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: VAR_TEXT;
+    margin: 2.5rem 0 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid VAR_BORDER;
+    animation: pageEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.section-header .icon {
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+
+/* Stagger the KPI cards */
+.kpi-card:nth-child(1) { animation: pageEnter 0.4s 0.05s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.kpi-card:nth-child(2) { animation: pageEnter 0.4s 0.10s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.kpi-card:nth-child(3) { animation: pageEnter 0.4s 0.15s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.kpi-card:nth-child(4) { animation: pageEnter 0.4s 0.20s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Chart containers fade up */
+.chart-container {
+    background: VAR_CARD;
+    border: 1px solid VAR_BORDER;
+    border-radius: 16px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    animation: pageEnter 0.5s 0.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.chart-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: VAR_TEXT;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Detail header pops in */
+.detail-header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    background: VAR_CARD;
+    border: 1px solid VAR_BORDER;
+    border-radius: 20px;
+    margin-bottom: 2rem;
+    animation: pageEnter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.detail-art {
+    width: 120px;
+    height: 120px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, VAR_GREEN_DIM 0%, VAR_GREEN_XLO 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+.detail-info { flex: 1; }
+.detail-type {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: VAR_GREEN;
+    margin-bottom: 0.3rem;
+}
+.detail-title {
+    font-size: 2rem;
+    font-weight: 800;
+    color: VAR_TEXT;
+    letter-spacing: -0.03em;
+    margin-bottom: 0.25rem;
+}
+.detail-subtitle {
+    font-size: 1rem;
+    color: VAR_TEXT_MID;
+}
+.detail-stats {
+    display: flex;
+    gap: 2rem;
+}
+.detail-stat {
+    text-align: center;
+    padding: 1rem 1.5rem;
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+}
+.detail-stat-value {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: VAR_TEXT;
+}
+.detail-stat-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: VAR_TEXT_DIM;
+    letter-spacing: 0.05em;
+}
+
+@keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 20px VAR_GREEN_GLOW; }
+    50% { box-shadow: 0 0 35px VAR_GREEN_GLOW, 0 0 60px rgba(29,185,84,0.15); }
+}
+@keyframes revealUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.97);
+        filter: blur(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0px);
+    }
+}
+
+.list-item-reveal {
+    opacity: 0;
+    animation: revealUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ─── STICKY NAVBAR ─── */
+.navbar {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: rgba(5, 5, 5, 0.92);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid VAR_BORDER;
+    padding: 0.75rem 0;
+    margin: 0 -2rem 1.5rem -2rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+
+.navbar-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: VAR_TEXT;
+}
+.nav-brand span { font-size: 1.8rem; }
+
+/* ─── KPI CARDS — Glass Effect ─── */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0 2rem;
+}
+
+.kpi-card {
+    background: VAR_CARD;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid VAR_BORDER;
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(90deg, VAR_GREEN 0%, transparent 100%);
+}
+.kpi-card:hover {
+    transform: translateY(-4px);
+    border-color: VAR_BORDER_HL;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+
+.kpi-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+    filter: grayscale(30%);
+}
+.kpi-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: VAR_TEXT_DIM;
+    margin-bottom: 0.4rem;
+}
+.kpi-value {
+    font-size: 2.2rem;
+    font-weight: 800;
+    color: VAR_TEXT;
+    line-height: 1;
+    letter-spacing: -0.03em;
+}
+.kpi-unit {
+    font-size: 0.9rem;
+    color: VAR_TEXT_MID;
+    margin-left: 4px;
+    font-weight: 500;
+}
+
+/* ─── LIST ITEM — Modern Cards ─── */
+.list-item {
+    display: flex;
+    align-items: center;
+    background: VAR_CARD;
+    backdrop-filter: blur(10px);
+    border: 1px solid VAR_BORDER;
+    border-radius: 14px;
+    padding: 1rem 1.5rem;
+    margin-bottom: 0.6rem;
+    transition: background 0.25s ease, border-color 0.25s ease,
+                transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* CLEAN NATIVE CLICKABLE LINKS */
+a.custom-link {
+    text-decoration: none !important;
+    color: inherit !important;
+    display: block;
+    margin-bottom: 0.6rem;
+}
+a.custom-link .list-item {
+    margin-bottom: 0 !important;
+}
+a.custom-link:hover .list-item {
+    background: VAR_CARD_HOVER;
+    border-color: VAR_BORDER_HL;
+    transform: translateX(6px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+}
+a.custom-link:hover .item-arrow {
+    transform: translateX(4px);
+    color: VAR_GREEN;
+}
+
+.item-rank {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: VAR_TEXT_DIM;
+    width: 50px;
+    min-width: 50px;
+    text-align: center;
+}
+.item-rank.gold { color: #FFD700; }
+.item-rank.silver { color: #C0C0C0; }
+.item-rank.bronze { color: #CD7F32; }
+
+.item-art {
+    width: 52px;
+    height: 52px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, VAR_GREEN_XLO 0%, rgba(0,0,0,0.3) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    margin-right: 1rem;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.item-info {
+    flex: 1;
+    min-width: 0;
+}
+.item-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: VAR_TEXT;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.15rem;
+}
+.item-subtitle {
+    font-size: 0.85rem;
+    color: VAR_TEXT_MID;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.item-stats {
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+    margin-left: auto;
+    padding-left: 1rem;
+}
+.stat { text-align: right; }
+.stat-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: VAR_TEXT;
+    line-height: 1.1;
+}
+.stat-value.green { color: VAR_GREEN; }
+.stat-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: VAR_TEXT_DIM;
+}
+
+.item-arrow {
+    color: VAR_TEXT_DIM;
+    font-size: 1.2rem;
+    margin-left: 1rem;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+/* ─── BACK BUTTON ─── */
+.back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.2rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid VAR_BORDER;
+    border-radius: 10px;
+    color: VAR_TEXT_MID;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-bottom: 1.5rem;
+}
+
+/* ─── WRAPPED BANNER ─── */
+.wrapped-banner {
+    background: linear-gradient(135deg, rgba(29,185,84,0.2) 0%, rgba(29,185,84,0.05) 50%, rgba(0,0,0,0) 100%);
+    border: 1px solid VAR_GREEN;
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+}
+.wrapped-banner::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 50%;
+    height: 200%;
+    background: radial-gradient(ellipse, VAR_GREEN_GLOW 0%, transparent 70%);
+    animation: pulseGlow 3s infinite;
+}
+.wrapped-title {
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, VAR_GREEN 0%, #1ed760 50%, VAR_GREEN 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+}
+.wrapped-subtitle {
+    font-size: 1.1rem;
+    color: VAR_TEXT_MID;
+}
+
+/* ─── EMPTY STATE ─── */
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: VAR_TEXT_DIM;
+}
+.empty-state .icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* ─── STREAMLIT OVERRIDES FOR INPUTS ─── */
+div[data-baseweb="select"] > div,
+div[data-testid="stDateInput"] input {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid VAR_BORDER !important;
+    border-radius: 8px !important;
+    color: VAR_TEXT !important;
+    font-size: 0.85rem !important;
+    padding: 0.4rem 0.75rem !important;
+    transition: all 0.2s ease !important;
+}
+div.row-widget.stRadio { display: none !important; }
+
+div[data-testid="stTextInput"] input {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid VAR_BORDER !important;
+    border-radius: 12px !important;
+    padding: 0.8rem 1rem !important;
+    font-size: 0.95rem !important;
+}
+div[data-testid="stTextInput"] input::placeholder {
+    color: VAR_TEXT_DIM !important;
+<<<<<<< HEAD
+}
+=======
+}
+>>>>>>> 1dfd0248a1f30021e5e34b899e7161fc0188bc6e
