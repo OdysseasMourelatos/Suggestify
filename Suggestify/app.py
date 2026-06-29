@@ -39,7 +39,7 @@ TEXT_DIM  = "#727272"
 # ══════════════════════════════════════════════════════════════════
 def load_css():
     try:
-        with open("styles.css", "r", encoding="utf-8") as f:
+        with open("static/styles.css", "r", encoding="utf-8") as f:
             css = f.read()
             
         # Το λεξικό ορίζεται με φθίνουσα σειρά μεγέθους κλειδιού
