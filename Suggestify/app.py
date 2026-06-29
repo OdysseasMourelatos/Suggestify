@@ -760,69 +760,71 @@ if detail_type and detail_id:
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
     elif detail_type == "genre":
-        genre_info = run_query("""
-            SELECT g.name, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
-                   COUNT(DISTINCT sa.artist_id) as unique_artists
-            FROM genres g
-            JOIN artist_genres ag ON ag.genre_id = g.id
-            JOIN song_artists sa ON sa.artist_id = ag.artist_id AND sa.is_feature = FALSE
-            JOIN streams s ON s.song_id = sa.song_id AND s.played_at::date BETWEEN :start_date AND :end_date
-            WHERE g.id = :id
-            GROUP BY g.name
-        """, {"id": detail_id, **F})
+            genre_info = run_query("""
+                SELECT g.name, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+                       COUNT(DISTINCT sa.artist_id) as unique_artists
+                FROM genres g
+                JOIN album_genres ag ON ag.genre_id = g.id
+                JOIN songs so ON so.album_id = ag.album_id
+                JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                JOIN streams s ON s.song_id = so.id AND s.played_at::date BETWEEN :start_date AND :end_date
+                WHERE g.id = :id
+                GROUP BY g.name
+            """, {"id": detail_id, **F})
 
-        if not genre_info.empty:
-            row = genre_info.iloc[0]
-            genre_name = str(row["name"]).title()
-            
-            render_detail_header(
-                type_label="Genre", title=genre_name,
-                subtitle=f"{int(row['unique_artists'] or 0)} artists in your library", icon="🎸",
-                stats=[
-                    {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
-                    {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
-                ]
-            )
-            
-            c_left, c_right = st.columns(2)
-            
-            with c_left:
-                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
-                df_g_artists = run_query("""
-                    SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
-                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
-                    FROM streams s
-                    JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
-                    JOIN artists a ON a.id = sa.artist_id
-                    JOIN artist_genres ag ON ag.artist_id = a.id
-                    WHERE ag.genre_id = :id AND s.played_at::date BETWEEN :start_date AND :end_date
-                    GROUP BY a.id, a.name, a.image_url ORDER BY streams DESC LIMIT 10
-                """, {"id": detail_id, **F})
-                
-                if not df_g_artists.empty:
-                    df_g_artists["sub"] = "Artist"
-                    render_list_v2(df_g_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
-                else:
-                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
+            if not genre_info.empty:
+                row = genre_info.iloc[0]
+                genre_name = str(row["name"]).title()
 
-            with c_right:
-                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
-                df_g_tracks = run_query("""
-                    SELECT so.id AS song_id, so.title AS song_title, a.name AS main_artist, so.image_url,
-                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
-                    FROM streams s
-                    JOIN songs so ON so.id = s.song_id
-                    JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                    JOIN artists a ON a.id = sa.artist_id
-                    JOIN artist_genres ag ON ag.artist_id = a.id
-                    WHERE ag.genre_id = :id AND s.played_at::date BETWEEN :start_date AND :end_date
-                    GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 10
-                """, {"id": detail_id, **F})
-                
-                if not df_g_tracks.empty:
-                    render_list_v2(df_g_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
-                else:
-                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
+                render_detail_header(
+                    type_label="Genre", title=genre_name,
+                    subtitle=f"{int(row['unique_artists'] or 0)} artists in your library", icon="🎸",
+                    stats=[
+                        {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
+                        {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                    ]
+                )
+
+                c_left, c_right = st.columns(2)
+
+                with c_left:
+                    st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
+                    df_g_artists = run_query("""
+                        SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
+                               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+                        FROM streams s
+                        JOIN songs so ON so.id = s.song_id
+                        JOIN album_genres ag ON ag.album_id = so.album_id
+                        JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                        JOIN artists a ON a.id = sa.artist_id
+                        WHERE ag.genre_id = :id AND s.played_at::date BETWEEN :start_date AND :end_date
+                        GROUP BY a.id, a.name, a.image_url ORDER BY streams DESC LIMIT 10
+                    """, {"id": detail_id, **F})
+
+                    if not df_g_artists.empty:
+                        df_g_artists["sub"] = "Artist"
+                        render_list_v2(df_g_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
+                    else:
+                        st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
+
+                with c_right:
+                    st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+                    df_g_tracks = run_query("""
+                        SELECT so.id AS song_id, so.title AS song_title, a.name AS main_artist, so.image_url,
+                               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+                        FROM streams s
+                        JOIN songs so ON so.id = s.song_id
+                        JOIN album_genres ag ON ag.album_id = so.album_id
+                        JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                        JOIN artists a ON a.id = sa.artist_id
+                        WHERE ag.genre_id = :id AND s.played_at::date BETWEEN :start_date AND :end_date
+                        GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 10
+                    """, {"id": detail_id, **F})
+
+                    if not df_g_tracks.empty:
+                        render_list_v2(df_g_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+                    else:
+                        st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════
 # TAB VIEWS
 # ══════════════════════════════════════════════════════════════════
@@ -1148,9 +1150,10 @@ elif current_tab == "genres":
                COUNT(DISTINCT sa.artist_id) || ' Artists' AS subtitle,
                COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
         FROM streams s
-        JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
-        JOIN artist_genres ag ON ag.artist_id = sa.artist_id
+        JOIN songs so ON so.id = s.song_id
+        JOIN album_genres ag ON ag.album_id = so.album_id
         JOIN genres g ON g.id = ag.genre_id
+        JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
         WHERE s.played_at::date BETWEEN :start_date AND :end_date
     """
 
@@ -1168,12 +1171,7 @@ elif current_tab == "genres":
         """, query_params)
 
     if not df_genres.empty:
-        # Χρησιμοποιούμε rank_col None για να υπολογίσει local ranks
         render_list_v2(df_genres, "genre_name", "subtitle", "streams", "hours_played",
                        "genre_id", "genre")
     else:
-<<<<<<< HEAD
         st.markdown('<div class="empty-state"><div class="icon">🎸</div>No genres found</div>', unsafe_allow_html=True)
-=======
-        st.markdown('<div class="empty-state"><div class="icon">🎸</div>No genres found</div>', unsafe_allow_html=True)
->>>>>>> 1dfd0248a1f30021e5e34b899e7161fc0188bc6e

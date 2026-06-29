@@ -479,8 +479,4 @@ div[data-testid="stTextInput"] input {
 }
 div[data-testid="stTextInput"] input::placeholder {
     color: VAR_TEXT_DIM !important;
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 1dfd0248a1f30021e5e34b899e7161fc0188bc6e
