@@ -1172,8 +1172,4 @@ elif current_tab == "genres":
         render_list_v2(df_genres, "genre_name", "subtitle", "streams", "hours_played",
                        "genre_id", "genre")
     else:
-<<<<<<< HEAD
         st.markdown('<div class="empty-state"><div class="icon">🎸</div>No genres found</div>', unsafe_allow_html=True)
-=======
-        st.markdown('<div class="empty-state"><div class="icon">🎸</div>No genres found</div>', unsafe_allow_html=True)
->>>>>>> 1dfd0248a1f30021e5e34b899e7161fc0188bc6e
