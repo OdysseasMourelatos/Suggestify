@@ -1,8 +1,26 @@
+# Virtual environments & Notebooks
 venv/
 .ipynb_checkpoints/
 
+# IDE settings
 ../.idea/
 .vscode/
 
-*.json
+# System files
+.DS_Store
+Thumbs.db
+
+# Environment variables
 .env
+
+# Python cache & build
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+
+# Java / Maven build
+target/
+*.jar
