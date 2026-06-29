@@ -71,7 +71,7 @@ div[data-testid="stFileUploader"] section::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
 }
 div[data-testid="stFileUploader"] section::before {
-    content: "📦"; position: absolute; top: 50%; left: 50%;
+    content: "📦"; position: absolute; top: 60%; left: 50%;
     transform: translate(-50%, -90px); pointer-events: none;
     width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;
     background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.2);
@@ -94,6 +94,24 @@ div[data-testid="stButton"] button[kind="primary"]:hover {
     background: #1ed760 !important; 
     transform: translateY(-2px) !important;
     box-shadow: 0 8px 32px rgba(29,185,84,0.4) !important;
+}
+
+/* ─── Hero headphone emoji "breathing" animation ─── */
+@keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.18); }
+}
+
+/* ─── Step cards: interactive hover ─── */
+.step-card {
+    transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+    cursor: default;
+}
+.step-card:hover {
+    transform: translateY(-6px) scale(1.035);
+    border-color: rgba(29,185,84,0.45) !important;
+    background: rgba(29,185,84,0.06) !important;
+    box-shadow: 0 10px 28px rgba(29,185,84,0.18);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -183,15 +201,15 @@ if st.session_state.upload_state == "idle":
 
     st.markdown("""
     <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
-        <div style="flex: 1; background: rgba(255,255,255,0.025); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 1rem 0.85rem; text-align: center;">
+        <div class="step-card" style="flex: 1; background: rgba(255,255,255,0.025); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 1rem 0.85rem; text-align: center;">
             <div style="font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #1DB954; margin-bottom: 0.45rem;">Step 1</div>
             <div style="font-size: 0.79rem; color: #B3B3B3; line-height: 1.45;">Download your data from<br><strong style="color: #FFFFFF; font-weight: 600;">spotify.com/account</strong></div>
         </div>
-        <div style="flex: 1; background: rgba(255,255,255,0.025); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 1rem 0.85rem; text-align: center;">
+        <div class="step-card" style="flex: 1; background: rgba(255,255,255,0.025); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 1rem 0.85rem; text-align: center;">
             <div style="font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #1DB954; margin-bottom: 0.45rem;">Step 2</div>
             <div style="font-size: 0.79rem; color: #B3B3B3; line-height: 1.45;">Drop the ZIP here<br>& hit <strong style="color: #FFFFFF; font-weight: 600;">Import</strong></div>
         </div>
-        <div style="flex: 1; background: rgba(255,255,255,0.025); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 1rem 0.85rem; text-align: center;">
+        <div class="step-card" style="flex: 1; background: rgba(255,255,255,0.025); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 1rem 0.85rem; text-align: center;">
             <div style="font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #1DB954; margin-bottom: 0.45rem;">Step 3</div>
             <div style="font-size: 0.79rem; color: #B3B3B3; line-height: 1.45;">Wait ~60 s while we<br>crunch the numbers</div>
         </div>
