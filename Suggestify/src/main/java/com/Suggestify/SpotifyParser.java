@@ -54,10 +54,37 @@ public class SpotifyParser {
             DatabaseManager.initializeSchema();
             DatabaseImporter importer = new DatabaseImporter();
             importer.importRecords(allRecords, username);
+            System.out.println("✅ Import complete!");
+
+            System.out.println("Starting background enrichment concurrently...");
+
+            Thread songsThread = new Thread(() -> {
+                System.out.println("▶️ Started Song Image Updater thread.");
+                ImageUpdater.update();
+            });
+
+            Thread artistsThread = new Thread(() -> {
+                System.out.println("▶️ Started Artist Image Updater thread.");
+                ArtistImageUpdater.update();
+            });
+
+            songsThread.start();
+            artistsThread.start();
+
+            try {
+                songsThread.join();
+                artistsThread.join();
+            } catch (InterruptedException e) {
+                System.err.println("Enrichment threads were interrupted!");
+                e.printStackTrace();
+            }
+
+            System.out.println("🎉 All tasks finished successfully!");
 
         } catch (Exception e) {
-            System.err.println("Error reading ZIP file. Please verify the file path.");
+            System.err.println("Error processing data.");
             e.printStackTrace();
+            System.exit(1);
         }
     }
 }

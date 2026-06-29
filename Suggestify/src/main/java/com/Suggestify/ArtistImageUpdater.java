@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 
 public class ArtistImageUpdater {
 
-    public static void main(String[] args) {
+    public static void update() {
         System.out.println("Starting Artist Image Updater (via Deezer API)...");
 
         // Φέρνουμε τους καλλιτέχνες ταξινομημένους με βάση τα streams (Priority Loading!)
