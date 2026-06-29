@@ -17,9 +17,13 @@ public class SpotifyParser {
         mapper.registerModule(new JavaTimeModule());
         mapper.configure(JsonParser.Feature.AUTO_CLOSE_SOURCE, false);
 
+<<<<<<< HEAD
         String zipFilePath = args.length > 0 ? args[0] : "default.zip";
         String username = args.length > 1 ? args[1] : "Ody"; // <--- Παίρνουμε το username
 
+=======
+        String zipFilePath = args.length > 0 ? args[0] : "C:\\Users\\spmou\\Downloads\\my_spotify_data.zip";
+>>>>>>> main
         List<StreamingRecord> allRecords = new ArrayList<>();
 
         System.out.println("Opening ZIP file in memory...");
