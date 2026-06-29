@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Suggestify | Ody",
+    page_title="Suggestify",
     page_icon="🎧",
     layout="wide",
     initial_sidebar_state="collapsed",
