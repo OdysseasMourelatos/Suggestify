@@ -480,3 +480,32 @@ div[data-testid="stTextInput"] input {
 div[data-testid="stTextInput"] input::placeholder {
     color: VAR_TEXT_DIM !important;
 }
+
+/* --- Διορθώσεις για Κινητά (Mobile Responsive) --- */
+@media (max-width: 768px) {
+    /* Εξασφαλίζει ότι το κείμενο παίρνει τον διαθέσιμο χώρο και βάζει αποσιωπητικά αν δεν χωράει */
+    .item-info {
+        flex: 1 1 0%;
+        min-width: 0;
+        margin-right: 10px;
+    }
+    .item-title, .item-subtitle {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    /* Μικραίνει τα στατιστικά για να δώσει χώρο στο όνομα */
+    .item-stats {
+        flex-shrink: 0;
+        gap: 8px !important;
+    }
+    .stat-value {
+        font-size: 0.85rem !important;
+    }
+    
+    /* Κάνει την μπάρα πλοήγησης (Tabs) να σκρολάρει οριζόντια αντί να χαλάει η οθόνη */
+    div[data-testid="column"] {
+        min-width: auto !important;
+        flex: 0 0 auto !important;
+    }
+}
