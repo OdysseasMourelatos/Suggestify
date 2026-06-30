@@ -70,14 +70,8 @@ public class ArtistImageUpdater {
 
     private static String fetchArtistPhoto(HttpClient client, String artistName) {
         try {
-            // 1. Φτιάχνουμε αυστηρό query της μορφής: artist:"Ονομα Καλλιτέχνη"
-            String exactQuery = "artist:\"" + artistName + "\"";
-            
-            // 2. Κάνουμε encode όλο το query string με ασφάλεια
-            String encodedQuery = URLEncoder.encode(exactQuery, StandardCharsets.UTF_8.toString());
-            
-            // 3. Προσθέτουμε το strict=on για να απαγορεύσουμε στο Deezer να μαντεύει άσχετα πράγματα
-            String url = "https://api.deezer.com/search/artist?q=" + encodedQuery + "&strict=on&limit=1";
+            String encodedName = URLEncoder.encode(artistName, StandardCharsets.UTF_8.toString());
+            String url = "https://api.deezer.com/search/artist?q=" + encodedName + "&limit=1";
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
