@@ -1,5 +1,5 @@
 # 1. Βήμα: Εγκαθιστούμε τη Java 23 από τα επίσημα repositories της Eclipse Temurin
-FROM eclipse-temurin:23-jre-jammy AS java_runtime
+FROM eclipse-temurin:23-jre AS java_runtime
 
 # 2. Βήμα: Συνδυάζουμε την Python για να τρέξει παράλληλα το Streamlit
 FROM python:3.11-slim
