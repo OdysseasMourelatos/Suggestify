@@ -56,7 +56,7 @@ public class ArtistImageUpdater {
                     }
 
                     apiCalls++;
-                    Thread.sleep(100); // 100ms delay για να είμαστε καλά παιδιά στο API του Deezer
+                    Thread.sleep(100);
                 }
             }
 
