@@ -4,6 +4,7 @@ import time
 import os
 import tempfile
 import threading
+import sys
 
 # ══════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -268,10 +269,25 @@ elif st.session_state.upload_state == "processing":
     if result.returncode == 0:
         render_proc(100, st.session_state.log_lines + ["🎉  Import complete!"])
         time.sleep(0.8)
+        
+        # 🚀 ΞΕΚΙΝΗΜΑ ΤΩΝ IMAGE UPDATERS ΣΤΟ ΠΑΡΑΣΚΗΝΙΟ (FIRE AND FORGET)
+        # Θα τρέχουν αθόρυβα μέσω του Λειτουργικού Συστήματος
+        flags = 0
+        if sys.platform == "win32":
+            flags = subprocess.CREATE_NO_WINDOW # Κρύβει το CMD window στα Windows
+
+        try:
+            # Τρέχουμε τις συγκεκριμένες κλάσεις μέσα από το JAR ανεξάρτητα
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ImageUpdater"], creationflags=flags)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ArtistImageUpdater"], creationflags=flags)
+        except Exception as e:
+            print(f"Background tasks failed: {e}")
+
         try:
             os.unlink(st.session_state.saved_zip_path)
         except Exception:
             pass
+        
         st.session_state.upload_state = "done"
         st.rerun()
     else:

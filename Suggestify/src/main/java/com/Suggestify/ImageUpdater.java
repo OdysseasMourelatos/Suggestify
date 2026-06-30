@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 
 public class ImageUpdater {
 
-    public static void update() {
+    public static void main(String[] args) {
         System.out.println("Starting PRIORITY background image updater...");
 
         // ΒΗΜΑ 1: Albums ταξινομημένα με βάση τα συνολικά streams των τραγουδιών τους!
