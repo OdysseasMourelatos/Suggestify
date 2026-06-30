@@ -1,17 +1,29 @@
 package com.Suggestify;
 
+import java.net.URI;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 
 public class DatabaseManager {
 
-    private static final String URL = "jdbc:postgresql://localhost:5432/spotify_db";
-    private static final String USER = "postgres";
-    private static final String PASSWORD = "secret";
-
     public static Connection getConnection() throws Exception {
-        return DriverManager.getConnection(URL, USER, PASSWORD);
+        String envDbUrl = System.getenv("DATABASE_URL");
+
+        if (envDbUrl != null && !envDbUrl.trim().isEmpty()) {
+            URI dbUri = new URI(envDbUrl);
+            String username = dbUri.getUserInfo().split(":")[0];
+            String password = dbUri.getUserInfo().split(":")[1];
+            int port = dbUri.getPort() != -1 ? dbUri.getPort() : 5432;
+
+            String dbUrl = "jdbc:postgresql://" + dbUri.getHost() + ":" + port + dbUri.getPath();
+            return DriverManager.getConnection(dbUrl, username, password);
+        } else {
+            String URL = "jdbc:postgresql://localhost:5432/spotify_db";
+            String USER = "postgres";
+            String PASSWORD = "secret";
+            return DriverManager.getConnection(URL, USER, PASSWORD);
+        }
     }
 
     public static void initializeSchema() {
