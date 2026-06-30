@@ -267,21 +267,33 @@ elif st.session_state.upload_state == "processing":
 
     result = result_holder["result"]
     if result.returncode == 0:
-        render_proc(100, st.session_state.log_lines + ["🎉  Import complete!"])
-        time.sleep(0.8)
+        # 1. Γρήγορο (αλλά ομαλό) γέμισμα μέχρι το 80% αν η Java τελείωσε νωρίς
+        current_pct = st.session_state.progress_pct
+        while current_pct < 80:
+            current_pct += 2
+            render_proc(min(current_pct, 80), st.session_state.log_lines)
+            time.sleep(0.02)
+            
+        st.session_state.log_lines.append("🎉  Database import complete!")
+        render_proc(80, st.session_state.log_lines)
         
-        # 🚀 ΞΕΚΙΝΗΜΑ ΤΩΝ IMAGE UPDATERS ΣΤΟ ΠΑΡΑΣΚΗΝΙΟ (FIRE AND FORGET)
-        # Θα τρέχουν αθόρυβα μέσω του Λειτουργικού Συστήματος
+        # 2. 🚀 ΞΕΚΙΝΗΜΑ ΤΩΝ IMAGE UPDATERS ΣΤΟ ΠΑΡΑΣΚΗΝΙΟ
         flags = 0
         if sys.platform == "win32":
-            flags = subprocess.CREATE_NO_WINDOW # Κρύβει το CMD window στα Windows
+            flags = subprocess.CREATE_NO_WINDOW
 
         try:
-            # Τρέχουμε τις συγκεκριμένες κλάσεις μέσα από το JAR ανεξάρτητα
             subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ImageUpdater"], creationflags=flags)
             subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ArtistImageUpdater"], creationflags=flags)
         except Exception as e:
             print(f"Background tasks failed: {e}")
+
+        # 3. Ομαλή αναμονή 10 δευτερολέπτων (γεμίζει σιγά-σιγά από το 80% στο 100%)
+        st.session_state.log_lines.append("🖼️  Fetching initial cover art from Spotify...")
+        for i in range(1, 101):
+            pct = 80 + int(20 * (i / 100))
+            render_proc(pct, st.session_state.log_lines)
+            time.sleep(0.1) # 100 βήματα * 0.1s = 10 δευτερόλεπτα
 
         try:
             os.unlink(st.session_state.saved_zip_path)
@@ -294,7 +306,6 @@ elif st.session_state.upload_state == "processing":
         st.session_state.upload_state = "error"
         st.session_state.error_msg = result.stderr or "Unknown error."
         st.rerun()
-
 # ══════════════════════════════════════════════════════════════════
 # DONE & ERROR
 # ══════════════════════════════════════════════════════════════════

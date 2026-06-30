@@ -214,7 +214,7 @@ CONNECTION_STRING = "postgresql://postgres:secret@localhost:5432/spotify_db"
 def get_engine():
     return create_engine(CONNECTION_STRING, pool_pre_ping=True, pool_size=5)
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)
 def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
     with get_engine().connect() as conn:
         return pd.read_sql(text(sql), conn, params=params or {})
@@ -243,7 +243,8 @@ def get_item_icon(link_type: str) -> str:
 
 def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str,
                    id_col: str = None, link_type: str = None, image_col: str = "image_url",
-                   rank_col: str = None, reveal_top_n: int = 0):
+                   rank_col: str = None, reveal_top_n: int = 0,
+                   reveal_delay_base: float = 0.5, reveal_delay_step: float = 0.2):
     """
     Modern list renderer using pure HTML <a> tags.
     reveal_top_n: αν > 0, τα πρώτα N items εμφανίζονται με staggered animation (1→N, δηλ. το #1 πρώτο).
@@ -270,7 +271,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         # Τα top-N items: rank=1 εμφανίζεται 1ο (μικρό delay), rank=N τελευταίο (μεγάλο delay)
         reveal_style = ""
         if reveal_top_n > 0 and rank <= reveal_top_n:
-            delay = 0.5 + (rank - 1) * 0.2
+            delay = reveal_delay_base + (rank - 1) * reveal_delay_step
             reveal_style = f'style="animation-delay: {delay:.1f}s;"'
 
         reveal_class = "list-item-reveal" if reveal_style else ""
@@ -1117,7 +1118,8 @@ elif current_tab == "tracks":
         
         if not df_songs.empty:
             render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
-                           "song_id", "song") # rank_col is omitted, so it defaults to local rank!
+               "song_id", "song",
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
 
@@ -1137,8 +1139,9 @@ elif current_tab == "tracks":
         """, query_params)
 
         if not df_songs.empty:
-            render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
-                           "song_id", "song", rank_col="global_rank")
+           render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
+               "song_id", "song", rank_col="global_rank",
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
 
@@ -1172,7 +1175,8 @@ elif current_tab == "artists":
         if not df_artists.empty:
             df_artists["subtitle"] = "Artist"
             render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
-                           "artist_id", "artist") # Defaults to local rank
+               "artist_id", "artist",
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
 
@@ -1193,7 +1197,8 @@ elif current_tab == "artists":
         if not df_artists.empty:
             df_artists["subtitle"] = "Artist"
             render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
-                           "artist_id", "artist", rank_col="global_rank")
+               "artist_id", "artist", rank_col="global_rank",
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
 
@@ -1246,7 +1251,9 @@ elif current_tab == "albums":
         
         if not df_albums.empty:
             render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
-                           "album_id", "album")
+               "album_id", "album",
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
+
         else:
             st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
 
@@ -1269,7 +1276,8 @@ elif current_tab == "albums":
 
         if not df_albums.empty:
             render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
-                           "album_id", "album", rank_col="global_rank")
+               "album_id", "album", rank_col="global_rank",
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
             
@@ -1352,6 +1360,7 @@ elif current_tab == "genres":
 
     if not df_genres.empty:
         render_list_v2(df_genres, "genre_name", "subtitle", "streams", "hours_played",
-                       "genre_id", "genre")
+               "genre_id", "genre",
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
     else:
         st.markdown('<div class="empty-state"><div class="icon">🎸</div>No genres found</div>', unsafe_allow_html=True)
