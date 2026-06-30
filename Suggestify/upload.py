@@ -16,7 +16,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-JAVA_JAR_PATH = r"C:\Users\spmou\IdeaProjects\SuggestifyProject\out\artifacts\SuggestifyProject_jar\SuggestifyProject.jar"
+current_dir = os.path.dirname(os.path.abspath(__file__))
+JAVA_JAR_PATH = os.path.join(current_dir, "SuggestifyProject.jar")
 
 # ══════════════════════════════════════════════════════════════════
 # LOAD EXTERNAL CSS & LOCAL OVERRIDES
