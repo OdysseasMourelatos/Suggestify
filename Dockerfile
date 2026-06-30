@@ -2,7 +2,7 @@
 FROM python:3.11-slim
 
 # Εγκαθιστούμε τη Java (JRE)
-RUN apt-get update && apt-get install -y default-jre
+RUN apt-get update && apt-get install -y openjdk-23-jre-headless
 
 # Φτιάχνουμε τον φάκελο εργασίας
 WORKDIR /app
