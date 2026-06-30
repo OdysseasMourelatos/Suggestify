@@ -482,75 +482,72 @@ div[data-testid="stTextInput"] input::placeholder {
 }
 
 /* ========================================================
-   MOBILE RESPONSIVE FIXES (Aggressive)
+   MOBILE RESPONSIVE FIXES (Bulletproof)
    ======================================================== */
 @media (max-width: 768px) {
-    /* 1. Διόρθωση των Λιστών (Tracks/Artists/Albums) */
+    /* Δίνουμε όλο τον χώρο της οθόνης, μειώνουμε τα τεράστια κενά αριστερά-δεξιά */
+    .block-container {
+        padding: 1rem 0.5rem 4rem !important; 
+    }
+    
+    /* Η κάρτα δεν πρέπει ποτέ να βγαίνει έξω από την οθόνη */
     .list-item {
-        padding: 8px !important;
-        gap: 8px !important;
+        padding: 10px 8px !important;
+        gap: 5px !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
     }
+
+    /* Μικραίνουμε τον αριθμό κατάταξης (Rank) */
+    .item-rank {
+        width: 20px !important;
+        min-width: 20px !important;
+        font-size: 1rem !important;
+        margin-right: 5px !important;
+    }
+
+    /* Μικραίνουμε την εικόνα */
+    .item-art {
+        width: 38px !important;
+        height: 38px !important;
+        margin-right: 8px !important;
+    }
+
+    /* ΥΠΟΧΡΕΩΤΙΚΟ για να δουλέψει το κόψιμο με αποσιωπητικά (...) */
     .item-info {
-        flex: 1 1 0% !important; /* Αναγκάζει το κείμενο να πάρει τον χώρο */
-        min-width: 0 !important; /* Αποτρέπει το overflow */
-        padding-right: 5px;
+        flex: 1 !important;
+        min-width: 0 !important; 
+        padding-right: 5px !important;
     }
-    .item-title {
-        font-size: 0.95rem !important;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis; /* Βάζει ... αν δεν χωράει */
+    .item-title, .item-subtitle {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        display: block !important;
+        max-width: 100% !important;
     }
-    .item-subtitle {
-        font-size: 0.75rem !important;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
+
+    /* Συμπιέζουμε τα νούμερα τέρμα δεξιά */
     .item-stats {
-        flex: 0 0 auto !important; /* Αποτρέπει τα στατιστικά από το να κλέβουν χώρο */
+        flex: 0 0 auto !important;
         gap: 6px !important;
+        padding-left: 0 !important;
     }
     .stat-value {
-        font-size: 0.75rem !important; /* Πολύ μικρότερα νούμερα στο κινητό */
+        font-size: 0.8rem !important;
     }
     .stat-label {
-        font-size: 0.6rem !important;
-    }
-    .item-rank {
-        font-size: 1rem !important;
-        min-width: 20px !important;
-    }
-    .item-art {
-        width: 40px !important;
-        height: 40px !important;
+        font-size: 0.55rem !important;
     }
 
-    /* 2. Διόρθωση της τεράστιας Κεφαλίδας (Artist/Album) */
-    .detail-header {
-        flex-direction: column !important; /* Τα βάζει το ένα κάτω από το άλλο */
-        align-items: flex-start !important;
-        padding: 15px !important;
-    }
-    .detail-art {
-        width: 100px !important;
-        height: 100px !important;
-        margin-bottom: 15px;
-    }
-    .detail-stats {
-        flex-wrap: wrap !important;
-        gap: 10px !important;
-        margin-top: 15px !important;
-        justify-content: flex-start !important;
+    /* ΚΡΥΒΟΥΜΕ το βελάκι (→) στο κινητό για να κερδίσουμε πολύτιμο χώρο */
+    .item-arrow {
+        display: none !important;
     }
 
-    /* 3. Διόρθωση στα Tabs/Buttons για να μη βγαίνουν εκτός */
-    div[data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important;
-        gap: 5px !important;
-    }
+    /* Διόρθωση Tabs (Overview, Tracks, Artists κλπ) για να μην σπάνε το πλάτος */
     div[data-testid="column"] {
-        min-width: 30% !important; /* Επιτρέπει στα tabs να διπλώσουν */
+        min-width: 30% !important; 
         flex: 1 1 auto !important;
     }
 }
