@@ -217,11 +217,11 @@ CONNECTION_STRING = os.environ.get("DATABASE_URL", "postgresql://postgres:secret
 def get_engine():
     return create_engine(CONNECTION_STRING, pool_pre_ping=True, pool_size=5)
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False, hash_funcs={dict: lambda _: None})
 def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
     with get_engine().connect() as conn:
         return pd.read_sql(text(sql), conn, params=params or {})
-
+    
 @st.cache_data(ttl=600, show_spinner=False)
 def get_date_bounds() -> tuple[datetime.date, datetime.date]:
     df = run_query("SELECT MIN(played_at)::date AS mn, MAX(played_at)::date AS mx FROM streams;")

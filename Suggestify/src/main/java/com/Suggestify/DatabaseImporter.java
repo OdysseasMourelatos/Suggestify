@@ -1,4 +1,4 @@
-package com.Suggestify;
+\package com.Suggestify;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -25,12 +25,39 @@ public class DatabaseImporter {
     private final Map<String, Integer> songCache = new HashMap<>();
     private final Map<String, Integer> albumCache = new HashMap<>();
 
+    private void preloadCaches(Connection conn) throws Exception {
+        System.out.println("Pre-loading caches to bypass network latency...");
+        try (Statement stmt = conn.createStatement()) {
+            try (ResultSet rs = stmt.executeQuery("SELECT id, name FROM artists")) {
+                while (rs.next()) artistCache.put(rs.getString("name"), rs.getInt("id"));
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT id, title FROM albums")) {
+                while (rs.next()) albumCache.put(rs.getString("title"), rs.getInt("id"));
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT s.id, s.title, s.track_uri, sa.artist_id FROM songs s LEFT JOIN song_artists sa ON s.id = sa.song_id AND sa.is_feature = FALSE")) {
+                while (rs.next()) {
+                    String uri = rs.getString("track_uri");
+                    if (uri != null && !uri.isEmpty()) {
+                        songCache.put(uri, rs.getInt("id"));
+                    } else {
+                        String title = rs.getString("title");
+                        int artistId = rs.getInt("artist_id");
+                        if (rs.wasNull()) artistId = -1;
+                        songCache.put(title.toLowerCase() + "|" + artistId, rs.getInt("id"));
+                    }
+                }
+            }
+        }
+        System.out.println("Caches loaded! Artists: " + artistCache.size() + ", Albums: " + albumCache.size());
+    }
+
     public void importRecords(List<StreamingRecord> records, String username) {
         String insertStreamSQL = "INSERT INTO streams (user_id, song_id, played_at, ms_played) VALUES (?, ?, ?, ?)";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement streamStmt = conn.prepareStatement(insertStreamSQL)) {
 
+            preloadCaches(conn);
             int userId = getOrCreateUser(conn, username);
 
             conn.setAutoCommit(false);

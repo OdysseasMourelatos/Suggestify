@@ -481,31 +481,76 @@ div[data-testid="stTextInput"] input::placeholder {
     color: VAR_TEXT_DIM !important;
 }
 
-/* --- Διορθώσεις για Κινητά (Mobile Responsive) --- */
+/* ========================================================
+   MOBILE RESPONSIVE FIXES (Aggressive)
+   ======================================================== */
 @media (max-width: 768px) {
-    /* Εξασφαλίζει ότι το κείμενο παίρνει τον διαθέσιμο χώρο και βάζει αποσιωπητικά αν δεν χωράει */
-    .item-info {
-        flex: 1 1 0%;
-        min-width: 0;
-        margin-right: 10px;
+    /* 1. Διόρθωση των Λιστών (Tracks/Artists/Albums) */
+    .list-item {
+        padding: 8px !important;
+        gap: 8px !important;
     }
-    .item-title, .item-subtitle {
+    .item-info {
+        flex: 1 1 0% !important; /* Αναγκάζει το κείμενο να πάρει τον χώρο */
+        min-width: 0 !important; /* Αποτρέπει το overflow */
+        padding-right: 5px;
+    }
+    .item-title {
+        font-size: 0.95rem !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis; /* Βάζει ... αν δεν χωράει */
+    }
+    .item-subtitle {
+        font-size: 0.75rem !important;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    /* Μικραίνει τα στατιστικά για να δώσει χώρο στο όνομα */
     .item-stats {
-        flex-shrink: 0;
-        gap: 8px !important;
+        flex: 0 0 auto !important; /* Αποτρέπει τα στατιστικά από το να κλέβουν χώρο */
+        gap: 6px !important;
     }
     .stat-value {
-        font-size: 0.85rem !important;
+        font-size: 0.75rem !important; /* Πολύ μικρότερα νούμερα στο κινητό */
     }
-    
-    /* Κάνει την μπάρα πλοήγησης (Tabs) να σκρολάρει οριζόντια αντί να χαλάει η οθόνη */
+    .stat-label {
+        font-size: 0.6rem !important;
+    }
+    .item-rank {
+        font-size: 1rem !important;
+        min-width: 20px !important;
+    }
+    .item-art {
+        width: 40px !important;
+        height: 40px !important;
+    }
+
+    /* 2. Διόρθωση της τεράστιας Κεφαλίδας (Artist/Album) */
+    .detail-header {
+        flex-direction: column !important; /* Τα βάζει το ένα κάτω από το άλλο */
+        align-items: flex-start !important;
+        padding: 15px !important;
+    }
+    .detail-art {
+        width: 100px !important;
+        height: 100px !important;
+        margin-bottom: 15px;
+    }
+    .detail-stats {
+        flex-wrap: wrap !important;
+        gap: 10px !important;
+        margin-top: 15px !important;
+        justify-content: flex-start !important;
+    }
+
+    /* 3. Διόρθωση στα Tabs/Buttons για να μη βγαίνουν εκτός */
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+        gap: 5px !important;
+    }
     div[data-testid="column"] {
-        min-width: auto !important;
-        flex: 0 0 auto !important;
+        min-width: 30% !important; /* Επιτρέπει στα tabs να διπλώσουν */
+        flex: 1 1 auto !important;
     }
 }
