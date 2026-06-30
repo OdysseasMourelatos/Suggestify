@@ -299,10 +299,42 @@ elif st.session_state.upload_state == "processing":
 # DONE & ERROR
 # ══════════════════════════════════════════════════════════════════
 elif st.session_state.upload_state == "done":
-    st.success("Your data is ready! Head to the dashboard to explore.")
-    if st.button("↩  Import another file"):
-        st.session_state.upload_state = "idle"
-        st.rerun()
+    username = st.session_state.get("username_to_import", "")
+
+    st.markdown(f"""
+    <div style="text-align: center; padding: 3.5rem 2rem; background: rgba(22,22,22,0.95);
+                border: 1px solid #1DB954; border-radius: 24px; margin: 2rem 0;
+                position: relative; overflow: hidden;">
+        <div style="position: absolute; top: -80px; left: 50%; transform: translateX(-50%);
+                    width: 400px; height: 400px;
+                    background: radial-gradient(ellipse, rgba(29,185,84,0.12) 0%, transparent 70%);
+                    pointer-events: none;"></div>
+        <div style="font-size: 3.5rem; margin-bottom: 1rem; animation: breathe 3s ease-in-out infinite;">🎉</div>
+        <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+                    letter-spacing: 0.18em; color: #1DB954; margin-bottom: 0.5rem;">Import Complete</div>
+        <div style="font-size: 2.2rem; font-weight: 900; color: #FFFFFF;
+                    letter-spacing: -0.04em; margin-bottom: 0.75rem;">
+            {"Welcome, " + username + "! 🎧" if username else "Your data is ready! 🎧"}
+        </div>
+        <p style="color: #B3B3B3; font-size: 0.95rem; line-height: 1.6;
+                  max-width: 380px; margin: 0 auto 0.5rem;">
+            Your Spotify history has been imported and is ready to explore.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        if st.button("🎧  Open Dashboard →", type="primary", use_container_width=True):
+            st.switch_page("pages/app.py")   # ← adjust to your actual page filename
+        
+        st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
+        
+        if st.button("↩  Import another file", use_container_width=True):
+            st.session_state.upload_state = "idle"
+            st.rerun()
 
 elif st.session_state.upload_state == "error":
     st.error(f"Import failed: {st.session_state.get('error_msg', '')[:600]}")
