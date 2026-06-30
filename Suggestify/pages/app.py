@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from sqlalchemy import create_engine, text
 import datetime
 import warnings
+import os
 from html import escape
 warnings.filterwarnings("ignore")
 
@@ -38,8 +39,10 @@ TEXT_DIM  = "#727272"
 # LOAD EXTERNAL CSS
 # ══════════════════════════════════════════════════════════════════
 def load_css():
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    css_path = os.path.join(os.path.dirname(current_dir), "static", "styles.css")
     try:
-        with open("static/styles.css", "r", encoding="utf-8") as f:
+        with open(css_path, "r", encoding="utf-8") as f:
             css = f.read()
             
         # Το λεξικό ορίζεται με φθίνουσα σειρά μεγέθους κλειδιού
@@ -208,7 +211,7 @@ div[data-testid="stDateInput"] input:focus {{
 # ══════════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════════
-CONNECTION_STRING = "postgresql://postgres:secret@localhost:5432/spotify_db"
+CONNECTION_STRING = os.environ.get("DATABASE_URL", "postgresql://postgres:secret@localhost:5432/spotify_db")
 
 @st.cache_resource
 def get_engine():
