@@ -17,15 +17,13 @@ Using Spotify Extended Streaming History data, Suggestify analyzes listening hab
 
 ## Tech Stack
 
-* **Backend:** Java
+* **Frontend & File Processing:** Python (Streamlit)
+* **Backend & Data Ingestion:** Java (JAR CLI integration)
 * **Recommendation Engine:** Python
-* **Database:** SQL
-* **Frontend:** HTML, CSS, JavaScript
+* **Database:** SQL & PostgreSQL
 
 ## Vision
 
 Most music platforms focus on what you're listening to now. Suggestify focuses on your complete listening journey, helping users discover patterns, revisit forgotten favorites, and receive recommendations based on their actual listening behavior.
-
----
 
 **Suggestify — Understand your music. Discover your next favorite song.** 🎶
