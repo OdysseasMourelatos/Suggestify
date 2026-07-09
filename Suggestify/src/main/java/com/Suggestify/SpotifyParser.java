@@ -30,6 +30,8 @@ public class SpotifyParser {
 
         System.out.println("Opening ZIP file in memory...");
 
+        DatabaseManager.initializeSchema();
+        
         try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFilePath))) {
             ZipEntry entry;
 

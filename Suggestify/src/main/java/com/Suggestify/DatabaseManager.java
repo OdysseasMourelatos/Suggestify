@@ -27,7 +27,7 @@ public class DatabaseManager {
     }
 
     public static void initializeSchema() {
-        String dropTables = "DROP TABLE IF EXISTS streams, album_genres, genres, song_artists, songs, artists, albums, users CASCADE;";
+        //String dropTables = "DROP TABLE IF EXISTS streams, album_genres, genres, song_artists, songs, artists, albums, users CASCADE;";
 
         String createUsersTable = """
             CREATE TABLE IF NOT EXISTS users (
@@ -93,7 +93,7 @@ public class DatabaseManager {
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
 
-            stmt.execute(dropTables);
+            //stmt.execute(dropTables);
 
             stmt.execute(createUsersTable);
             stmt.execute(createArtistsTable);

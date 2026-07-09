@@ -58,7 +58,15 @@ public class DatabaseImporter {
              PreparedStatement streamStmt = conn.prepareStatement(insertStreamSQL)) {
 
             preloadCaches(conn);
+            
             int userId = getOrCreateUser(conn, username);
+
+            // Καθαρίζουμε το ιστορικό του χρήστη πριν ανεβάσουμε το νέο ZIP
+            try (PreparedStatement clearStmt = conn.prepareStatement("DELETE FROM streams WHERE user_id = ?")) {
+                clearStmt.setInt(1, userId);
+                clearStmt.executeUpdate();
+            }
+            // ----------------------------------------
 
             conn.setAutoCommit(false);
             int count = 0;
