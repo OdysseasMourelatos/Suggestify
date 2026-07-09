@@ -51,7 +51,6 @@ public class SpotifyParser {
             EntityExtractor extractor = new EntityExtractor();
             extractor.extractEntities(allRecords);
 
-            DatabaseManager.initializeSchema();
             DatabaseImporter importer = new DatabaseImporter();
             importer.importRecords(allRecords, username);
             System.out.println("✅ Import complete!");

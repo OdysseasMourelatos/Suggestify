@@ -6,10 +6,23 @@ html, body, [class*="css"] {
     background: VAR_BG !important;
     color: VAR_TEXT !important;
 }
-#MainMenu, footer, header { visibility: hidden; }
+#MainMenu, footer { visibility: hidden; }
+
+/* Kill Streamlit's default header bar + colored decoration strip entirely
+   (visibility:hidden alone keeps the empty space — this removes it) */
+header[data-testid="stHeader"] {
+    display: none !important;
+    height: 0 !important;
+}
+div[data-testid="stDecoration"] { display: none !important; }
+div[data-testid="stToolbar"] { display: none !important; }
+
 .block-container {
-    padding: 0.5rem 2rem 4rem !important;
+    padding: 0 2rem 4rem !important;
     max-width: 100% !important;
+}
+.main .block-container {
+    padding-top: 0 !important;
 }
 
 /* ─── PAGE TRANSITIONS ─── */
@@ -549,5 +562,103 @@ div[data-testid="stTextInput"] input::placeholder {
     div[data-testid="column"] {
         min-width: 30% !important; 
         flex: 1 1 auto !important;
+    }
+
+    /* ─── NAVBAR ─── */
+    .navbar {
+        margin: 0 -0.5rem 1rem -0.5rem !important;
+        padding: 0.5rem 0.5rem !important;
+    }
+    .navbar-content {
+        gap: 0.5rem !important;
+    }
+    .nav-brand {
+        font-size: 1.05rem !important;
+        gap: 0.4rem !important;
+        margin-bottom: 0.4rem !important;
+    }
+    .nav-brand span { font-size: 1.3rem !important; }
+
+    /* Nav + secondary buttons (tabs, back button) */
+    div[data-testid="stButton"] button {
+        font-size: 0.68rem !important;
+        padding: 0.4rem 0.25rem !important;
+        line-height: 1.1 !important;
+        min-height: 2.1rem !important;
+    }
+
+    /* Period / date pickers: stack and shrink so text never clips */
+    div[data-baseweb="select"] > div,
+    div[data-testid="stDateInput"] input {
+        font-size: 0.72rem !important;
+        padding: 0.35rem 0.5rem !important;
+    }
+
+    /* ─── KPI CARDS ─── */
+    .kpi-grid {
+        gap: 0.6rem !important;
+    }
+    div[data-testid="column"]:has(.kpi-card) {
+        min-width: 47% !important;
+    }
+    .kpi-card {
+        padding: 0.85rem 1rem !important;
+    }
+    .kpi-icon { font-size: 1.15rem !important; margin-bottom: 0.3rem !important; }
+    .kpi-title { font-size: 0.6rem !important; }
+    .kpi-value { font-size: 1.5rem !important; }
+    .kpi-unit { font-size: 0.75rem !important; }
+
+    /* ─── SECTION HEADERS ─── */
+    .section-header {
+        font-size: 1rem !important;
+        margin: 1.5rem 0 0.9rem !important;
+        gap: 0.5rem !important;
+    }
+    .section-header .icon { font-size: 0.95rem !important; }
+
+    /* ─── DETAIL HEADER (song/artist/album/genre page) ─── */
+    .detail-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 1rem !important;
+        padding: 1rem !important;
+        text-align: left;
+    }
+    .detail-art {
+        width: 84px !important;
+        height: 84px !important;
+        font-size: 2rem !important;
+    }
+    .detail-title { font-size: 1.4rem !important; }
+    .detail-subtitle { font-size: 0.85rem !important; }
+    .detail-stats {
+        width: 100% !important;
+        gap: 0.6rem !important;
+        justify-content: space-between !important;
+    }
+    .detail-stat {
+        flex: 1 !important;
+        padding: 0.6rem 0.5rem !important;
+    }
+    .detail-stat-value { font-size: 1.2rem !important; }
+    .detail-stat-label { font-size: 0.58rem !important; }
+
+    /* ─── CHARTS ─── */
+    .chart-container {
+        padding: 0.85rem !important;
+        border-radius: 12px !important;
+    }
+    .chart-title { font-size: 0.75rem !important; margin-bottom: 0.6rem !important; }
+
+    /* ─── WRAPPED BANNER ─── */
+    .wrapped-banner { padding: 1.25rem !important; }
+    .wrapped-title { font-size: 1.6rem !important; }
+    .wrapped-subtitle { font-size: 0.85rem !important; }
+
+    /* ─── SEARCH INPUTS ─── */
+    div[data-testid="stTextInput"] input {
+        font-size: 0.85rem !important;
+        padding: 0.6rem 0.8rem !important;
     }
 }

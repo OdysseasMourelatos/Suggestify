@@ -211,8 +211,7 @@ div[data-testid="stDateInput"] input:focus {{
 # ══════════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════════
-CONNECTION_STRING = os.environ.get("DATABASE_URL", "postgresql://postgres:secret@localhost:5432/spotify_db")
-
+CONNECTION_STRING = os.environ.get("DATABASE_URL", "postgresql://postgres:dKPJjO2jZtkmwjYh@db.pxpplxyszvrzubdqykmw.supabase.co:5432/postgres")
 @st.cache_resource
 def get_engine():
     return create_engine(CONNECTION_STRING, pool_pre_ping=True, pool_size=5)
@@ -577,8 +576,16 @@ with nav_col:
                 if curr_end: st.query_params["end"] = curr_end
                 
                 st.rerun()
+try:
+    users_df = run_query("SELECT id, username FROM users ORDER BY username")
+    user_dict = dict(zip(users_df['username'], users_df['id']))
+except:
+    user_dict = {"Ody": 1} 
 
 with date_col:
+    selected_username = st.selectbox("👤 User", options=list(user_dict.keys()), label_visibility="collapsed")
+    selected_user_id = user_dict[selected_username]
+    
     preset_col, d1_col, d2_col = st.columns([1.4, 1, 1])
 
     with preset_col:
@@ -603,7 +610,11 @@ with date_col:
 st.markdown('</div></div>', unsafe_allow_html=True)
 
 # Κλειδώνουμε τα φίλτρα για τα queries
-F = {"start_date": st.session_state.start_date, "end_date": st.session_state.end_date}
+F = {
+    "start_date": st.session_state.start_date, 
+    "end_date": st.session_state.end_date,
+    "user_id": selected_user_id
+}
 
 # ══════════════════════════════════════════════════════════════════
 # DETAIL VIEWS

@@ -6,6 +6,9 @@ import tempfile
 import threading
 import sys
 
+DB_URL = "postgresql://postgres:dKPJjO2jZtkmwjYh@db.pxpplxyszvrzubdqykmw.supabase.co:5432/postgres"
+
+os.environ["DATABASE_URL"] = DB_URL
 # ══════════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════════
