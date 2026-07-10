@@ -311,6 +311,8 @@ elif st.session_state.upload_state == "processing":
         if "import_running" in st.session_state:
             del st.session_state["import_running"]
             
+        st.cache_data.clear()
+            
         st.session_state.upload_state = "done"
         st.rerun()
     else:
@@ -353,6 +355,7 @@ elif st.session_state.upload_state == "done":
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         if st.button("🎧  Open Dashboard →", type="primary", use_container_width=True):
+            st.cache_data.clear()
             st.switch_page("pages/app.py")   # ← adjust to your actual page filename
         
         st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
