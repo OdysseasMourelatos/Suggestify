@@ -628,9 +628,35 @@ div[data-testid="stTextInput"] input::placeholder {
     }
 
     /* Διόρθωση Tabs (Overview, Tracks, Artists κλπ) για να μην σπάνε το πλάτος */
-    div[data-testid="column"] {
-        min-width: 30% !important; 
-        flex: 1 1 auto !important;
+    /* ─── SWIPEABLE TAB MENU (Spotify Style) ─── */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1) {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: none !important;
+        /* Απλώνει το μενού από άκρη σε άκρη στην οθόνη */
+        margin: 0 -0.5rem 1rem -0.5rem !important; 
+        padding: 0 0.5rem 0.5rem 0.5rem !important;
+    }
+    
+    /* Κρύβει την άσχημη μπάρα του scroll (Chrome/Safari) */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1)::-webkit-scrollbar {
+        display: none !important;
+    }
+    
+    /* Κρατάει τα κουμπιά στο φυσικό τους μέγεθος για να γίνεται swipe */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1) > [data-testid="column"] {
+        flex: 0 0 auto !important;
+        min-width: max-content !important;
+        width: auto !important;
+    }
+    
+    /* Κάνει τα tab buttons πιο στρογγυλεμένα σαν mobile "Pills" */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1) button {
+        padding: 0.4rem 1.1rem !important;
+        font-size: 0.8rem !important;
+        border-radius: 20px !important; 
     }
 
     /* ─── NAVBAR ─── */
