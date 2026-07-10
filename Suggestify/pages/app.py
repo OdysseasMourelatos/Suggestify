@@ -129,7 +129,12 @@ CONNECTION_STRING = os.environ.get("DATABASE_URL", NEW_DB_URL)
 
 @st.cache_resource
 def get_engine():
-    return create_engine(CONNECTION_STRING, pool_pre_ping=True, pool_size=5)
+    return create_engine(
+        CONNECTION_STRING, 
+        pool_pre_ping=True, 
+        pool_size=5,
+        connect_args={'sslmode': 'require'}
+    )
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
@@ -429,9 +434,13 @@ detail_type = view_state["type"]
 detail_id = view_state["id"]
 
 # ─── NAVBAR: brand + tab row ───
-st.markdown('<div class="navbar"><div class="navbar-content">', unsafe_allow_html=True)
-st.markdown('<div class="nav-brand"><span>🎧</span>Suggestify</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('''
+<div class="navbar">
+    <div class="navbar-content">
+        <div class="nav-brand"><span>🎧</span>Suggestify</div>
+    </div>
+</div>
+''', unsafe_allow_html=True)
 
 tabs = [
     ("overview", "📊 Overview"),
@@ -470,8 +479,7 @@ try:
 except:
     user_dict = {"Ody": 1}
 
-# ─── FILTER BAR: its own full-width row so nothing gets clipped ───
-st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
+# ─── FILTER BAR ───
 f_user, f_preset, f_start, f_end = st.columns([1.2, 1.2, 1, 1])
 
 with f_user:
@@ -503,8 +511,6 @@ with f_end:
     st.date_input("To", min_value=min_date, max_value=max_date,
                   label_visibility="collapsed", key="end_date", on_change=mark_manual)
 
-st.markdown('</div>', unsafe_allow_html=True)  # close filter-bar
-st.markdown('</div>', unsafe_allow_html=True)  # close navbar
 
 # Κλειδώνουμε τα φίλτρα για τα queries (Με το USER_ID)
 F = {
@@ -665,7 +671,6 @@ if detail_type and detail_id:
                 if not df_tracks.empty:
                     render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
                     
-                    st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("See Full List →", key=f"btn_full_tracks_{detail_id}", use_container_width=True):
                         st.query_params.clear()
                         st.query_params["tab"] = "tracks"
@@ -692,7 +697,6 @@ if detail_type and detail_id:
                     df_albums["subtitle"] = "Album"
                     render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album")
                     
-                    st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("See Full List →", key=f"btn_full_albums_{detail_id}", use_container_width=True):
                         st.query_params.clear()
                         st.query_params["tab"] = "albums"

@@ -25,6 +25,17 @@ div[data-testid="stToolbar"] { display: none !important; }
     padding-top: 0 !important;
 }
 
+/* ─── STREAMLIT ELEMENT SPACING FIXES ─── */
+div.element-container {
+    margin-bottom: 0 !important;
+}
+div[data-testid="stVerticalBlock"] > div {
+    gap: 0.2rem !important; /* Μειώνει το default κάθετο gap */
+}
+div[data-testid="stHorizontalBlock"] {
+    gap: 0.5rem !important;
+}
+
 /* ─── PAGE TRANSITIONS ─── */
 @keyframes pageEnter {
     from {
@@ -210,7 +221,8 @@ section.main > div.block-container {
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border-bottom: 1px solid VAR_BORDER;
     padding: 0.75rem 0 0;
-    margin: 0 -2rem 1.5rem -2rem;
+    /* ΑΛΛΑΓΗ ΕΔΩ: Μηδενίζουμε το bottom margin */
+    margin: 0 -2rem 0 -2rem; 
     padding-left: 2rem;
     padding-right: 2rem;
 }
@@ -242,8 +254,10 @@ section.main > div.block-container {
     align-items: flex-end;
     gap: 0.85rem;
     flex-wrap: wrap;
-    padding: 0.85rem 0 1rem;
-    border-top: 1px solid VAR_BORDER;
+    /* ΑΛΛΑΓΗ ΕΔΩ: Πιο σφιχτό padding στην κορυφή */
+    padding: 0.4rem 0 1rem; 
+    /* Προαιρετικά: border-top: none; αν φαίνεται διπλή γραμμή */
+    border-top: 1px solid VAR_BORDER; 
 }
 .filter-bar [data-testid="column"] {
     min-width: 150px;
