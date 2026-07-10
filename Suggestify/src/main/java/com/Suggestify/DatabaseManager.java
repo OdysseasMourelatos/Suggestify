@@ -11,25 +11,27 @@ public class DatabaseManager {
         String envDbUrl = System.getenv("DATABASE_URL");
 
         if (envDbUrl != null && !envDbUrl.trim().isEmpty()) {
-            URI dbUri = new URI(envDbUrl);
-            String username = dbUri.getUserInfo().split(":")[0];
-            String password = dbUri.getUserInfo().split(":")[1];
+            // Διαβάζει το URL από την Python
+            URI dbUri = new URI(envDbUrl.replace("jdbc:", "")); 
+            
+            String username = dbUri.getUserInfo() != null ? dbUri.getUserInfo().split(":")[0] : "postgres.pxpplxyszvrzubdqykmw";
+            String password = dbUri.getUserInfo() != null ? dbUri.getUserInfo().split(":")[1] : "dKPJjO2jZtkmwjYh";
             int port = dbUri.getPort() != -1 ? dbUri.getPort() : 5432;
 
             String dbUrl = "jdbc:postgresql://" + dbUri.getHost() + ":" + port + dbUri.getPath() + "?reWriteBatchedInserts=true&prepareThreshold=0";
 
             return DriverManager.getConnection(dbUrl, username, password);
         } else {
-            String URL = "jdbc:postgresql://localhost:5432/spotify_db";
-            String USER = "postgres";
-            String PASSWORD = "secret";
-            return DriverManager.getConnection("jdbc:postgresql://localhost:5432/spotify_db?reWriteBatchedInserts=true", "postgres", "secret");
+            // Hardcoded Fallback (Supabase Session Pooler IPv4)
+            String URL = "jdbc:postgresql://aws-0-eu-west-1.pooler.supabase.com:5432/postgres?reWriteBatchedInserts=true&prepareThreshold=0";
+            String USER = "postgres.pxpplxyszvrzubdqykmw";
+            String PASSWORD = "dKPJjO2jZtkmwjYh";
+            
+            return DriverManager.getConnection(URL, USER, PASSWORD);
         }
     }
 
     public static void initializeSchema() {
-        //String dropTables = "DROP TABLE IF EXISTS streams, album_genres, genres, song_artists, songs, artists, albums, users CASCADE;";
-
         String createUsersTable = """
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -44,7 +46,7 @@ public class DatabaseManager {
             CREATE TABLE IF NOT EXISTS albums (
                 id SERIAL PRIMARY KEY, 
                 title VARCHAR(255) UNIQUE NOT NULL
-               );
+            );
         """;
 
         String createSongsTable = """
@@ -94,8 +96,6 @@ public class DatabaseManager {
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
 
-            //stmt.execute(dropTables);
-
             stmt.execute(createUsersTable);
             stmt.execute(createArtistsTable);
             stmt.execute(createAlbumsTable);
@@ -105,7 +105,12 @@ public class DatabaseManager {
             stmt.execute(createAlbumGenresTable);
             stmt.execute(createStreamsTable);
 
-            stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");
+            // Προσθήκη του constraint σιωπηλά, αγνοώντας το σφάλμα αν υπάρχει ήδη
+            try {
+                stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");
+            } catch (Exception ignored) {
+                // Η βάση έχει ήδη το constraint, προχωράμε κανονικά
+            }
 
         } catch (Exception e) {
             e.printStackTrace();

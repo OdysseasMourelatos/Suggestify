@@ -123,7 +123,7 @@ div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input
 # ══════════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════════
-CONNECTION_STRING = os.environ.get("DATABASE_URL", "postgresql://postgres:dKPJjO2jZtkmwjYh@db.pxpplxyszvrzubdqykmw.supabase.co:5432/postgres")
+CONNECTION_STRING = os.environ.get("DATABASE_URL", DB_URL = "postgresql://postgres.pxpplxyszvrzubdqykmw:dKPJjO2jZtkmwjYh@aws-0-eu-west-1.pooler.supabase.com:5432/postgres")
 @st.cache_resource
 def get_engine():
     return create_engine(CONNECTION_STRING, pool_pre_ping=True, pool_size=5)
