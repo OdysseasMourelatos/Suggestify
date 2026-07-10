@@ -147,7 +147,7 @@ def save_uploaded_file(uploaded_file) -> str:
 def run_java_parser(zip_path: str, username: str):
     return subprocess.run(
         ["java", "-jar", JAVA_JAR_PATH, zip_path, username],
-        capture_output=True, text=True, timeout=300
+        capture_output=False, text=True, timeout=1200
     )
 
 # ══════════════════════════════════════════════════════════════════
@@ -245,19 +245,24 @@ elif st.session_state.upload_state == "processing":
                 unsafe_allow_html=True
             )
 
+    # Χρησιμοποιούμε απλό dictionary (όχι session_state) για να μην κρασάρει το thread του Streamlit
     result_holder = {"result": None, "done": False}
-    
-    zip_path_to_process = st.session_state.saved_zip_path
-    user_to_process = st.session_state.username_to_import
 
-    def java_thread(target_path, target_user):
-        try:
-            result_holder["result"] = run_java_parser(target_path, target_user)
-        except Exception as e:
-            result_holder["result"] = type("R", (), {"returncode": 1, "stderr": str(e), "stdout": ""})()
-        result_holder["done"] = True
+    if "import_running" not in st.session_state:
+        st.session_state.import_running = True
+        
+        zip_path_to_process = st.session_state.saved_zip_path
+        user_to_process = st.session_state.username_to_import
 
-    threading.Thread(target=java_thread, args=(zip_path_to_process, user_to_process), daemon=True).start()
+        def java_thread(target_path, target_user):
+            try:
+                res = run_java_parser(target_path, target_user)
+                result_holder["result"] = res
+            except Exception as e:
+                result_holder["result"] = type("R", (), {"returncode": 1, "stderr": str(e), "stdout": ""})()
+            result_holder["done"] = True
+
+        threading.Thread(target=java_thread, args=(zip_path_to_process, user_to_process), daemon=True).start()
 
     elapsed, interval = 0.0, 0.5
     while not result_holder["done"]:
@@ -270,8 +275,8 @@ elif st.session_state.upload_state == "processing":
         time.sleep(interval)
 
     result = result_holder["result"]
+
     if result.returncode == 0:
-        # 1. Γρήγορο (αλλά ομαλό) γέμισμα μέχρι το 80% αν η Java τελείωσε νωρίς
         current_pct = st.session_state.progress_pct
         while current_pct < 80:
             current_pct += 2
@@ -281,7 +286,6 @@ elif st.session_state.upload_state == "processing":
         st.session_state.log_lines.append("🎉  Database import complete!")
         render_proc(80, st.session_state.log_lines)
         
-        # 2. 🚀 ΞΕΚΙΝΗΜΑ ΤΩΝ IMAGE UPDATERS ΣΤΟ ΠΑΡΑΣΚΗΝΙΟ
         flags = 0
         if sys.platform == "win32":
             flags = subprocess.CREATE_NO_WINDOW
@@ -292,21 +296,26 @@ elif st.session_state.upload_state == "processing":
         except Exception as e:
             print(f"Background tasks failed: {e}")
 
-        # 3. Ομαλή αναμονή 10 δευτερολέπτων (γεμίζει σιγά-σιγά από το 80% στο 100%)
         st.session_state.log_lines.append("🖼️  Fetching initial cover art from Spotify...")
         for i in range(1, 101):
             pct = 80 + int(20 * (i / 100))
             render_proc(pct, st.session_state.log_lines)
-            time.sleep(0.1) # 100 βήματα * 0.1s = 10 δευτερόλεπτα
+            time.sleep(0.1)
 
         try:
             os.unlink(st.session_state.saved_zip_path)
         except Exception:
             pass
         
+        if "import_running" in st.session_state:
+            del st.session_state["import_running"]
+            
         st.session_state.upload_state = "done"
         st.rerun()
     else:
+        if "import_running" in st.session_state:
+            del st.session_state["import_running"]
+            
         st.session_state.upload_state = "error"
         st.session_state.error_msg = result.stderr or "Unknown error."
         st.rerun()

@@ -1,9 +1,5 @@
 package com.Suggestify;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -15,279 +11,267 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class DatabaseImporter {
 
     private static final Pattern FEAT_PATTERN = Pattern.compile("\\((?:feat\\.|ft\\.|with)\\s(.*?)\\)", Pattern.CASE_INSENSITIVE);
     private static final int BATCH_SIZE = 5000;
 
-    private final Map<String, Integer> artistCache = new HashMap<>();
-    private final Map<String, Integer> songCache = new HashMap<>();
-    private final Map<String, Integer> albumCache = new HashMap<>();
-
-    private void preloadCaches(Connection conn) throws Exception {
-        System.out.println("Pre-loading caches to bypass network latency...");
-        try (Statement stmt = conn.createStatement()) {
-            try (ResultSet rs = stmt.executeQuery("SELECT id, name FROM artists")) {
-                while (rs.next()) artistCache.put(rs.getString("name"), rs.getInt("id"));
-            }
-            try (ResultSet rs = stmt.executeQuery("SELECT id, title FROM albums")) {
-                while (rs.next()) albumCache.put(rs.getString("title"), rs.getInt("id"));
-            }
-            try (ResultSet rs = stmt.executeQuery("SELECT s.id, s.title, s.track_uri, sa.artist_id FROM songs s LEFT JOIN song_artists sa ON s.id = sa.song_id AND sa.is_feature = FALSE")) {
-                while (rs.next()) {
-                    String uri = rs.getString("track_uri");
-                    if (uri != null && !uri.isEmpty()) {
-                        songCache.put(uri, rs.getInt("id"));
-                    } else {
-                        String title = rs.getString("title");
-                        int artistId = rs.getInt("artist_id");
-                        if (rs.wasNull()) artistId = -1;
-                        songCache.put(title.toLowerCase() + "|" + artistId, rs.getInt("id"));
-                    }
-                }
-            }
-        }
-        System.out.println("Caches loaded! Artists: " + artistCache.size() + ", Albums: " + albumCache.size());
-    }
+    // Caches μόνο για τη διάρκεια αυτού του Import (για να μη διπλογράφουμε στο ίδιο batch)
+    private final Map<String, Integer> localArtistCache = new HashMap<>();
+    private final Map<String, Integer> localAlbumCache = new HashMap<>();
+    private final Map<String, Integer> localSongCache = new HashMap<>();
 
     public void importRecords(List<StreamingRecord> records, String username) {
-        String insertStreamSQL = "INSERT INTO streams (user_id, song_id, played_at, ms_played) VALUES (?, ?, ?, ?)";
+        long totalStartTime = System.currentTimeMillis();
+        System.out.println("🚀 Starting HIGH-PERFORMANCE Database Insertion...");
 
-        try (Connection conn = DatabaseManager.getConnection();
-             PreparedStatement streamStmt = conn.prepareStatement(insertStreamSQL)) {
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false); // Κρίσιμο για ταχύτητα
 
-            preloadCaches(conn);
-            
             int userId = getOrCreateUser(conn, username);
+            clearUserHistory(conn, userId);
 
-            // Καθαρίζουμε το ιστορικό του χρήστη πριν ανεβάσουμε το νέο ZIP
-            try (PreparedStatement clearStmt = conn.prepareStatement("DELETE FROM streams WHERE user_id = ?")) {
-                clearStmt.setInt(1, userId);
-                clearStmt.executeUpdate();
-            }
-            // ----------------------------------------
+            // ΒΗΜΑ 1: Συγκέντρωση και Bulk Insert Καλλιτεχνών & Άλμπουμ
+            System.out.println("📦 Extracting & Inserting Artists and Albums (Bulk)...");
+            processArtistsAndAlbumsBulk(conn, records);
 
-            conn.setAutoCommit(false);
-            int count = 0;
+            // Αφού μπήκαν, τραβάμε τα IDs τους για να τα χρησιμοποιήσουμε (πολύ πιο γρήγορο από το ένα-ένα)
+            refreshLocalCaches(conn);
 
-            for (StreamingRecord record : records) {
+            // ΒΗΜΑ 2: Συγκέντρωση και Bulk Insert Τραγουδιών
+            System.out.println("🎵 Extracting & Inserting Songs (Bulk)...");
+            processSongsBulk(conn, records);
+            refreshSongCache(conn);
 
-                if (record.getTrackName() == null || record.getArtistName() == null || record.getTimestamp() == null) {
-                    continue;
-                }
+            // ΒΗΜΑ 3: Bulk Insert Streams & Σχέσεων (Song_Artists)
+            System.out.println("🌊 Inserting Streams and Relationships (Bulk)...");
+            processStreamsAndRelationshipsBulk(conn, records, userId);
 
-                List<String> extractedArtists = new ArrayList<>();
-
-                String[] mainArtists = record.getArtistName().split(",\\s*|\\s*&\\s*");
-                for (String artist : mainArtists) {
-                    extractedArtists.add(artist.trim());
-                }
-
-                String cleanTrackName = record.getTrackName();
-                Matcher matcher = FEAT_PATTERN.matcher(record.getTrackName());
-                if (matcher.find()) {
-                    String[] featArtists = matcher.group(1).split(",\\s*|\\s*(?:&|and)\\s*");
-                    for (String feat : featArtists) {
-                        extractedArtists.add(feat.trim());
-                    }
-                    cleanTrackName = record.getTrackName().replace(matcher.group(0), "").trim();
-                }
-
-                List<Integer> artistIds = new ArrayList<>();
-                for (String artistName : extractedArtists) {
-                    artistIds.add(getOrCreateArtist(conn, artistName));
-                }
-
-                int albumId = getOrCreateAlbum(conn, record.getAlbumName());
-                int songId = getOrCreateSong(conn, cleanTrackName, artistIds, albumId, record.getTrackUri());
-
-                streamStmt.setInt(1, userId);
-                streamStmt.setInt(2, songId);
-                streamStmt.setTimestamp(3, Timestamp.from(record.getTimestamp()));
-                streamStmt.setInt(4, record.getMsPlayed());
-                streamStmt.addBatch();
-
-                count++;
-                if (count % BATCH_SIZE == 0) {
-                    streamStmt.executeBatch();
-                    conn.commit();
-                }
-            }
-
-            streamStmt.executeBatch();
             conn.commit();
+            long totalEndTime = System.currentTimeMillis();
+            System.out.println("🎉 Import complete! Total time: " + (totalEndTime - totalStartTime) + "ms");
 
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private int getOrCreateArtist(Connection conn, String artistName) throws Exception {
-        if (artistCache.containsKey(artistName)) return artistCache.get(artistName);
-
-        String selectSQL = "SELECT id FROM artists WHERE name = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
-            stmt.setString(1, artistName);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    artistCache.put(artistName, rs.getInt("id"));
-                    return rs.getInt("id");
-                }
-            }
+    private void clearUserHistory(Connection conn, int userId) throws Exception {
+        try (PreparedStatement clearStmt = conn.prepareStatement("DELETE FROM streams WHERE user_id = ?")) {
+            clearStmt.setInt(1, userId);
+            clearStmt.executeUpdate();
+            conn.commit();
         }
-
-        String insertSQL = "INSERT INTO artists (name) VALUES (?)";
-        try (PreparedStatement stmt = conn.prepareStatement(insertSQL, Statement.RETURN_GENERATED_KEYS)) {
-            stmt.setString(1, artistName);
-            stmt.executeUpdate();
-            try (ResultSet rs = stmt.getGeneratedKeys()) {
-                if (rs.next()) {
-                    int id = rs.getInt(1);
-                    artistCache.put(artistName, id);
-                    return id;
-                }
-            }
-        }
-        return -1;
     }
 
-    private int getOrCreateSong(Connection conn, String songTitle, List<Integer> artistIds, int albumId, String trackUri) throws Exception {
-        String cacheKey = (trackUri != null && !trackUri.isEmpty()) ?
-                trackUri :
-                (songTitle.toLowerCase() + "|" + (artistIds.isEmpty() ? -1 : artistIds.get(0)));
+    // --- BULK INSERTS ---
 
-        if (songCache.containsKey(cacheKey)) return songCache.get(cacheKey);
+    private void processArtistsAndAlbumsBulk(Connection conn, List<StreamingRecord> records) throws Exception {
+        String insertArtistSQL = "INSERT INTO artists (name) VALUES (?) ON CONFLICT (name) DO NOTHING";
+        String insertAlbumSQL = "INSERT INTO albums (title) VALUES (?) ON CONFLICT (title) DO NOTHING";
 
-        if (trackUri != null && !trackUri.isEmpty()) {
-            String selectUriSQL = "SELECT id FROM songs WHERE track_uri = ?";
-            try (PreparedStatement stmt = conn.prepareStatement(selectUriSQL)) {
-                stmt.setString(1, trackUri);
-                try (ResultSet rs = stmt.executeQuery()) {
-                    if (rs.next()) {
-                        int foundId = rs.getInt("id");
-                        songCache.put(cacheKey, foundId);
-                        return foundId;
+        try (PreparedStatement artistStmt = conn.prepareStatement(insertArtistSQL);
+             PreparedStatement albumStmt = conn.prepareStatement(insertAlbumSQL)) {
+
+            Map<String, Boolean> seenArtists = new HashMap<>();
+            Map<String, Boolean> seenAlbums = new HashMap<>();
+
+            for (StreamingRecord record : records) {
+                if (record.getArtistName() == null || record.getTrackName() == null) continue;
+
+                // Artists
+                List<String> artists = extractAllArtists(record.getArtistName(), record.getTrackName());
+                for (String artist : artists) {
+                    if (!seenArtists.containsKey(artist)) {
+                        seenArtists.put(artist, true);
+                        artistStmt.setString(1, artist);
+                        artistStmt.addBatch();
+                    }
+                }
+
+                // Albums
+                String albumName = record.getAlbumName();
+                if (albumName != null && !albumName.trim().isEmpty() && !seenAlbums.containsKey(albumName)) {
+                    seenAlbums.put(albumName, true);
+                    albumStmt.setString(1, albumName);
+                    albumStmt.addBatch();
+                }
+            }
+
+            artistStmt.executeBatch();
+            albumStmt.executeBatch();
+            conn.commit();
+        }
+    }
+
+    private void processSongsBulk(Connection conn, List<StreamingRecord> records) throws Exception {
+        // Χρησιμοποιούμε ON CONFLICT (title, album_id) αν υπάρχει, αλλιώς αγνοούμε διπλότυπα με βάση URI ή Title
+        String insertSongSQL = "INSERT INTO songs (title, album_id, track_uri) VALUES (?, ?, ?) ON CONFLICT DO NOTHING";
+
+        try (PreparedStatement songStmt = conn.prepareStatement(insertSongSQL)) {
+            Map<String, Boolean> seenSongs = new HashMap<>();
+
+            for (StreamingRecord record : records) {
+                if (record.getArtistName() == null || record.getTrackName() == null) continue;
+
+                String cleanTrackName = cleanTrackName(record.getTrackName());
+                String uri = record.getTrackUri();
+
+                // Δημιουργία ενός μοναδικού κλειδιού για να μη στείλουμε το ίδιο τραγούδι 2 φορές στο ίδιο batch
+                String uniqueKey = (uri != null && !uri.isEmpty()) ? uri : cleanTrackName.toLowerCase();
+
+                if (!seenSongs.containsKey(uniqueKey)) {
+                    seenSongs.put(uniqueKey, true);
+
+                    songStmt.setString(1, cleanTrackName);
+
+                    String albumName = record.getAlbumName();
+                    Integer albumId = localAlbumCache.get(albumName);
+                    if (albumId != null) {
+                        songStmt.setInt(2, albumId);
+                    } else {
+                        songStmt.setNull(2, java.sql.Types.INTEGER);
+                    }
+
+                    songStmt.setString(3, uri);
+                    songStmt.addBatch();
+                }
+            }
+            songStmt.executeBatch();
+            conn.commit();
+        }
+    }
+
+    private void processStreamsAndRelationshipsBulk(Connection conn, List<StreamingRecord> records, int userId) throws Exception {
+        String insertStreamSQL = "INSERT INTO streams (user_id, song_id, played_at, ms_played) VALUES (?, ?, ?, ?)";
+        String insertRelationSQL = "INSERT INTO song_artists (song_id, artist_id, is_feature) VALUES (?, ?, ?) ON CONFLICT (song_id, artist_id) DO NOTHING";
+
+        try (PreparedStatement streamStmt = conn.prepareStatement(insertStreamSQL);
+             PreparedStatement relationStmt = conn.prepareStatement(insertRelationSQL)) {
+
+            int count = 0;
+            Map<String, Boolean> seenRelations = new HashMap<>();
+
+            for (StreamingRecord record : records) {
+                if (record.getArtistName() == null || record.getTrackName() == null || record.getTimestamp() == null) continue;
+
+                String cleanTrackName = cleanTrackName(record.getTrackName());
+                String uri = record.getTrackUri();
+                List<String> artistNames = extractAllArtists(record.getArtistName(), record.getTrackName());
+
+                // Εύρεση Song ID
+                String songCacheKey = (uri != null && !uri.isEmpty()) ? uri : cleanTrackName.toLowerCase();
+                Integer songId = localSongCache.get(songCacheKey);
+
+                // Fallback: Αν δε βρέθηκε με URI/Όνομα, ψάχνουμε με Βασικό Καλλιτέχνη
+                if (songId == null && !artistNames.isEmpty()) {
+                    Integer primaryArtistId = localArtistCache.get(artistNames.get(0));
+                    if (primaryArtistId != null) {
+                        songId = localSongCache.get(cleanTrackName.toLowerCase() + "|" + primaryArtistId);
+                    }
+                }
+
+                if (songId == null) continue; // Αν παρόλα αυτά δε βρεθεί, το προσπερνάμε για να μη σκάσει
+
+                // Streams Batch
+                streamStmt.setInt(1, userId);
+                streamStmt.setInt(2, songId);
+                streamStmt.setTimestamp(3, Timestamp.from(record.getTimestamp()));
+                streamStmt.setInt(4, record.getMsPlayed());
+                streamStmt.addBatch();
+
+                // Song_Artists Batch
+                for (int i = 0; i < artistNames.size(); i++) {
+                    Integer artistId = localArtistCache.get(artistNames.get(i));
+                    if (artistId != null) {
+                        String relationKey = songId + "-" + artistId;
+                        if (!seenRelations.containsKey(relationKey)) {
+                            seenRelations.put(relationKey, true);
+                            relationStmt.setInt(1, songId);
+                            relationStmt.setInt(2, artistId);
+                            relationStmt.setBoolean(3, i > 0);
+                            relationStmt.addBatch();
+                        }
+                    }
+                }
+
+                count++;
+                if (count % BATCH_SIZE == 0) {
+                    streamStmt.executeBatch();
+                    relationStmt.executeBatch();
+                    conn.commit();
+                    System.out.println("✅ Inserted " + count + " streams...");
+                }
+            }
+
+            streamStmt.executeBatch();
+            relationStmt.executeBatch();
+            conn.commit();
+        }
+    }
+
+
+    // --- HELPERS ---
+
+    private void refreshLocalCaches(Connection conn) throws Exception {
+        localArtistCache.clear();
+        localAlbumCache.clear();
+        try (Statement stmt = conn.createStatement()) {
+            try (ResultSet rs = stmt.executeQuery("SELECT id, name FROM artists")) {
+                while (rs.next()) localArtistCache.put(rs.getString("name"), rs.getInt("id"));
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT id, title FROM albums")) {
+                while (rs.next()) localAlbumCache.put(rs.getString("title"), rs.getInt("id"));
+            }
+        }
+    }
+
+    private void refreshSongCache(Connection conn) throws Exception {
+        localSongCache.clear();
+        try (Statement stmt = conn.createStatement()) {
+            try (ResultSet rs = stmt.executeQuery("SELECT s.id, s.title, s.track_uri, sa.artist_id FROM songs s LEFT JOIN song_artists sa ON s.id = sa.song_id AND sa.is_feature = FALSE")) {
+                while (rs.next()) {
+                    String uri = rs.getString("track_uri");
+                    if (uri != null && !uri.isEmpty()) {
+                        localSongCache.put(uri, rs.getInt("id"));
+                    } else {
+                        String title = rs.getString("title");
+                        int artistId = rs.getInt("artist_id");
+                        if (rs.wasNull()) artistId = -1;
+                        localSongCache.put(title.toLowerCase(), rs.getInt("id"));
+                        localSongCache.put(title.toLowerCase() + "|" + artistId, rs.getInt("id"));
                     }
                 }
             }
         }
-
-        int primaryArtistId = artistIds.isEmpty() ? -1 : artistIds.get(0);
-        String selectFallbackSQL = "SELECT s.id FROM songs s " +
-                "JOIN song_artists sa ON s.id = sa.song_id " +
-                "WHERE s.title = ? AND sa.artist_id = ? AND sa.is_feature = FALSE";
-
-        try (PreparedStatement stmt = conn.prepareStatement(selectFallbackSQL)) {
-            stmt.setString(1, songTitle);
-            stmt.setInt(2, primaryArtistId);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    int foundId = rs.getInt("id");
-                    songCache.put(cacheKey, foundId);
-                    return foundId;
-                }
-            }
-        }
-
-        String insertSongSQL = "INSERT INTO songs (title, album_id, track_uri) VALUES (?, ?, ?)";
-        int songId = -1;
-        try (PreparedStatement stmt = conn.prepareStatement(insertSongSQL, Statement.RETURN_GENERATED_KEYS)) {
-            stmt.setString(1, songTitle);
-
-            if (albumId != -1) {
-                stmt.setInt(2, albumId);
-            } else {
-                stmt.setNull(2, java.sql.Types.INTEGER);
-            }
-
-            stmt.setString(3, trackUri);
-
-            stmt.executeUpdate();
-            try (ResultSet rs = stmt.getGeneratedKeys()) {
-                if (rs.next()) {
-                    songId = rs.getInt(1);
-                }
-            }
-        }
-
-        String insertRelationSQL = "INSERT INTO song_artists (song_id, artist_id, is_feature) VALUES (?, ?, ?) ON CONFLICT (song_id, artist_id) DO NOTHING";
-        try (PreparedStatement relationStmt = conn.prepareStatement(insertRelationSQL)) {
-            for (int i = 0; i < artistIds.size(); i++) {
-                relationStmt.setInt(1, songId);
-                relationStmt.setInt(2, artistIds.get(i));
-                relationStmt.setBoolean(3, i > 0);
-                relationStmt.addBatch();
-            }
-            relationStmt.executeBatch();
-        }
-
-        songCache.put(cacheKey, songId);
-        return songId;
-    }
-    
-    private int getOrCreateAlbum(Connection conn, String albumTitle) throws Exception {
-        if (albumTitle == null || albumTitle.trim().isEmpty()) return -1; // Handling για null albums
-        if (albumCache.containsKey(albumTitle)) return albumCache.get(albumTitle);
-
-        String selectSQL = "SELECT id FROM albums WHERE title = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
-            stmt.setString(1, albumTitle);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    albumCache.put(albumTitle, rs.getInt("id"));
-                    return rs.getInt("id");
-                }
-            }
-        }
-
-        String insertSQL = "INSERT INTO albums (title) VALUES (?) ON CONFLICT (title) DO NOTHING";
-        try (PreparedStatement stmt = conn.prepareStatement(insertSQL, Statement.RETURN_GENERATED_KEYS)) {
-            stmt.setString(1, albumTitle);
-            stmt.executeUpdate();
-            try (ResultSet rs = stmt.getGeneratedKeys()) {
-                if (rs.next()) {
-                    int id = rs.getInt(1);
-                    albumCache.put(albumTitle, id);
-                    return id;
-                }
-            }
-        }
-
-        try (PreparedStatement stmt = conn.prepareStatement(selectSQL)) {
-            stmt.setString(1, albumTitle);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) return rs.getInt("id");
-            }
-        }
-        return -1;
     }
 
-    private String fetchImageUrl(String trackUri) {
-        if (trackUri == null || trackUri.isEmpty()) return null;
 
-        String oembedUrl = "https://open.spotify.com/oembed?url=" + trackUri;
-
-        try {
-            HttpClient client = HttpClient.newHttpClient();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(oembedUrl))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            // Αν το response είναι 200 OK, τραβάμε το thumbnail_url
-            if (response.statusCode() == 200) {
-                Matcher m = Pattern.compile("\"thumbnail_url\"\\s*:\\s*\"([^\"]+)\"").matcher(response.body());
-                if (m.find()) {
-                    return m.group(1);
-                }
-            }
-        } catch (Exception e) {
-            System.out.println("Failed to fetch image for: " + trackUri);
+    private List<String> extractAllArtists(String mainArtistString, String trackName) {
+        List<String> extractedArtists = new ArrayList<>();
+        String[] mainArtists = mainArtistString.split(",\\s*|\\s*&\\s*");
+        for (String artist : mainArtists) {
+            extractedArtists.add(artist.trim());
         }
-        return null;
+
+        Matcher matcher = FEAT_PATTERN.matcher(trackName);
+        if (matcher.find()) {
+            String[] featArtists = matcher.group(1).split(",\\s*|\\s*(?:&|and)\\s*");
+            for (String feat : featArtists) {
+                extractedArtists.add(feat.trim());
+            }
+        }
+        return extractedArtists;
+    }
+
+    private String cleanTrackName(String trackName) {
+        Matcher matcher = FEAT_PATTERN.matcher(trackName);
+        if (matcher.find()) {
+            return trackName.replace(matcher.group(0), "").trim();
+        }
+        return trackName;
     }
 
     private int getOrCreateUser(Connection conn, String username) throws Exception {

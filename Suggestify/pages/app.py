@@ -425,75 +425,83 @@ current_tab = view_state["tab"]
 detail_type = view_state["type"]
 detail_id = view_state["id"]
 
-# ─── NAVBAR ───
+# ─── NAVBAR: brand + tab row ───
 st.markdown('<div class="navbar"><div class="navbar-content">', unsafe_allow_html=True)
 st.markdown('<div class="nav-brand"><span>🎧</span>Suggestify</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-nav_col, date_col = st.columns([3, 2])
+tabs = [
+    ("overview", "📊 Overview"),
+    ("tracks", "🎵 Tracks"),
+    ("artists", "🎤 Artists"),
+    ("albums", "💿 Albums"),
+    ("genres", "🎸 Genres"),
+    ("habits", "🕐 Habits"),
+]
+cols = st.columns(len(tabs))
+for i, (tab_id, tab_label) in enumerate(tabs):
+    with cols[i]:
+        is_active = (current_tab == tab_id) and not detail_type
+        if st.button(
+            tab_label,
+            key=f"nav_{tab_id}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True
+        ):
+            curr_preset = st.query_params.get("preset")
+            curr_start = st.query_params.get("start")
+            curr_end = st.query_params.get("end")
 
-with nav_col:
-    tabs = [
-        ("overview", "📊 Overview"),
-        ("tracks", "🎵 Tracks"),
-        ("artists", "🎤 Artists"),
-        ("albums", "💿 Albums"),
-        ("genres", "🎸 Genres"),
-        ("habits", "🕐 Habits"),
-    ]
-    cols = st.columns(len(tabs))
-    for i, (tab_id, tab_label) in enumerate(tabs):
-        with cols[i]:
-            is_active = (current_tab == tab_id) and not detail_type
-            if st.button(
-                tab_label,
-                key=f"nav_{tab_id}",
-                type="primary" if is_active else "secondary",
-                use_container_width=True
-            ):
-                curr_preset = st.query_params.get("preset")
-                curr_start = st.query_params.get("start")
-                curr_end = st.query_params.get("end")
-                
-                st.query_params.clear()
-                st.query_params["tab"] = tab_id
-                
-                if curr_preset: st.query_params["preset"] = curr_preset
-                if curr_start: st.query_params["start"] = curr_start
-                if curr_end: st.query_params["end"] = curr_end
-                
-                st.rerun()
+            st.query_params.clear()
+            st.query_params["tab"] = tab_id
+
+            if curr_preset: st.query_params["preset"] = curr_preset
+            if curr_start: st.query_params["start"] = curr_start
+            if curr_end: st.query_params["end"] = curr_end
+
+            st.rerun()
+
 try:
     users_df = run_query("SELECT id, username FROM users ORDER BY username")
     user_dict = dict(zip(users_df['username'], users_df['id']))
 except:
-    user_dict = {"Ody": 1} 
+    user_dict = {"Ody": 1}
 
-with date_col:
-    selected_username = st.selectbox("👤 User", options=list(user_dict.keys()), label_visibility="collapsed")
+# ─── FILTER BAR: its own full-width row so nothing gets clipped ───
+st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
+f_user, f_preset, f_start, f_end = st.columns([1.2, 1.2, 1, 1])
+
+with f_user:
+    st.markdown('<div class="filter-label">👤 User</div>', unsafe_allow_html=True)
+    selected_username = st.selectbox(
+        "User", options=list(user_dict.keys()), label_visibility="collapsed"
+    )
     selected_user_id = user_dict.get(selected_username, 1)
-    
-    preset_col, d1_col, d2_col = st.columns([1.4, 1, 1])
 
-    with preset_col:
-        st.selectbox(
-            "Period",
-            options=list(preset_options.keys()),
-            format_func=lambda x: preset_options[x],
-            placeholder="⚙️ Manual",
-            label_visibility="collapsed",
-            key="date_preset",
-            on_change=update_dates_from_preset
-        )
+with f_preset:
+    st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
+    st.selectbox(
+        "Period",
+        options=list(preset_options.keys()),
+        format_func=lambda x: preset_options[x],
+        placeholder="⚙️ Manual",
+        label_visibility="collapsed",
+        key="date_preset",
+        on_change=update_dates_from_preset
+    )
 
-    with d1_col:
-        st.date_input("From", min_value=min_date, max_value=max_date, 
-                      label_visibility="collapsed", key="start_date", on_change=mark_manual)
+with f_start:
+    st.markdown('<div class="filter-label">From</div>', unsafe_allow_html=True)
+    st.date_input("From", min_value=min_date, max_value=max_date,
+                  label_visibility="collapsed", key="start_date", on_change=mark_manual)
 
-    with d2_col:
-        st.date_input("To", min_value=min_date, max_value=max_date, 
-                      label_visibility="collapsed", key="end_date", on_change=mark_manual)
+with f_end:
+    st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
+    st.date_input("To", min_value=min_date, max_value=max_date,
+                  label_visibility="collapsed", key="end_date", on_change=mark_manual)
 
-st.markdown('</div></div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)  # close filter-bar
+st.markdown('</div>', unsafe_allow_html=True)  # close navbar
 
 # Κλειδώνουμε τα φίλτρα για τα queries (Με το USER_ID)
 F = {

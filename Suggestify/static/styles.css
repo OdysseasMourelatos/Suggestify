@@ -209,7 +209,7 @@ section.main > div.block-container {
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border-bottom: 1px solid VAR_BORDER;
-    padding: 0.75rem 0;
+    padding: 0.75rem 0 0;
     margin: 0 -2rem 1.5rem -2rem;
     padding-left: 2rem;
     padding-right: 2rem;
@@ -221,6 +221,7 @@ section.main > div.block-container {
     justify-content: space-between;
     gap: 1.5rem;
     flex-wrap: wrap;
+    margin-bottom: 0.85rem;
 }
 
 .nav-brand {
@@ -233,6 +234,29 @@ section.main > div.block-container {
     color: VAR_TEXT;
 }
 .nav-brand span { font-size: 1.8rem; }
+
+/* ─── FILTER BAR (User / Period / From / To) ───
+   Its own row underneath the tab navigation, so nothing gets squeezed. */
+.filter-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+    padding: 0.85rem 0 1rem;
+    border-top: 1px solid VAR_BORDER;
+}
+.filter-bar [data-testid="column"] {
+    min-width: 150px;
+}
+.filter-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: VAR_TEXT_DIM;
+    margin-bottom: 0.4rem;
+    white-space: nowrap;
+}
 
 /* ─── KPI CARDS — Glass Effect ─── */
 .kpi-grid {
@@ -470,16 +494,47 @@ a.custom-link:hover .item-arrow {
     opacity: 0.5;
 }
 
-/* ─── STREAMLIT OVERRIDES FOR INPUTS ─── */
-div[data-baseweb="select"] > div,
+/* ─── STREAMLIT OVERRIDES FOR INPUTS ───
+   These are the fixes for the clipped/overlapping "User" + date bar:
+   give every control a fixed, equal height and stop text from being
+   clipped or wrapping onto another control. */
+div[data-baseweb="select"] {
+    min-width: 0;
+}
+div[data-baseweb="select"] > div {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid VAR_BORDER !important;
+    border-radius: 10px !important;
+    color: VAR_TEXT !important;
+    font-size: 0.85rem !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 0 0.75rem !important;
+    transition: all 0.2s ease !important;
+}
+/* the actual text node inside the select value */
+div[data-baseweb="select"] > div > div {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+div[data-testid="stDateInput"] > div {
+    min-width: 0;
+}
 div[data-testid="stDateInput"] input {
     background: rgba(255,255,255,0.04) !important;
     border: 1px solid VAR_BORDER !important;
-    border-radius: 8px !important;
+    border-radius: 10px !important;
     color: VAR_TEXT !important;
     font-size: 0.85rem !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    box-sizing: border-box !important;
     padding: 0.4rem 0.75rem !important;
-    transition: all 0.2s ease !important;
 }
 div.row-widget.stRadio { display: none !important; }
 
@@ -567,10 +622,11 @@ div[data-testid="stTextInput"] input::placeholder {
     /* ─── NAVBAR ─── */
     .navbar {
         margin: 0 -0.5rem 1rem -0.5rem !important;
-        padding: 0.5rem 0.5rem !important;
+        padding: 0.5rem 0.5rem 0 !important;
     }
     .navbar-content {
         gap: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
     }
     .nav-brand {
         font-size: 1.05rem !important;
@@ -587,11 +643,27 @@ div[data-testid="stTextInput"] input::placeholder {
         min-height: 2.1rem !important;
     }
 
-    /* Period / date pickers: stack and shrink so text never clips */
+    /* ─── FILTER BAR: clean 2x2 grid, Spotify-style, nothing clipped ─── */
+    .filter-bar {
+        gap: 0.5rem !important;
+        padding: 0.6rem 0 0.75rem !important;
+    }
+    .filter-bar [data-testid="column"] {
+        flex: 1 1 47% !important;
+        min-width: 47% !important;
+        max-width: 47% !important;
+    }
+    .filter-label {
+        font-size: 0.6rem !important;
+        margin-bottom: 0.25rem !important;
+    }
     div[data-baseweb="select"] > div,
     div[data-testid="stDateInput"] input {
-        font-size: 0.72rem !important;
-        padding: 0.35rem 0.5rem !important;
+        font-size: 0.75rem !important;
+        min-height: 40px !important;
+        height: 40px !important;
+        padding-left: 0.55rem !important;
+        padding-right: 0.4rem !important;
     }
 
     /* ─── KPI CARDS ─── */
@@ -660,5 +732,14 @@ div[data-testid="stTextInput"] input::placeholder {
     div[data-testid="stTextInput"] input {
         font-size: 0.85rem !important;
         padding: 0.6rem 0.8rem !important;
+    }
+}
+
+/* Extra-small phones (iPhone SE etc.) — drop to single column filters */
+@media (max-width: 380px) {
+    .filter-bar [data-testid="column"] {
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
     }
 }

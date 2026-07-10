@@ -16,13 +16,14 @@ public class DatabaseManager {
             String password = dbUri.getUserInfo().split(":")[1];
             int port = dbUri.getPort() != -1 ? dbUri.getPort() : 5432;
 
-            String dbUrl = "jdbc:postgresql://" + dbUri.getHost() + ":" + port + dbUri.getPath();
+            String dbUrl = "jdbc:postgresql://" + dbUri.getHost() + ":" + port + dbUri.getPath() + "?reWriteBatchedInserts=true&prepareThreshold=0";
+
             return DriverManager.getConnection(dbUrl, username, password);
         } else {
             String URL = "jdbc:postgresql://localhost:5432/spotify_db";
             String USER = "postgres";
             String PASSWORD = "secret";
-            return DriverManager.getConnection(URL, USER, PASSWORD);
+            return DriverManager.getConnection("jdbc:postgresql://localhost:5432/spotify_db?reWriteBatchedInserts=true", "postgres", "secret");
         }
     }
 
@@ -103,6 +104,8 @@ public class DatabaseManager {
             stmt.execute(createGenresTable);
             stmt.execute(createAlbumGenresTable);
             stmt.execute(createStreamsTable);
+
+            stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");
 
         } catch (Exception e) {
             e.printStackTrace();
