@@ -11,22 +11,23 @@ public class DatabaseManager {
         String envDbUrl = System.getenv("DATABASE_URL");
 
         if (envDbUrl != null && !envDbUrl.trim().isEmpty()) {
-            // Διαβάζει το URL από την Python
-            URI dbUri = new URI(envDbUrl.replace("jdbc:", "")); 
-            
+            // Διαβάζει το URL από το Streamlit / Python
+            URI dbUri = new URI(envDbUrl.replace("jdbc:", ""));
+
             String username = dbUri.getUserInfo() != null ? dbUri.getUserInfo().split(":")[0] : "postgres.pxpplxyszvrzubdqykmw";
             String password = dbUri.getUserInfo() != null ? dbUri.getUserInfo().split(":")[1] : "dKPJjO2jZtkmwjYh";
-            int port = dbUri.getPort() != -1 ? dbUri.getPort() : 5432;
+            int port = dbUri.getPort() != -1 ? dbUri.getPort() : 6543;
 
-            String dbUrl = "jdbc:postgresql://" + dbUri.getHost() + ":" + port + dbUri.getPath() + "?reWriteBatchedInserts=true&prepareThreshold=0";
+            // ΠΡΟΣΟΧΗ: Προστέθηκε το sslmode=require στο τέλος! Είναι απολύτως απαραίτητο για το Supabase.
+            String dbUrl = "jdbc:postgresql://" + dbUri.getHost() + ":" + port + dbUri.getPath() + "?reWriteBatchedInserts=true&prepareThreshold=0&sslmode=require";
 
             return DriverManager.getConnection(dbUrl, username, password);
         } else {
-            // Hardcoded Fallback (Supabase Session Pooler IPv4)
-            String URL = "jdbc:postgresql://aws-0-eu-west-1.pooler.supabase.com:5432/postgres?reWriteBatchedInserts=true&prepareThreshold=0";
+            // Το σωστό Pooler URL με Transaction Port (6543) και sslmode
+            String URL = "jdbc:postgresql://aws-0-eu-west-1.pooler.supabase.com:6543/postgres?reWriteBatchedInserts=true&prepareThreshold=0&sslmode=require";
             String USER = "postgres.pxpplxyszvrzubdqykmw";
             String PASSWORD = "dKPJjO2jZtkmwjYh";
-            
+
             return DriverManager.getConnection(URL, USER, PASSWORD);
         }
     }
@@ -105,11 +106,9 @@ public class DatabaseManager {
             stmt.execute(createAlbumGenresTable);
             stmt.execute(createStreamsTable);
 
-            // Προσθήκη του constraint σιωπηλά, αγνοώντας το σφάλμα αν υπάρχει ήδη
             try {
                 stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");
             } catch (Exception ignored) {
-                // Η βάση έχει ήδη το constraint, προχωράμε κανονικά
             }
 
         } catch (Exception e) {
