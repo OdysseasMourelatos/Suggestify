@@ -235,8 +235,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             if p_end: 
                 href += f"&end={p_end}"
 
-            # Αφαίρεσα το target="_top" για να παίζει σωστά στο iframe του Streamlit Cloud
-            st.markdown(f'<a href="{href}" class="custom-link">{card_html}</a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
         else:
             st.markdown(card_html, unsafe_allow_html=True)
 
