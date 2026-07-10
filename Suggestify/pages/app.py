@@ -123,18 +123,18 @@ div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input
 # ══════════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════════
-NEW_DB_URL = "postgresql://postgres.pxpplxyszvrzubdqykmw:dKPJjO2jZtkmwjYh@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
+import streamlit as st
 
-CONNECTION_STRING = os.environ.get("DATABASE_URL", NEW_DB_URL)
+# FORCE OVERRIDE: Διαβάζουμε ΑΠΕΥΘΕΙΑΣ από τα secrets, αγνοώντας το OS environment
+try:
+    CONNECTION_STRING = st.secrets["DATABASE_URL"]
+except KeyError:
+    # Αν για κάποιο λόγο δεν βρει τα secrets, χρησιμοποιεί κατευθείαν το σωστό
+    CONNECTION_STRING = "postgresql://postgres.pxpplxyszvrzubdqykmw:dKPJjO2jZtkmwjYh@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require"
 
 @st.cache_resource
 def get_engine():
-    return create_engine(
-        CONNECTION_STRING, 
-        pool_pre_ping=True, 
-        pool_size=5,
-        connect_args={'sslmode': 'require'}
-    )
+    return create_engine(CONNECTION_STRING, pool_pre_ping=True, pool_size=5)
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:

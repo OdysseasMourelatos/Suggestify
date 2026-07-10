@@ -6,9 +6,10 @@ import tempfile
 import threading
 import sys
 
-DB_URL = "postgresql://postgres:dKPJjO2jZtkmwjYh@db.pxpplxyszvrzubdqykmw.supabase.co:5432/postgres"
-
-os.environ["DATABASE_URL"] = DB_URL
+try:
+    os.environ["DATABASE_URL"] = st.secrets["DATABASE_URL"]
+except KeyError:
+    os.environ["DATABASE_URL"] = "postgresql://postgres.pxpplxyszvrzubdqykmw:dKPJjO2jZtkmwjYh@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require"
 # ══════════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════════
