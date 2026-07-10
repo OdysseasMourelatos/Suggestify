@@ -216,17 +216,27 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
 
         if can_navigate:
             item_id = str(row[id_col])
-            params = st.query_params
-            current_view = params.get("view", "")
-            current_id = params.get("id", "")
             
+            # Τραβάμε τις τρέχουσες παραμέτρους με ασφάλεια (αποφεύγουμε τα "None")
+            p_view = st.query_params.get("view")
+            p_id = st.query_params.get("id")
+            p_preset = st.query_params.get("preset")
+            p_start = st.query_params.get("start")
+            p_end = st.query_params.get("end")
+            
+            # Χτίζουμε το URL καθαρά, προσθέτοντας μόνο ό,τι έχει πραγματική τιμή
             href = f"?tab={current_tab}&view={link_type}&id={item_id}"
-            if current_view and current_id: href += f"&pview={current_view}&pid={current_id}"
-            if params.get("preset"): href += f"&preset={params.get('preset')}"
-            if params.get("start"): href += f"&start={params.get('start')}"
-            if params.get("end"): href += f"&end={params.get('end')}"
+            if p_view and p_id: 
+                href += f"&pview={p_view}&pid={p_id}"
+            if p_preset: 
+                href += f"&preset={p_preset}"
+            if p_start: 
+                href += f"&start={p_start}"
+            if p_end: 
+                href += f"&end={p_end}"
 
-            st.markdown(f'<a href="{href}" class="custom-link" target="_top">{card_html}</a>', unsafe_allow_html=True)
+            # Αφαίρεσα το target="_top" για να παίζει σωστά στο iframe του Streamlit Cloud
+            st.markdown(f'<a href="{href}" class="custom-link">{card_html}</a>', unsafe_allow_html=True)
         else:
             st.markdown(card_html, unsafe_allow_html=True)
 
