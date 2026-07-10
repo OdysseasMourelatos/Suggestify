@@ -1059,20 +1059,36 @@ elif current_tab == "tracks":
 
     query_params = {**F, "limit": display_limit}
 
+    # 🚀 CTE που ενώνει όλους τους καλλιτέχνες ενός τραγουδιού με κόμμα
+    base_tracks_query = """
+        WITH TrackArtists AS (
+            SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
+            FROM song_artists sa
+            JOIN artists a ON a.id = sa.artist_id
+            GROUP BY sa.song_id
+        )
+    """
+
     if search_term:
         query_params["search"] = f"%{search_term}%"
-        df_songs = run_query("""
+        df_songs = run_query(base_tracks_query + """
             SELECT so.id AS song_id, so.title AS song_title,
-                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                   COALESCE(ta.all_artists, 'Unknown') AS main_artist, so.image_url,
                    COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
             FROM streams s
             JOIN songs so ON so.id = s.song_id
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            LEFT JOIN artists a ON a.id = sa.artist_id
+            LEFT JOIN TrackArtists ta ON ta.song_id = so.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
-              AND (so.title ILIKE :search OR a.name ILIKE :search)
-            GROUP BY so.id, so.title, a.name, so.image_url
+              AND (
+                  so.title ILIKE :search 
+                  OR EXISTS (
+                      SELECT 1 FROM song_artists sa_search 
+                      JOIN artists a_search ON a_search.id = sa_search.artist_id 
+                      WHERE sa_search.song_id = so.id AND a_search.name ILIKE :search
+                  )
+              )
+            GROUP BY so.id, so.title, ta.all_artists, so.image_url
             ORDER BY streams DESC
             LIMIT :limit;
         """, query_params)
@@ -1084,18 +1100,17 @@ elif current_tab == "tracks":
             st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
 
     else:
-        df_songs = run_query("""
+        df_songs = run_query(base_tracks_query + """
             SELECT so.id AS song_id, so.title AS song_title,
-                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                   COALESCE(ta.all_artists, 'Unknown') AS main_artist, so.image_url,
                    COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played,
                    ROW_NUMBER() OVER (ORDER BY COUNT(s.id) DESC, SUM(s.ms_played) DESC) AS global_rank
             FROM streams s
             JOIN songs so ON so.id = s.song_id
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            LEFT JOIN artists a ON a.id = sa.artist_id
+            LEFT JOIN TrackArtists ta ON ta.song_id = so.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
-            GROUP BY so.id, so.title, a.name, so.image_url
+            GROUP BY so.id, so.title, ta.all_artists, so.image_url
             ORDER BY streams DESC, hours_played DESC LIMIT :limit;
         """, query_params)
 
@@ -1105,7 +1120,6 @@ elif current_tab == "tracks":
                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
-
 
 elif current_tab == "artists":
     st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
