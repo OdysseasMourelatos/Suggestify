@@ -223,6 +223,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             p_preset = st.query_params.get("preset")
             p_start = st.query_params.get("start")
             p_end = st.query_params.get("end")
+            p_user = st.query_params.get("user")
             
             # Χτίζουμε το URL καθαρά, προσθέτοντας μόνο ό,τι έχει πραγματική τιμή
             href = f"?tab={current_tab}&view={link_type}&id={item_id}"
@@ -234,6 +235,8 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                 href += f"&start={p_start}"
             if p_end: 
                 href += f"&end={p_end}"
+            if p_user:
+                href += f"&user={p_user}"
 
             st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
         else:
@@ -278,11 +281,12 @@ _LAYOUT_BASE = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     font=dict(family="Inter, sans-serif", color=TEXT_DIM, size=12),
-    xaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False),
-    yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False),
+    xaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
+    yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
     margin=dict(t=30, b=40, l=50, r=20),
     legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)"),
-    hoverlabel=dict(bgcolor="#1C1C1C", bordercolor="rgba(255,255,255,0.1)", font=dict(color=TEXT, size=13))
+    hoverlabel=dict(bgcolor="#1C1C1C", bordercolor="rgba(255,255,255,0.1)", font=dict(color=TEXT, size=13)),
+    dragmode=False,
 )
 
 def themed(fig: go.Figure, **extra) -> go.Figure:
@@ -308,7 +312,7 @@ def chart_trend(df: pd.DataFrame) -> go.Figure:
     ))
     return themed(fig,
         yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))),
-        yaxis2=dict(title=dict(text="Hours", font=dict(color=TEXT_MID)), overlaying="y", side="right", showgrid=False),
+        yaxis2=dict(title=dict(text="Hours", font=dict(color=TEXT_MID)), overlaying="y", side="right", showgrid=False, fixedrange=True),
         hovermode="x unified",
         legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center")
     )
@@ -377,6 +381,7 @@ def go_back():
     preset = params.get("preset")
     start = params.get("start")
     end = params.get("end")
+    user = params.get("user")
 
     st.query_params.clear()
     st.query_params["tab"] = tab
@@ -386,6 +391,7 @@ def go_back():
     if preset: st.query_params["preset"] = preset
     if start: st.query_params["start"] = start
     if end: st.query_params["end"] = end
+    if user: st.query_params["user"] = user
     
 # ══════════════════════════════════════════════════════════════════
 # MAIN APP & STATE MANAGEMENT (CALLBACKS)
@@ -459,28 +465,31 @@ tabs = [
     ("genres", "🎸 Genres"),
     ("habits", "🕐 Habits"),
 ]
-cols = st.columns(len(tabs))
-for i, (tab_id, tab_label) in enumerate(tabs):
-    with cols[i]:
-        is_active = (current_tab == tab_id) and not detail_type
-        if st.button(
-            tab_label,
-            key=f"nav_{tab_id}",
-            type="primary" if is_active else "secondary",
-            use_container_width=True
-        ):
-            curr_preset = st.query_params.get("preset")
-            curr_start = st.query_params.get("start")
-            curr_end = st.query_params.get("end")
+with st.container(key="tab_nav_row"):
+    cols = st.columns(len(tabs))
+    for i, (tab_id, tab_label) in enumerate(tabs):
+        with cols[i]:
+            is_active = (current_tab == tab_id) and not detail_type
+            if st.button(
+                tab_label,
+                key=f"nav_{tab_id}",
+                type="primary" if is_active else "secondary",
+                use_container_width=True
+            ):
+                curr_preset = st.query_params.get("preset")
+                curr_start = st.query_params.get("start")
+                curr_end = st.query_params.get("end")
+                curr_user = st.query_params.get("user")
 
-            st.query_params.clear()
-            st.query_params["tab"] = tab_id
+                st.query_params.clear()
+                st.query_params["tab"] = tab_id
 
-            if curr_preset: st.query_params["preset"] = curr_preset
-            if curr_start: st.query_params["start"] = curr_start
-            if curr_end: st.query_params["end"] = curr_end
+                if curr_preset: st.query_params["preset"] = curr_preset
+                if curr_start: st.query_params["start"] = curr_start
+                if curr_end: st.query_params["end"] = curr_end
+                if curr_user: st.query_params["user"] = curr_user
 
-            st.rerun()
+                st.rerun()
 
 try:
     users_df = run_query("SELECT id, username FROM users ORDER BY username")
@@ -489,36 +498,49 @@ except:
     user_dict = {"Ody": 1}
 
 # ─── FILTER BAR ───
-f_user, f_preset, f_start, f_end = st.columns([1.2, 1.2, 1, 1])
+with st.container(key="filter_bar_row"):
+    f_user, f_preset, f_start, f_end = st.columns([1.2, 1.2, 1, 1])
 
-with f_user:
-    st.markdown('<div class="filter-label">👤 User</div>', unsafe_allow_html=True)
-    selected_username = st.selectbox(
-        "User", options=list(user_dict.keys()), label_visibility="collapsed"
-    )
-    selected_user_id = user_dict.get(selected_username, 1)
+    with f_user:
+        st.markdown('<div class="filter-label">👤 User</div>', unsafe_allow_html=True)
+        usernames = list(user_dict.keys())
+        default_index = 0
+        url_user_id = st.query_params.get("user")
+        if url_user_id:
+            for idx, uname in enumerate(usernames):
+                if str(user_dict[uname]) == str(url_user_id):
+                    default_index = idx
+                    break
+        selected_username = st.selectbox(
+            "User", options=usernames, index=default_index,
+            label_visibility="collapsed", key="selected_username"
+        )
+        selected_user_id = user_dict.get(selected_username, 1)
+        # Κρατάμε το URL συγχρονισμένο με τον επιλεγμένο χρήστη, ώστε η πλοήγηση
+        # (tabs, back, κλικ σε τραγούδι/artist/album) να μη γυρνάει στον πρώτο χρήστη.
+        st.query_params["user"] = str(selected_user_id)
 
-with f_preset:
-    st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
-    st.selectbox(
-        "Period",
-        options=list(preset_options.keys()),
-        format_func=lambda x: preset_options[x],
-        placeholder="⚙️ Manual",
-        label_visibility="collapsed",
-        key="date_preset",
-        on_change=update_dates_from_preset
-    )
+    with f_preset:
+        st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
+        st.selectbox(
+            "Period",
+            options=list(preset_options.keys()),
+            format_func=lambda x: preset_options[x],
+            placeholder="⚙️ Manual",
+            label_visibility="collapsed",
+            key="date_preset",
+            on_change=update_dates_from_preset
+        )
 
-with f_start:
-    st.markdown('<div class="filter-label">From</div>', unsafe_allow_html=True)
-    st.date_input("From", min_value=min_date, max_value=max_date,
-                  label_visibility="collapsed", key="start_date", on_change=mark_manual)
+    with f_start:
+        st.markdown('<div class="filter-label">From</div>', unsafe_allow_html=True)
+        st.date_input("From", min_value=min_date, max_value=max_date,
+                      label_visibility="collapsed", key="start_date", on_change=mark_manual)
 
-with f_end:
-    st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
-    st.date_input("To", min_value=min_date, max_value=max_date,
-                  label_visibility="collapsed", key="end_date", on_change=mark_manual)
+    with f_end:
+        st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
+        st.date_input("To", min_value=min_date, max_value=max_date,
+                      label_visibility="collapsed", key="end_date", on_change=mark_manual)
 
 
 # Κλειδώνουμε τα φίλτρα για τα queries (Με το USER_ID)
@@ -597,7 +619,7 @@ if detail_type and detail_id:
                     GROUP BY 1 ORDER BY 1
                 """, {"id": detail_id, **F})
                 if not df_t.empty:
-                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with c2:
@@ -613,7 +635,7 @@ if detail_type and detail_id:
                 if not df_h.empty:
                     st.plotly_chart(
                         chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
-                        use_container_width=True, config={"displayModeBar": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -681,8 +703,10 @@ if detail_type and detail_id:
                     render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
                     
                     if st.button("See Full List →", key=f"btn_full_tracks_{detail_id}", use_container_width=True):
+                        curr_user = st.query_params.get("user")
                         st.query_params.clear()
                         st.query_params["tab"] = "tracks"
+                        if curr_user: st.query_params["user"] = curr_user
                         st.session_state["search_tracks"] = artist_name
                         st.rerun()
 
@@ -707,8 +731,10 @@ if detail_type and detail_id:
                     render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album")
                     
                     if st.button("See Full List →", key=f"btn_full_albums_{detail_id}", use_container_width=True):
+                        curr_user = st.query_params.get("user")
                         st.query_params.clear()
                         st.query_params["tab"] = "albums"
+                        if curr_user: st.query_params["user"] = curr_user
                         st.session_state["search_albums"] = artist_name
                         st.rerun()
 
@@ -724,7 +750,7 @@ if detail_type and detail_id:
                     GROUP BY 1 ORDER BY 1
                 """, {"aid": detail_id, **F})
                 if not df_t.empty:
-                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
@@ -739,7 +765,7 @@ if detail_type and detail_id:
                 if not df_h.empty:
                     st.plotly_chart(
                         chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
-                        use_container_width=True, config={"displayModeBar": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -757,7 +783,7 @@ if detail_type and detail_id:
                     dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
                     st.plotly_chart(
                         chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                        use_container_width=True, config={"displayModeBar": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -870,7 +896,7 @@ if detail_type and detail_id:
                 """, {"aid": detail_id, **F})
                 
                 if not df_album_trend.empty:
-                    st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 st.markdown('<div class="chart-container"><div class="chart-title">⏰ Peak Hours</div>', unsafe_allow_html=True)
@@ -886,7 +912,7 @@ if detail_type and detail_id:
                 if not df_hours.empty:
                     st.plotly_chart(
                         chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
-                        use_container_width=True, config={"displayModeBar": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -904,7 +930,7 @@ if detail_type and detail_id:
                     dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
                     st.plotly_chart(
                         chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                        use_container_width=True, config={"displayModeBar": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1063,7 +1089,7 @@ elif current_tab == "overview":
         GROUP BY 1 ORDER BY 1;
     """, F)
     if not df_trend.empty:
-        st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
     st.markdown('</div>', unsafe_allow_html=True)
 
 elif current_tab == "tracks":
@@ -1285,7 +1311,7 @@ elif current_tab == "habits":
         GROUP BY 1, 2;
     """, F)
     if not df_heatmap.empty:
-        st.plotly_chart(chart_heatmap(df_heatmap), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(chart_heatmap(df_heatmap), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
     st.markdown('</div>', unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
@@ -1301,7 +1327,7 @@ elif current_tab == "habits":
         if not df_hours.empty:
             st.plotly_chart(
                 chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
-                use_container_width=True, config={"displayModeBar": False}
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
             )
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1318,7 +1344,7 @@ elif current_tab == "habits":
             dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
             st.plotly_chart(
                 chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                use_container_width=True, config={"displayModeBar": False}
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
             )
         st.markdown('</div>', unsafe_allow_html=True)
 

@@ -25,3 +25,5 @@ dist/
 # Java / Maven build
 target/
 out/
+
+.streamlit/

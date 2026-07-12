@@ -249,17 +249,14 @@ section.main > div.block-container {
 
 /* ─── FILTER BAR (User / Period / From / To) ───
    Its own row underneath the tab navigation, so nothing gets squeezed. */
-.filter-bar {
-    display: flex;
+.st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
     align-items: flex-end;
-    gap: 0.85rem;
     flex-wrap: wrap;
-    /* ΑΛΛΑΓΗ ΕΔΩ: Πιο σφιχτό padding στην κορυφή */
+    gap: 0.85rem;
     padding: 0.4rem 0 1rem; 
-    /* Προαιρετικά: border-top: none; αν φαίνεται διπλή γραμμή */
     border-top: 1px solid VAR_BORDER; 
 }
-.filter-bar [data-testid="column"] {
+.st-key-filter_bar_row [data-testid="column"] {
     min-width: 150px;
 }
 .filter-label {
@@ -615,11 +612,16 @@ div[data-testid="stTextInput"] input::placeholder {
         gap: 6px !important;
         padding-left: 0 !important;
     }
+    .stat {
+        flex-shrink: 0 !important;
+    }
     .stat-value {
         font-size: 0.8rem !important;
+        white-space: nowrap !important;
     }
     .stat-label {
         font-size: 0.55rem !important;
+        white-space: nowrap !important;
     }
 
     /* ΚΡΥΒΟΥΜΕ το βελάκι (→) στο κινητό για να κερδίσουμε πολύτιμο χώρο */
@@ -629,7 +631,7 @@ div[data-testid="stTextInput"] input::placeholder {
 
     /* Διόρθωση Tabs (Overview, Tracks, Artists κλπ) για να μην σπάνε το πλάτος */
     /* ─── SWIPEABLE TAB MENU (Spotify Style) ─── */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1) {
+    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important;
         overflow-x: auto !important;
         overflow-y: hidden !important;
@@ -641,19 +643,19 @@ div[data-testid="stTextInput"] input::placeholder {
     }
     
     /* Κρύβει την άσχημη μπάρα του scroll (Chrome/Safari) */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1)::-webkit-scrollbar {
+    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"]::-webkit-scrollbar {
         display: none !important;
     }
     
     /* Κρατάει τα κουμπιά στο φυσικό τους μέγεθος για να γίνεται swipe */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1) > [data-testid="column"] {
+    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] > [data-testid="column"] {
         flex: 0 0 auto !important;
         min-width: max-content !important;
         width: auto !important;
     }
     
     /* Κάνει τα tab buttons πιο στρογγυλεμένα σαν mobile "Pills" */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"]:nth-of-type(1) button {
+    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] button {
         padding: 0.4rem 1.1rem !important;
         font-size: 0.8rem !important;
         border-radius: 20px !important; 
@@ -684,11 +686,11 @@ div[data-testid="stTextInput"] input::placeholder {
     }
 
     /* ─── FILTER BAR: clean 2x2 grid, Spotify-style, nothing clipped ─── */
-    .filter-bar {
+    .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
         gap: 0.5rem !important;
         padding: 0.6rem 0 0.75rem !important;
     }
-    .filter-bar [data-testid="column"] {
+    .st-key-filter_bar_row [data-testid="column"] {
         flex: 1 1 47% !important;
         min-width: 47% !important;
         max-width: 47% !important;
@@ -777,7 +779,7 @@ div[data-testid="stTextInput"] input::placeholder {
 
 /* Extra-small phones (iPhone SE etc.) — drop to single column filters */
 @media (max-width: 380px) {
-    .filter-bar [data-testid="column"] {
+    .st-key-filter_bar_row [data-testid="column"] {
         flex: 1 1 100% !important;
         min-width: 100% !important;
         max-width: 100% !important;
