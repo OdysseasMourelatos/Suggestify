@@ -49,7 +49,10 @@ public class DatabaseImporter {
             System.out.println("🌊 Inserting Streams and Relationships (Bulk)...");
             processStreamsAndRelationshipsBulk(conn, records, userId);
 
-            conn.commit();
+            // ----> ΝΕΟ ΒΗΜΑ 4: ΚΑΘΑΡΙΣΜΟΣ ΔΙΠΛΟΤΥΠΩΝ ΕΔΩ <----
+            deduplicateSongs(conn);
+
+            conn.commit(); // <-- Αμέσως πριν το commit
             long totalEndTime = System.currentTimeMillis();
             System.out.println("🎉 Import complete! Total time: " + (totalEndTime - totalStartTime) + "ms");
 
@@ -291,5 +294,61 @@ public class DatabaseImporter {
             }
         }
         return -1;
+    }
+
+    private void deduplicateSongs(Connection conn) throws Exception {
+        System.out.println("🧹 Cleaning up duplicate song versions (Clean/Explicit) within albums...");
+
+        // 1. Ενημέρωση των streams: Δένουμε τα streams των διπλότυπων πάνω στο αρχικό (MIN id) τραγούδι
+        String updateStreams = """
+            UPDATE streams s
+            SET song_id = ps.min_id
+            FROM songs so
+            JOIN (
+                SELECT MIN(id) as min_id, title, album_id
+                FROM songs
+                WHERE album_id IS NOT NULL
+                GROUP BY title, album_id
+                HAVING COUNT(*) > 1
+            ) ps ON so.title = ps.title AND so.album_id = ps.album_id
+            WHERE s.song_id = so.id AND so.id != ps.min_id
+        """;
+
+        // 2. Διαγραφή των relationships (ώστε να μη χτυπήσει το Foreign Key κατά τη διαγραφή)
+        String deleteSongArtists = """
+            DELETE FROM song_artists sa
+            USING songs so
+            JOIN (
+                SELECT MIN(id) as min_id, title, album_id
+                FROM songs
+                WHERE album_id IS NOT NULL
+                GROUP BY title, album_id
+                HAVING COUNT(*) > 1
+            ) ps ON so.title = ps.title AND so.album_id = ps.album_id
+            WHERE sa.song_id = so.id AND so.id != ps.min_id
+        """;
+
+        // 3. Διαγραφή των διπλότυπων τραγουδιών
+        String deleteSongs = """
+            DELETE FROM songs so
+            USING (
+                SELECT MIN(id) as min_id, title, album_id
+                FROM songs
+                WHERE album_id IS NOT NULL
+                GROUP BY title, album_id
+                HAVING COUNT(*) > 1
+            ) ps
+            WHERE so.title = ps.title AND so.album_id = ps.album_id AND so.id != ps.min_id
+        """;
+
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(updateStreams);
+            stmt.executeUpdate(deleteSongArtists);
+            int deleted = stmt.executeUpdate(deleteSongs);
+
+            if (deleted > 0) {
+                System.out.println("✨ Merged " + deleted + " duplicate track versions into a single entry!");
+            }
+        }
     }
 }
