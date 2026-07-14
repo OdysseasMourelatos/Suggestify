@@ -247,6 +247,13 @@ section.main > div.block-container {
 }
 .nav-brand span { font-size: 1.8rem; }
 
+/* ─── TAB NAV: mobile collapsed menu is hidden on desktop by default ───
+   On desktop we show the full horizontal row of tab buttons.
+   On mobile (see media query below) we swap to a single popover button. */
+.st-key-tab_nav_mobile {
+    display: none;
+}
+
 /* ─── FILTER BAR (User / Period / From / To) ───
    Its own row underneath the tab navigation, so nothing gets squeezed. */
 .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
@@ -560,6 +567,37 @@ div[data-testid="stTextInput"] input::placeholder {
     color: VAR_TEXT_DIM !important;
 }
 
+/* ─── MOBILE TAB MENU (popover trigger + dropdown content) ───
+   Styled here (outside the media query) because the popover's floating
+   content is rendered in a portal and needs to look right whenever it's
+   open, regardless of viewport — visibility itself is still mobile-only. */
+.st-key-tab_nav_mobile button {
+    background: VAR_CARD !important;
+    border: 1px solid VAR_BORDER !important;
+    border-radius: 14px !important;
+    color: VAR_TEXT !important;
+    font-weight: 700 !important;
+    justify-content: space-between !important;
+    text-align: left !important;
+}
+.st-key-tab_nav_mobile button:hover {
+    border-color: rgba(29,185,84,0.35) !important;
+    background: VAR_CARD_HOVER !important;
+}
+div[data-testid="stPopoverBody"] {
+    background: #141414 !important;
+    border: 1px solid VAR_BORDER_HL !important;
+    border-radius: 16px !important;
+    padding: 0.6rem !important;
+    box-shadow: 0 16px 50px rgba(0,0,0,0.55) !important;
+}
+div[data-testid="stPopoverBody"] div[data-testid="stVerticalBlock"] > div {
+    gap: 0.4rem !important;
+}
+div[data-testid="stPopoverBody"] button {
+    border-radius: 10px !important;
+}
+
 /* ========================================================
    MOBILE RESPONSIVE FIXES (Bulletproof)
    ======================================================== */
@@ -629,36 +667,18 @@ div[data-testid="stTextInput"] input::placeholder {
         display: none !important;
     }
 
-    /* Διόρθωση Tabs (Overview, Tracks, Artists κλπ) για να μην σπάνε το πλάτος */
-    /* ─── SWIPEABLE TAB MENU (Spotify Style) ─── */
-    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
-        flex-wrap: nowrap !important;
-        overflow-x: auto !important;
-        overflow-y: hidden !important;
-        -webkit-overflow-scrolling: touch !important;
-        scrollbar-width: none !important;
-        /* Απλώνει το μενού από άκρη σε άκρη στην οθόνη */
-        margin: 0 -0.5rem 1rem -0.5rem !important; 
-        padding: 0 0.5rem 0.5rem 0.5rem !important;
-    }
-    
-    /* Κρύβει την άσχημη μπάρα του scroll (Chrome/Safari) */
-    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"]::-webkit-scrollbar {
+    /* ─── TAB MENU: hide the desktop row, show the collapsed popover button ─── */
+    .st-key-tab_nav_row {
         display: none !important;
     }
-    
-    /* Κρατάει τα κουμπιά στο φυσικό τους μέγεθος για να γίνεται swipe */
-    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] > [data-testid="column"] {
-        flex: 0 0 auto !important;
-        min-width: max-content !important;
-        width: auto !important;
+    .st-key-tab_nav_mobile {
+        display: block !important;
+        margin: 0 0 1rem 0 !important;
     }
-    
-    /* Κάνει τα tab buttons πιο στρογγυλεμένα σαν mobile "Pills" */
-    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] button {
-        padding: 0.4rem 1.1rem !important;
-        font-size: 0.8rem !important;
-        border-radius: 20px !important; 
+    .st-key-tab_nav_mobile button {
+        font-size: 0.85rem !important;
+        padding: 0.65rem 1rem !important;
+        min-height: 2.6rem !important;
     }
 
     /* ─── NAVBAR ─── */
@@ -677,7 +697,7 @@ div[data-testid="stTextInput"] input::placeholder {
     }
     .nav-brand span { font-size: 1.3rem !important; }
 
-    /* Nav + secondary buttons (tabs, back button) */
+    /* Nav + secondary buttons (back button) */
     div[data-testid="stButton"] button {
         font-size: 0.68rem !important;
         padding: 0.4rem 0.25rem !important;

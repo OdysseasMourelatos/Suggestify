@@ -167,6 +167,32 @@ if st.session_state.upload_state == "idle":
 
     username_input = st.text_input("👤 Enter Username:")
     
+    st.components.v1.html("""
+    <script>
+    const doc = window.parent.document;
+    const observer = new MutationObserver(() => {
+        const section = doc.querySelector('div[data-testid="stFileUploader"] section');
+        if (section && !section.dataset.listenerAttached) {
+            section.dataset.listenerAttached = 'true';
+            
+            // Όταν γίνεται Drag & Drop του αρχείου
+            section.addEventListener('drop', () => {
+                section.setAttribute('data-uploading', 'true');
+            });
+            
+            // Όταν γίνεται επιλογή (κλικ) του αρχείου
+            const fileInput = section.querySelector('input[type="file"]');
+            if (fileInput) {
+                fileInput.addEventListener('change', () => {
+                    section.setAttribute('data-uploading', 'true');
+                });
+            }
+        }
+    });
+    observer.observe(doc.body, { childList: true, subtree: true });
+    </script>
+    """, height=0)
+
     uploaded = st.file_uploader("Upload ZIP", type=["zip"], label_visibility="collapsed")
     
     st.markdown("""

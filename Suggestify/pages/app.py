@@ -465,6 +465,28 @@ tabs = [
     ("genres", "🎸 Genres"),
     ("habits", "🕐 Habits"),
 ]
+
+def navigate_to_tab(tab_id: str):
+    """Switch tabs while preserving the current filters (preset/dates/user) in the URL."""
+    curr_preset = st.query_params.get("preset")
+    curr_start = st.query_params.get("start")
+    curr_end = st.query_params.get("end")
+    curr_user = st.query_params.get("user")
+
+    st.query_params.clear()
+    st.query_params["tab"] = tab_id
+
+    if curr_preset: st.query_params["preset"] = curr_preset
+    if curr_start: st.query_params["start"] = curr_start
+    if curr_end: st.query_params["end"] = curr_end
+    if curr_user: st.query_params["user"] = curr_user
+
+    st.rerun()
+
+tab_labels = dict(tabs)
+active_tab_id = current_tab if (current_tab in tab_labels and not detail_type) else "overview"
+
+# ─── Desktop: full horizontal tab row ───
 with st.container(key="tab_nav_row"):
     cols = st.columns(len(tabs))
     for i, (tab_id, tab_label) in enumerate(tabs):
@@ -476,20 +498,20 @@ with st.container(key="tab_nav_row"):
                 type="primary" if is_active else "secondary",
                 use_container_width=True
             ):
-                curr_preset = st.query_params.get("preset")
-                curr_start = st.query_params.get("start")
-                curr_end = st.query_params.get("end")
-                curr_user = st.query_params.get("user")
+                navigate_to_tab(tab_id)
 
-                st.query_params.clear()
-                st.query_params["tab"] = tab_id
-
-                if curr_preset: st.query_params["preset"] = curr_preset
-                if curr_start: st.query_params["start"] = curr_start
-                if curr_end: st.query_params["end"] = curr_end
-                if curr_user: st.query_params["user"] = curr_user
-
-                st.rerun()
+# ─── Mobile: single button that opens a popover menu with all tabs ───
+with st.container(key="tab_nav_mobile"):
+    with st.popover(f"{tab_labels[active_tab_id]}   ▾", use_container_width=True):
+        for tab_id, tab_label in tabs:
+            is_active = (current_tab == tab_id) and not detail_type
+            if st.button(
+                tab_label,
+                key=f"nav_mobile_{tab_id}",
+                type="primary" if is_active else "secondary",
+                use_container_width=True
+            ):
+                navigate_to_tab(tab_id)
 
 try:
     users_df = run_query("SELECT id, username FROM users ORDER BY username")
