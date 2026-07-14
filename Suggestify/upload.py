@@ -85,40 +85,6 @@ div[data-testid="stFileUploader"] section svg {
     display: none !important;
 }
 
-/* Κρύβουμε ΜΟΝΙΜΑ ολόκληρο το εσωτερικό wrapper div του section (native
-   κείμενα + button + native progress bar). Δεν χρειάζεται πια να δείχνουμε
-   τίποτα από εδώ μέσα — η δική μας progress bar παρακάτω είναι ένα εντελώς
-   ξεχωριστό, καθαρό CSS στοιχείο, οπότε δεν παλεύουμε πια με visibility/
-   opacity ανάμεσα σε γονείς και παιδιά. Το section κρατάει το ύψος του
-   χάρη στο δικό του min-height, οπότε η στοίχιση του overlay μας δεν χαλάει. */
-div[data-testid="stFileUploader"] section > div {
-    display: none !important;
-}
-
-/* ─── Δική μας progress bar, κάτω από το κουτί (CSS-only, indeterminate) ─── */
-div[data-testid="stFileUploader"] {
-    position: relative !important;
-}
-@keyframes uploadBarSlide {
-    0%   { background-position: -45% 0; }
-    100% { background-position: 145% 0; }
-}
-div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"])::after {
-    content: "";
-    position: absolute;
-    left: 8%;
-    right: 8%;
-    bottom: -13px;
-    height: 4px;
-    border-radius: 999px;
-    background-color: rgba(255,255,255,0.08);
-    background-image: linear-gradient(90deg, transparent, #1DB954, transparent);
-    background-size: 45% 100%;
-    background-repeat: no-repeat;
-    animation: uploadBarSlide 1.1s infinite linear;
-    pointer-events: none;
-}
-
 /* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
 div[data-testid="stFileUploader"] section::before {
     content: "📦"; 
@@ -252,10 +218,10 @@ if st.session_state.upload_state == "idle":
     
     # ΕΔΩ: Ενσωματώσαμε το "200MB per file" για τέλεια στοίχιση!
     st.markdown("""
-    <div style="position:relative; margin-top:-115px; pointer-events:none; width:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
-        <div style="font-weight:700; font-size:1.1rem; color:#fff; margin-bottom:0.4rem; text-align:center; width:100%;">Drag & drop your Spotify export ZIP</div>
-        <div style="font-size:0.75rem; color:#727272; margin-bottom:0.4rem; text-align:center; width:100%;">200MB per file • ZIP</div>
-        <div style="font-size:0.75rem; color:#1DB954; text-align:center; width:100%;">my_spotify_data.zip · stays on your machine, never uploaded anywhere</div>
+    <div style="position:relative; margin-top:-115px; pointer-events:none; text-align:center;">
+        <div style="font-weight:700; font-size:1.1rem; color:#fff; margin-bottom:0.4rem;">Drag & drop your Spotify export ZIP</div>
+        <div style="font-size:0.75rem; color:#727272; margin-bottom:0.4rem;">200MB per file • ZIP</div>
+        <div style="font-size:0.75rem; color:#1DB954;">my_spotify_data.zip · stays on your machine, never uploaded anywhere</div>
     </div>
     """, unsafe_allow_html=True)
 
