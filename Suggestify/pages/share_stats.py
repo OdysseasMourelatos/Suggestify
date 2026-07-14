@@ -1,8 +1,52 @@
+"""
+══════════════════════════════════════════════════════════════════
+ SUGGESTIFY — "Share Your Stats" feature
+══════════════════════════════════════════════════════════════════
+Drop this file next to your main app.py and wire it in like this:
+
+    from share_stats import render_share_stats_button
+
+    render_share_stats_button(
+        run_query=run_query,          # your existing @st.cache_data query fn
+        user_id=selected_user_id,
+        username=selected_username,
+        min_date=min_date,
+        max_date=max_date,
+    )
+
+Call it once, anywhere in your layout (e.g. right under the filter bar,
+or in the navbar row). It renders a "📤 Share Your Stats" button that
+opens a modal where the user picks what to show, the time period, and
+a color theme, previews a live glassmorphism card, and downloads a
+1080×1920 PNG sized for Instagram Stories.
+
+── WHY PIL AND NOT html2canvas? ──────────────────────────────────
+The card mixes hot-linked Spotify/CDN artwork with a "download as
+image" action. html2canvas (the usual HTML→PNG trick) taints the
+canvas and silently fails/blanks-out on any image that isn't served
+with permissive CORS headers — which most album art CDNs don't do.
+Rendering server-side with Pillow sidesteps that entirely: we fetch
+the artwork ourselves, so the export is 100% reliable. A lightweight
+HTML/CSS preview is still shown inside the modal for the "modern
+glassmorphism" live feel; the actual downloadable asset is the PIL
+render, pixel-matched to the same design language.
+
+── FONTS ─────────────────────────────────────────────────────────
+_font() tries a chain of common system fonts (DejaVu on most Linux
+hosts, Arial on Windows/Mac) and finally falls back to Pillow's
+scalable default font, so this works out of the box almost anywhere.
+For pixel-perfect brand typography, drop an Inter .ttf/.otf pair into
+an `assets/` folder next to this file and set FONT_REGULAR_PATH /
+FONT_BOLD_PATH below.
+══════════════════════════════════════════════════════════════════
+"""
+
 import io
 import os
 import datetime
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 # ══════════════════════════════════════════════════════════════════
@@ -489,6 +533,8 @@ def _html_preview(df, kind, username, period_label, theme_name, date_range_label
 
     title = _title_lines(kind, n)
     return f"""
+    <!doctype html><html><head><meta charset="utf-8"></head>
+    <body>
     <div class="sh-card" style="background:{grad}">
         <div class="sh-glow" style="background:radial-gradient(circle, {accent}55, transparent 70%)"></div>
         <div class="sh-header">
@@ -501,8 +547,10 @@ def _html_preview(df, kind, username, period_label, theme_name, date_range_label
         <div class="sh-footer">Made with Suggestify</div>
     </div>
     <style>
+        html, body {{ margin: 0; padding: 0; background: transparent; }}
+        * {{ box-sizing: border-box; }}
         .sh-card {{
-            position: relative; width: 300px; height: 533px; margin: 0 auto;
+            position: relative; width: 300px; height: 533px; margin: 12px auto;
             border-radius: 24px; overflow: hidden; padding: 22px 18px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.5);
             font-family: 'Inter', -apple-system, sans-serif; color: #fff;
@@ -530,6 +578,7 @@ def _html_preview(df, kind, username, period_label, theme_name, date_range_label
         .sh-label {{ font-size:7px; opacity:0.55; text-transform:uppercase; letter-spacing:0.05em; }}
         .sh-footer {{ position:absolute; bottom:10px; left:0; right:0; text-align:center; font-size:8px; opacity:0.45; }}
     </style>
+    </body></html>
     """
 
 
@@ -561,46 +610,106 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date):
         st.warning("No listening data for this period yet — try a different range.")
         return
 
-    st.markdown(
+    components.html(
         _html_preview(df, kind, username, period_label, theme_choice, date_range_label, n),
-        unsafe_allow_html=True,
+        height=565,
+        scrolling=False,
     )
 
     st.write("")
-    gen_col, dl_col = st.columns([1, 1])
-    with gen_col:
-        generate = st.button("✨ Generate high-res PNG", use_container_width=True, type="primary")
 
-    if generate or st.session_state.get("_share_png_bytes"):
-        if generate:
-            with st.spinner("Rendering your 1080×1920 card…"):
-                card = build_share_card(df, kind, username, period_label, theme_choice, date_range_label, n)
-                st.session_state["_share_png_bytes"] = image_to_bytes(card)
+    generate = st.button("✨ Generate high-res PNG", use_container_width=True,
+                          type="primary", key="share_generate_btn")
 
-        with dl_col:
-            st.download_button(
-                "⬇️ Download PNG",
-                data=st.session_state["_share_png_bytes"],
-                file_name=f"suggestify_{kind}_{period_key}_{datetime.date.today().isoformat()}.png",
-                mime="image/png",
-                use_container_width=True,
-            )
+    if generate:
+        with st.spinner("Rendering your 1080×1920 card…"):
+            card = build_share_card(df, kind, username, period_label, theme_choice, date_range_label, n)
+            st.session_state["_share_png_bytes"] = image_to_bytes(card)
+
+    if st.session_state.get("_share_png_bytes"):
+        st.download_button(
+            "⬇️ Download PNG",
+            data=st.session_state["_share_png_bytes"],
+            file_name=f"suggestify_{kind}_{period_key}_{datetime.date.today().isoformat()}.png",
+            mime="image/png",
+            use_container_width=True,
+            type="primary",
+            key="share_download_btn",
+        )
         st.success("Ready! Sized for Instagram Stories (1080×1920).")
 
-    if st.button("Close", use_container_width=True):
+    if st.button("Close", use_container_width=True, key="share_close_btn"):
         st.session_state.pop("_share_png_bytes", None)
         st.rerun()
 
 
-def render_share_stats_button(run_query, user_id, username, min_date, max_date, label="📤 Share Your Stats"):
-    """Renders the trigger button; call once per page render."""
+def render_share_stats_button(run_query, user_id, username, min_date, max_date,
+                               label="📤 Share Your Stats", accent="#1DB954", accent_dim="#169C46"):
+    """
+    Renders the trigger as a right-aligned gradient pill button.
+
+    Call this RIGHT AFTER your navbar markdown (before the tab row) so it
+    lines up visually in the top-right, e.g.:
+
+        st.markdown('<div class="navbar">...</div>', unsafe_allow_html=True)
+        render_share_stats_button(run_query=run_query, user_id=selected_user_id,
+                                   username=selected_username, min_date=min_date, max_date=max_date)
+        # ...tabs, filter bar, etc.
+
+    NOTE: this intentionally does NOT use position:fixed/absolute. Your
+    app's global CSS animates `.main .block-container`, `[data-testid=
+    "stVerticalBlock"] > div`, etc. with `transform: translateY(...)`.
+    Per the CSS spec, ANY element with a transform other than `none`
+    (including an animated-to-identity one) becomes the containing block
+    for fixed/absolute descendants — so a `position: fixed` button gets
+    pinned to that animated wrapper instead of the real viewport, which
+    is exactly the "floats in the middle of the page" bug. Right-aligning
+    in normal flow sidesteps that entirely and is far more robust.
+    """
     if _dialog_decorator is None:
         st.error("Your Streamlit version doesn't support st.dialog — please upgrade streamlit (>=1.31.0).")
         return
 
-    if st.button(label, type="secondary", key="share_stats_trigger"):
-        st.session_state.pop("_share_png_bytes", None)
-        _open_dialog(run_query, user_id, username, min_date, max_date)
+    st.markdown(f"""
+    <style>
+        .st-key-share_stats_btn_wrap {{
+            width: 100% !important;
+        }}
+        .st-key-share_stats_btn_wrap div[data-testid="stButton"] {{
+            display: flex !important;
+            justify-content: flex-end !important;
+            width: 100% !important;
+            margin: -0.25rem 0 0.75rem 0 !important;
+        }}
+        .st-key-share_stats_btn_wrap div[data-testid="stButton"] button {{
+            width: auto !important;
+            background: linear-gradient(135deg, {accent} 0%, {accent_dim} 100%) !important;
+            color: #000 !important;
+            font-weight: 800 !important;
+            font-size: 0.85rem !important;
+            border: none !important;
+            border-radius: 999px !important;
+            padding: 0.6rem 1.4rem !important;
+            box-shadow: 0 8px 24px {accent}55, 0 2px 10px rgba(0,0,0,0.45) !important;
+            transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
+            letter-spacing: 0.01em !important;
+        }}
+        .st-key-share_stats_btn_wrap div[data-testid="stButton"] button:hover {{
+            transform: translateY(-2px) scale(1.03) !important;
+            box-shadow: 0 12px 34px {accent}77, 0 4px 14px rgba(0,0,0,0.55) !important;
+        }}
+        @media (max-width: 768px) {{
+            .st-key-share_stats_btn_wrap div[data-testid="stButton"] button {{
+                padding: 0.5rem 1rem !important; font-size: 0.72rem !important;
+            }}
+        }}
+    </style>
+    """, unsafe_allow_html=True)
+
+    with st.container(key="share_stats_btn_wrap"):
+        if st.button(label, key="share_stats_trigger"):
+            st.session_state.pop("_share_png_bytes", None)
+            _open_dialog(run_query, user_id, username, min_date, max_date)
 
 
 @_dialog_decorator("🎉 Share Your Stats") if _dialog_decorator else (lambda f: f)
