@@ -1,6 +1,6 @@
 # Suggestify 🎵
 
-**[👉 Try Suggestify Live](https://www.google.com/search?q=https://suggestify-exploreyourmusic.streamlit.app/)**
+[👉 Click here to try Suggestify Live](https://suggestify-exploreyourmusic.streamlit.app/)
 
 Suggestify is a Spotify analytics and recommendation platform that transforms your streaming history into meaningful insights. Using Spotify Extended Streaming History data, Suggestify analyzes listening habits, favorite artists, top tracks, genres, and trends over time. The platform combines historical listening data with Spotify API metadata to provide personalized statistics and intelligent music recommendations.
 
