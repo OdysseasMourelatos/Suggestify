@@ -76,12 +76,22 @@ div[data-testid="stFileUploader"] section:hover {
     background: rgba(29,185,84,0.04) !important;
 }
 
+/* --- ΝΕΟ: Κεντράρουμε το 200MB per file --- */
+div[data-testid="stFileUploader"] section > div {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    text-align: center !important;
+}
+
 /* Κρύβουμε τα προεπιλεγμένα κείμενα του Streamlit (όχι όμως τη μπάρα!) */
 div[data-testid="stFileUploader"] section [data-testid="stMarkdownContainer"],
 div[data-testid="stFileUploader"] section button,
-div[data-testid="stFileUploader"] section small,
 div[data-testid="stFileUploader"] section svg { 
     opacity: 0 !important; 
+    display: none !important;
 }
 
 /* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
