@@ -85,6 +85,19 @@ div[data-testid="stFileUploader"] section svg {
     display: none !important;
 }
 
+/* Δίχτυ ασφαλείας: σε νεότερες εκδόσεις Streamlit το "Limit 200MB per file • ZIP"
+   ζει σε διαφορετικό tag/testid και ξέφευγε από τους παραπάνω selectors,
+   εμφανιζόμενο "διπλό" αριστερά. Κρύβουμε ΟΤΙΔΗΠΟΤΕ μέσα στο πρώτο wrapper div
+   του section, ό,τι tag κι αν είναι — μένει μόνο το δικό μας custom overlay. */
+div[data-testid="stFileUploader"] section > div {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+div[data-testid="stFileUploader"] section > div * {
+    opacity: 0 !important;
+    font-size: 0 !important;
+}
+
 /* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
 div[data-testid="stFileUploader"] section::before {
     content: "📦"; 
