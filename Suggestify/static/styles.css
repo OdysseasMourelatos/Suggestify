@@ -617,10 +617,11 @@ div[data-testid="stPopoverBody"] button {
 
     /* Μικραίνουμε τον αριθμό κατάταξης (Rank) */
     .item-rank {
-        width: 20px !important;
-        min-width: 20px !important;
+        width: 32px !important;
+        min-width: 32px !important;
         font-size: 1rem !important;
         margin-right: 5px !important;
+        text-align: left !important; 
     }
 
     /* Μικραίνουμε την εικόνα */
