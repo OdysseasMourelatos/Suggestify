@@ -65,7 +65,7 @@ div[data-testid="stFileUploader"] section {
     background: rgba(22, 22, 22, 0.9) !important;
     border: 1.5px dashed rgba(255,255,255,0.14) !important;
     border-radius: 22px !important;
-    min-height: 230px !important; /* Μεγαλώσαμε το ύψος! */
+    min-height: 230px !important;
     padding: 0 !important;
     margin-bottom: 0 !important;
     transition: all 0.3s ease !important;
@@ -76,24 +76,45 @@ div[data-testid="stFileUploader"] section:hover {
     background: rgba(29,185,84,0.04) !important;
 }
 
-/* Κρύβουμε ΤΕΛΕΙΩΣ τα προεπιλεγμένα κείμενα του Streamlit για να μην χαλάνε τη στοίχιση */
-div[data-testid="stFileUploader"] section [data-testid="stMarkdownContainer"],
-div[data-testid="stFileUploader"] section button,
-div[data-testid="stFileUploader"] section small,
-div[data-testid="stFileUploader"] section svg { 
-    opacity: 0 !important; 
+/* Κρύβουμε τα προεπιλεγμένα κείμενα του Streamlit (εκτός από το αρχείο & τη μπάρα) */
+div[data-testid="stFileUploader"] section > div:first-child { 
     display: none !important;
 }
 
 /* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
 div[data-testid="stFileUploader"] section::before {
     content: "📦"; 
-    position: absolute; top: 35%; left: 50%;
+    position: absolute; top: 32%; left: 50%;
     transform: translate(-50%, -50%); 
     pointer-events: none;
     width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;
     background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.2);
     border-radius: 18px; font-size: 1.8rem;
+}
+
+/* ΟΤΑΝ ΑΝΕΒΕΙ ΑΡΧΕΙΟ: Κρύβουμε το 📦 γιατί τώρα δείχνουμε το όνομα του αρχείου */
+div[data-testid="stFileUploader"]:has([data-testid="stUploadedFile"]) section::before {
+    display: none !important;
+}
+
+/* ==================================================================
+   ΑΠΟΛΥΤΟ ΚΕΝΤΡΑΡΙΣΜΑ ΤΟΥ NATIVE UPLOADED FILE
+   ================================================================== */
+div[data-testid="stUploadedFile"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    height: 100% !important;
+    position: absolute !important;
+    inset: 0 !important;
+}
+div[data-testid="stUploadedFile"] > div {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
 }
 
 /* 2. ΣΤΑΔΙΟ UPLOADING (Ανιχνεύει αυτόματα τη μπάρα προόδου) */
@@ -102,30 +123,12 @@ div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section {
     background: rgba(29,185,84,0.08) !important;
 }
 
-div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section::before {
-    content: "⏳" !important;
-    animation: breathe 1s ease-in-out infinite !important;
-}
-
-div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section::after {
-    content: "Uploading ZIP... παρακαλώ περιμένετε";
-    position: absolute; top: 75%; left: 50%;
-    transform: translate(-50%, 0);
-    color: #1DB954; font-weight: 700; font-size: 0.95rem;
-    pointer-events: none;
-}
-
-/* 3. ΜΟΛΙΣ ΑΝΕΒΕΙ: Κρύβουμε το χαλασμένο native box, ΚΡΑΤΑΜΕ ΜΟΝΟ ΤΗ ΜΠΑΡΑ ΠΡΟΟΔΟΥ */
-div[data-testid="stUploadedFile"] > div:first-child {
-    display: none !important; /* Αυτό κρύβει το εικονίδιο και το όνομα αρχείου που κάνανε overlap! */
-}
+/* Η μπάρα προόδου */
 div[data-testid="stFileUploader"] [data-testid="stProgressBar"] {
     opacity: 1 !important;
     display: block !important;
-    position: absolute;
-    bottom: 25px;
-    left: 10%;
-    width: 80%;
+    width: 70% !important;
+    margin-top: 15px !important;
 }
 div[data-testid="stFileUploader"] [data-testid="stProgressBar"] > div > div {
     background-color: #1DB954 !important;
@@ -216,19 +219,20 @@ if st.session_state.upload_state == "idle":
     
     uploaded = st.file_uploader("Upload ZIP", type=["zip"], label_visibility="collapsed")
     
-    # ΕΔΩ: Ενσωματώσαμε το "200MB per file" για τέλεια στοίχιση!
-    st.markdown("""
-    <div style="position:relative; margin-top:-115px; pointer-events:none; text-align:center;">
-        <div style="font-weight:700; font-size:1.1rem; color:#fff; margin-bottom:0.4rem;">Drag & drop your Spotify export ZIP</div>
-        <div style="font-size:0.75rem; color:#727272; margin-bottom:0.4rem;">200MB per file • ZIP</div>
-        <div style="font-size:0.75rem; color:#1DB954;">my_spotify_data.zip · stays on your machine, never uploaded anywhere</div>
-    </div>
-    """, unsafe_allow_html=True)
+    # ─── ΕΜΦΑΝΙΖΟΥΜΕ ΤΙΣ ΟΔΗΓΙΕΣ ΜΟΝΟ ΑΝ ΔΕΝ ΕΧΕΙ ΑΝΕΒΕΙ ΑΡΧΕΙΟ ───
+    if not uploaded:
+        st.markdown("""
+        <div style="position:relative; margin-top:-105px; margin-bottom: 75px; pointer-events:none; text-align:center; z-index:10;">
+            <div style="font-weight:700; font-size:1.1rem; color:#fff; margin-bottom:0.4rem;">Drag & drop your Spotify export ZIP</div>
+            <div style="font-size:0.75rem; color:#727272; margin-bottom:0.4rem;">200MB per file • ZIP</div>
+            <div style="font-size:0.75rem; color:#1DB954;">my_spotify_data.zip · stays on your machine, never uploaded anywhere</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     if uploaded:
         size_mb = uploaded.size / 1_000_000
         st.markdown(f"""
-        <div style="display: flex; align-items: center; gap: 0.75rem; background: rgba(29,185,84,0.07); border: 1px solid rgba(29,185,84,0.22); border-radius: 12px; padding: 0.7rem 1rem; margin-top: 1rem; margin-bottom: 1rem; animation: revealUp 0.4s ease-out;">
+        <div style="display: flex; align-items: center; justify-content: center; gap: 0.75rem; background: rgba(29,185,84,0.07); border: 1px solid rgba(29,185,84,0.22); border-radius: 12px; padding: 0.7rem 1rem; margin-top: 1rem; margin-bottom: 1rem; animation: revealUp 0.4s ease-out; text-align: left;">
             <span style="font-size:1.3rem;">✅</span>
             <div>
                 <div style="font-weight: 700; color: #FFFFFF; font-size: 0.9rem;">{uploaded.name}</div>
