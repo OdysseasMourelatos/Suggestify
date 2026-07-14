@@ -65,7 +65,7 @@ div[data-testid="stFileUploader"] section {
     background: rgba(22, 22, 22, 0.9) !important;
     border: 1.5px dashed rgba(255,255,255,0.14) !important;
     border-radius: 22px !important;
-    min-height: 190px !important;
+    min-height: 230px !important; /* Μεγαλώσαμε το ύψος! */
     padding: 0 !important;
     margin-bottom: 0 !important;
     transition: all 0.3s ease !important;
@@ -76,19 +76,10 @@ div[data-testid="stFileUploader"] section:hover {
     background: rgba(29,185,84,0.04) !important;
 }
 
-/* --- ΝΕΟ: Κεντράρουμε το 200MB per file --- */
-div[data-testid="stFileUploader"] section > div {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: 100% !important;
-    text-align: center !important;
-}
-
-/* Κρύβουμε τα προεπιλεγμένα κείμενα του Streamlit (όχι όμως τη μπάρα!) */
+/* Κρύβουμε ΤΕΛΕΙΩΣ τα προεπιλεγμένα κείμενα του Streamlit για να μην χαλάνε τη στοίχιση */
 div[data-testid="stFileUploader"] section [data-testid="stMarkdownContainer"],
 div[data-testid="stFileUploader"] section button,
+div[data-testid="stFileUploader"] section small,
 div[data-testid="stFileUploader"] section svg { 
     opacity: 0 !important; 
     display: none !important;
@@ -97,15 +88,15 @@ div[data-testid="stFileUploader"] section svg {
 /* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
 div[data-testid="stFileUploader"] section::before {
     content: "📦"; 
-    position: absolute; top: 60%; left: 50%;
-    transform: translate(-50%, -90px); 
+    position: absolute; top: 35%; left: 50%;
+    transform: translate(-50%, -50%); 
     pointer-events: none;
     width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;
     background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.2);
     border-radius: 18px; font-size: 1.8rem;
 }
 
-/* 2. ΣΤΑΔΙΟ UPLOADING (Ανιχνεύει αυτόματα τη μπάρα προόδου!) */
+/* 2. ΣΤΑΔΙΟ UPLOADING (Ανιχνεύει αυτόματα τη μπάρα προόδου) */
 div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section {
     border-color: #1DB954 !important;
     background: rgba(29,185,84,0.08) !important;
@@ -116,7 +107,6 @@ div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section::be
     animation: breathe 1s ease-in-out infinite !important;
 }
 
-/* Κείμενο Uploading */
 div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section::after {
     content: "Uploading ZIP... παρακαλώ περιμένετε";
     position: absolute; top: 75%; left: 50%;
@@ -125,13 +115,17 @@ div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section::af
     pointer-events: none;
 }
 
-/* Εμφανίζουμε τη native πράσινη μπάρα κάτω από το κουτί */
-div[data-testid="stFileUploader"] [data-testid="stUploadedFile"] * {
-    opacity: 1 !important; 
+/* 3. ΜΟΛΙΣ ΑΝΕΒΕΙ: Κρύβουμε το χαλασμένο native box, ΚΡΑΤΑΜΕ ΜΟΝΟ ΤΗ ΜΠΑΡΑ ΠΡΟΟΔΟΥ */
+div[data-testid="stUploadedFile"] > div:first-child {
+    display: none !important; /* Αυτό κρύβει το εικονίδιο και το όνομα αρχείου που κάνανε overlap! */
 }
 div[data-testid="stFileUploader"] [data-testid="stProgressBar"] {
     opacity: 1 !important;
     display: block !important;
+    position: absolute;
+    bottom: 25px;
+    left: 10%;
+    width: 80%;
 }
 div[data-testid="stFileUploader"] [data-testid="stProgressBar"] > div > div {
     background-color: #1DB954 !important;
@@ -222,10 +216,12 @@ if st.session_state.upload_state == "idle":
     
     uploaded = st.file_uploader("Upload ZIP", type=["zip"], label_visibility="collapsed")
     
+    # ΕΔΩ: Ενσωματώσαμε το "200MB per file" για τέλεια στοίχιση!
     st.markdown("""
-    <div style="position:relative; margin-top:-105px; pointer-events:none; text-align:center;">
-        <div style="font-weight:700; font-size:1rem; color:#fff; margin-bottom:0.3rem;">Drag & drop your Spotify export ZIP</div>
-        <div style="font-size:0.78rem; color:#727272;">my_spotify_data.zip · stays on your machine, never uploaded anywhere</div>
+    <div style="position:relative; margin-top:-115px; pointer-events:none; text-align:center;">
+        <div style="font-weight:700; font-size:1.1rem; color:#fff; margin-bottom:0.4rem;">Drag & drop your Spotify export ZIP</div>
+        <div style="font-size:0.75rem; color:#727272; margin-bottom:0.4rem;">200MB per file • ZIP</div>
+        <div style="font-size:0.75rem; color:#1DB954;">my_spotify_data.zip · stays on your machine, never uploaded anywhere</div>
     </div>
     """, unsafe_allow_html=True)
 
