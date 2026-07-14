@@ -180,8 +180,22 @@ def get_rank_class(rank: int) -> str:
     return ""
 
 def get_item_icon(link_type: str) -> str:
-    icons = {"song": "🎵", "artist": "🎤", "album": "💿", "genre": "🎸"}
+    icons = {"song": "🎵", "artist": "🎤", "album": "💿", "genre": "🎸", "year": "📆"}
     return icons.get(link_type, "🎵")
+
+def build_filtered_href(view_type: str, id_val: str) -> str:
+    """Build a nav URL for a dimension (season/tod/year) that preserves the current filters."""
+    current_tab = st.query_params.get("tab", "habits")
+    p_preset = st.query_params.get("preset")
+    p_start = st.query_params.get("start")
+    p_end = st.query_params.get("end")
+    p_user = st.query_params.get("user")
+    href = f"?tab={current_tab}&view={view_type}&id={id_val}"
+    if p_preset: href += f"&preset={p_preset}"
+    if p_start: href += f"&start={p_start}"
+    if p_end: href += f"&end={p_end}"
+    if p_user: href += f"&user={p_user}"
+    return href
 
 def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str,
                    id_col: str = None, link_type: str = None, image_col: str = "image_url",
@@ -342,7 +356,7 @@ def chart_multi_trend(df: pd.DataFrame) -> go.Figure:
     df["period"] = pd.to_datetime(df["period"])
     fig = go.Figure()
     
-
+    # Νέα, πιο διακριτά χρώματα για να ξεχωρίζουν τα 5 τραγούδια
     colors = [GREEN, "#4FC3F7", "#F48FB1", "#FFD54F", "#B39DDB"]
     
     for idx, track in enumerate(df["track_title"].unique()):
@@ -369,9 +383,11 @@ def chart_heatmap(df: pd.DataFrame) -> go.Figure:
         y=DOW,
         colorscale=[[0, BG], [0.15, "rgba(29,185,84,0.1)"], [0.4, GREEN_DIM], [1, GREEN]],
         hoverongaps=False,
+        xgap=3, ygap=3,
         hovertemplate="<b>%{y}</b> at <b>%{x}:00</b><br>%{z} streams<extra></extra>"
     ))
-    return themed(fig, xaxis_title="Hour", yaxis_title="", margin=dict(t=20, b=50, l=60, r=20))
+    return themed(fig, xaxis_title="Hour", yaxis_title="", margin=dict(t=20, b=50, l=60, r=20),
+                  height=300, yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True, autorange="reversed"))
 
 def chart_bar(x, y, xlabel: str) -> go.Figure:
     max_val = max(y) if y else 0
@@ -415,60 +431,159 @@ def chart_donut(labels, values, colors) -> go.Figure:
     fig.update_layout(showlegend=False)
     return themed(fig, margin=dict(t=10, b=10, l=10, r=10))
 
+SEASON_META = {
+    "Winter": {"icon": "❄️", "color": "#4FC3F7", "months": (12, 1, 2)},
+    "Spring": {"icon": "🌸", "color": "#F48FB1", "months": (3, 4, 5)},
+    "Summer": {"icon": "☀️", "color": "#FFD54F", "months": (6, 7, 8)},
+    "Autumn": {"icon": "🍂", "color": "#FF8A65", "months": (9, 10, 11)},
+}
+
+TOD_META = {
+    # Night now runs 9PM -> 5AM per user preference
+    "Night":     {"icon": "🌙", "range": "9PM–5AM",  "color": "#5C6BC0"},
+    "Morning":   {"icon": "🌅", "range": "5AM–12PM",  "color": "#FFD54F"},
+    "Afternoon": {"icon": "🌤️", "range": "12PM–5PM",  "color": "#4FC3F7"},
+    "Evening":   {"icon": "🌆", "range": "5PM–9PM",   "color": "#FF7043"},
+}
+
 def render_season_cards(df: pd.DataFrame):
-    """Fancy 'era of the year' cards — Winter / Spring / Summer / Autumn."""
-    season_meta = {
-        "Winter": {"icon": "❄️", "color": "#4FC3F7"},
-        "Spring": {"icon": "🌸", "color": "#F48FB1"},
-        "Summer": {"icon": "☀️", "color": "#FFD54F"},
-        "Autumn": {"icon": "🍂", "color": "#FF8A65"},
-    }
+    """Fancy, clickable 'era of the year' cards — Winter / Spring / Summer / Autumn."""
     data = {row["season"]: row for _, row in df.iterrows()} if not df.empty else {}
     max_streams = int(df["stream_count"].max()) if not df.empty else 0
 
     cols = st.columns(4)
     for col, season in zip(cols, ["Winter", "Spring", "Summer", "Autumn"]):
-        meta = season_meta[season]
+        meta = SEASON_META[season]
         row = data.get(season)
         streams = int(row["stream_count"]) if row is not None else 0
         hours = float(row["hours_played"]) if row is not None else 0.0
         is_top = streams > 0 and streams == max_streams
         badge = '<div class="season-badge">👑 Favorite</div>' if is_top else ""
         glow = f'box-shadow: 0 12px 30px {meta["color"]}33; border-color: {meta["color"]}66;' if is_top else ""
-        col.markdown(f'''
-        <div class="kpi-card season-card" style="{glow}">
-            {badge}
-            <div class="kpi-icon" style="font-size: 1.9rem;">{meta["icon"]}</div>
-            <div class="kpi-title">{season}</div>
-            <div class="kpi-value" style="color:{meta["color"]};">{streams:,}</div>
-            <div class="stat-label" style="margin-top:2px;">{hours:.1f}h listened</div>
-        </div>
-        ''', unsafe_allow_html=True)
+        
+        # Ανοσία στο auto-formatting του IDE ενώνοντας το string σε μια γραμμή!
+        card_html = (
+            f'<div class="kpi-card season-card" style="{glow}">'
+            f'{badge}'
+            f'<div class="kpi-icon" style="font-size: 1.9rem;">{meta["icon"]}</div>'
+            f'<div class="kpi-title">{season}</div>'
+            f'<div class="kpi-value" style="color:{meta["color"]};">{streams:,}</div>'
+            f'<div class="stat-label" style="margin-top:2px;">{hours:.1f}h listened</div>'
+            f'</div>'
+        )
+        href = build_filtered_href("season", season)
+        col.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
+
 
 def render_time_of_day_cards(df: pd.DataFrame):
-    """Small stat cards for each time-of-day bucket, shown next to the donut chart."""
-    tod_meta = {
-        "Night":     {"icon": "🌙", "range": "12AM–5AM"},
-        "Morning":   {"icon": "🌅", "range": "5AM–12PM"},
-        "Afternoon": {"icon": "🌤️", "range": "12PM–5PM"},
-        "Evening":   {"icon": "🌆", "range": "5PM–12AM"},
-    }
+    """Small, clickable stat cards for each time-of-day bucket."""
     data = {row["time_of_day"]: row for _, row in df.iterrows()} if not df.empty else {}
 
-    for label, meta in tod_meta.items():
+    for label, meta in TOD_META.items():
         row = data.get(label)
         streams = int(row["stream_count"]) if row is not None else 0
         hours = float(row["hours_played"]) if row is not None else 0.0
-        st.markdown(f'''
-        <div class="tod-card" style="margin-bottom: 10px;">
-            <div class="tod-icon">{meta["icon"]}</div>
-            <div class="tod-label">{label} · {meta["range"]}</div>
-            <div class="tod-value">{streams:,}</div>
-            <div class="tod-sub">{hours:.1f}h listened</div>
-        </div>
-        ''', unsafe_allow_html=True)
+        
+        # Ανοσία στο auto-formatting
+        card_html = (
+            f'<div class="tod-card" style="margin-bottom: 10px;">'
+            f'<div class="tod-icon">{meta["icon"]}</div>'
+            f'<div class="tod-label">{label} · {meta["range"]}</div>'
+            f'<div class="tod-value">{streams:,}</div>'
+            f'<div class="tod-sub">{hours:.1f}h listened</div>'
+            f'</div>'
+        )
+        href = build_filtered_href("tod", label)
+        st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
 
 
+def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str):
+    """Shared drill-down view for clicking a season / time-of-day / year card: shows top tracks, artists, albums."""
+    header_df = run_query(f"""
+        SELECT COUNT(*) AS streams, ROUND(COALESCE(SUM(ms_played), 0) / 3600000.0, 2) AS hours,
+               COUNT(DISTINCT song_id) AS unique_songs
+        FROM streams s
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date
+          AND s.user_id = :user_id
+          AND {extra_where}
+    """, {**F, **extra_params})
+
+    streams = int(header_df.iloc[0]["streams"]) if not header_df.empty else 0
+    hours = float(header_df.iloc[0]["hours"]) if not header_df.empty else 0.0
+    unique_songs = int(header_df.iloc[0]["unique_songs"]) if not header_df.empty else 0
+
+    render_detail_header(
+        type_label=type_label, title=title, subtitle=subtitle, icon=icon,
+        stats=[
+            {"value": f"{streams:,}", "label": "Streams"},
+            {"value": f"{hours:.1f}h", "label": "Listened"},
+            {"value": f"{unique_songs:,}", "label": "Unique Songs"},
+        ]
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+        df_tracks = run_query(f"""
+            SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            LEFT JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+              AND {extra_where}
+            GROUP BY so.id, so.title, a.name, so.image_url
+            ORDER BY streams DESC LIMIT 10
+        """, {**F, **extra_params})
+        if not df_tracks.empty:
+            render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
+
+    with c2:
+        st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
+        df_artists = run_query(f"""
+            SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
+                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+            FROM streams s
+            JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+            JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+              AND {extra_where}
+            GROUP BY a.id, a.name, a.image_url
+            ORDER BY streams DESC LIMIT 10
+        """, {**F, **extra_params})
+        if not df_artists.empty:
+            df_artists["sub"] = "Artist"
+            render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
+
+    with c3:
+        st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
+        df_albums = run_query(f"""
+            SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
+                   MAX(so.image_url) AS image_url,
+                   COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN albums al ON al.id = so.album_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+              AND {extra_where}
+              AND so.album_id IS NOT NULL
+            GROUP BY al.id, al.title
+            ORDER BY streams DESC LIMIT 10
+        """, {**F, **extra_params})
+        if not df_albums.empty:
+            df_albums["sub"] = "Album"
+            render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album")
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════
 # NAVIGATION HANDLING
 # ══════════════════════════════════════════════════════════════════
@@ -1136,6 +1251,50 @@ if detail_type and detail_id:
                     else:
                         st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
 
+    elif detail_type == "season":
+        if detail_id in SEASON_META:
+            months = SEASON_META[detail_id]["months"]
+            month_list = ",".join(str(m) for m in months)
+            render_dimension_detail(
+                extra_where=f"EXTRACT(MONTH FROM s.played_at) IN ({month_list})",
+                extra_params={},
+                type_label="Season", title=detail_id,
+                subtitle=f"Everything you played during {detail_id.lower()}",
+                icon=SEASON_META[detail_id]["icon"]
+            )
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>Unknown season</div>', unsafe_allow_html=True)
+
+    elif detail_type == "tod":
+        if detail_id in TOD_META:
+            if detail_id == "Night":
+                cond = "(EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5)"
+            elif detail_id == "Morning":
+                cond = "EXTRACT(HOUR FROM s.played_at) BETWEEN 5 AND 11"
+            elif detail_id == "Afternoon":
+                cond = "EXTRACT(HOUR FROM s.played_at) BETWEEN 12 AND 16"
+            else:
+                cond = "EXTRACT(HOUR FROM s.played_at) BETWEEN 17 AND 20"
+            render_dimension_detail(
+                extra_where=cond, extra_params={},
+                type_label="Time of Day", title=detail_id,
+                subtitle=f"Streams during {TOD_META[detail_id]['range']}",
+                icon=TOD_META[detail_id]["icon"]
+            )
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>Unknown time of day</div>', unsafe_allow_html=True)
+
+    elif detail_type == "year":
+        if detail_id and str(detail_id).isdigit() and 1900 <= int(detail_id) <= 2100:
+            render_dimension_detail(
+                extra_where="EXTRACT(YEAR FROM s.played_at) = :year",
+                extra_params={"year": int(detail_id)},
+                type_label="Year", title=str(detail_id),
+                subtitle="Your year in review", icon="📆"
+            )
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>Invalid year</div>', unsafe_allow_html=True)
+
 # ══════════════════════════════════════════════════════════════════
 # TAB VIEWS
 # ══════════════════════════════════════════════════════════════════
@@ -1479,21 +1638,28 @@ elif current_tab == "habits":
 
     # ─── 🌍 Seasonal Vibes ───
     st.markdown('<div class="section-header" style="margin-top: 8px;"><span class="icon">🌍</span>Seasonal Vibes</div>', unsafe_allow_html=True)
-    df_seasons = run_query("""
+    df_seasons_raw = run_query("""
         SELECT
-            CASE
-                WHEN EXTRACT(MONTH FROM played_at) IN (12, 1, 2) THEN 'Winter'
-                WHEN EXTRACT(MONTH FROM played_at) IN (3, 4, 5) THEN 'Spring'
-                WHEN EXTRACT(MONTH FROM played_at) IN (6, 7, 8) THEN 'Summer'
-                ELSE 'Autumn'
-            END AS season,
-            COUNT(*) AS stream_count,
-            ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+            COUNT(*) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (12,1,2)) AS winter_streams,
+            ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (12,1,2)), 0) / 3600000.0, 2) AS winter_hours,
+            COUNT(*) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (3,4,5)) AS spring_streams,
+            ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (3,4,5)), 0) / 3600000.0, 2) AS spring_hours,
+            COUNT(*) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (6,7,8)) AS summer_streams,
+            ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (6,7,8)), 0) / 3600000.0, 2) AS summer_hours,
+            COUNT(*) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (9,10,11)) AS autumn_streams,
+            ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(MONTH FROM played_at) IN (9,10,11)), 0) / 3600000.0, 2) AS autumn_hours
         FROM streams
         WHERE played_at::date BETWEEN :start_date AND :end_date
-          AND user_id = :user_id
-        GROUP BY 1;
+          AND user_id = :user_id;
     """, F)
+    if not df_seasons_raw.empty:
+        r = df_seasons_raw.iloc[0]
+        df_seasons = pd.DataFrame([
+            {"season": s, "stream_count": int(r[f"{s.lower()}_streams"] or 0), "hours_played": float(r[f"{s.lower()}_hours"] or 0)}
+            for s in ["Winter", "Spring", "Summer", "Autumn"]
+        ])
+    else:
+        df_seasons = pd.DataFrame(columns=["season", "stream_count", "hours_played"])
     render_season_cards(df_seasons)
 
     # ─── 🌙 Time of Day + 📆 Yearly Breakdown ───
@@ -1501,32 +1667,39 @@ elif current_tab == "habits":
 
     with c3:
         st.markdown('<div class="section-header"><span class="icon">🌙</span>Time of Day</div>', unsafe_allow_html=True)
-        df_tod = run_query("""
+        df_tod_raw = run_query("""
             SELECT
-                CASE
-                    WHEN EXTRACT(HOUR FROM played_at) BETWEEN 5 AND 11 THEN 'Morning'
-                    WHEN EXTRACT(HOUR FROM played_at) BETWEEN 12 AND 16 THEN 'Afternoon'
-                    WHEN EXTRACT(HOUR FROM played_at) BETWEEN 17 AND 20 THEN 'Evening'
-                    ELSE 'Night'
-                END AS time_of_day,
-                COUNT(*) AS stream_count,
-                ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+                COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM played_at) >= 21 OR EXTRACT(HOUR FROM played_at) < 5) AS night_streams,
+                ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(HOUR FROM played_at) >= 21 OR EXTRACT(HOUR FROM played_at) < 5), 0) / 3600000.0, 2) AS night_hours,
+                COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM played_at) BETWEEN 5 AND 11) AS morning_streams,
+                ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(HOUR FROM played_at) BETWEEN 5 AND 11), 0) / 3600000.0, 2) AS morning_hours,
+                COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM played_at) BETWEEN 12 AND 16) AS afternoon_streams,
+                ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(HOUR FROM played_at) BETWEEN 12 AND 16), 0) / 3600000.0, 2) AS afternoon_hours,
+                COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM played_at) BETWEEN 17 AND 20) AS evening_streams,
+                ROUND(COALESCE(SUM(ms_played) FILTER (WHERE EXTRACT(HOUR FROM played_at) BETWEEN 17 AND 20), 0) / 3600000.0, 2) AS evening_hours
             FROM streams
             WHERE played_at::date BETWEEN :start_date AND :end_date
-              AND user_id = :user_id
-            GROUP BY 1;
+              AND user_id = :user_id;
         """, F)
 
         tod_order = ["Night", "Morning", "Afternoon", "Evening"]
-        tod_colors = {"Night": "#5C6BC0", "Morning": "#FFD54F", "Afternoon": "#4FC3F7", "Evening": "#FF7043"}
-        if not df_tod.empty:
-            df_tod_sorted = df_tod.set_index("time_of_day").reindex(tod_order).dropna().reset_index()
+        if not df_tod_raw.empty:
+            r = df_tod_raw.iloc[0]
+            df_tod = pd.DataFrame([
+                {"time_of_day": t, "stream_count": int(r[f"{t.lower()}_streams"] or 0), "hours_played": float(r[f"{t.lower()}_hours"] or 0)}
+                for t in tod_order
+            ])
+        else:
+            df_tod = pd.DataFrame(columns=["time_of_day", "stream_count", "hours_played"])
+
+        if not df_tod.empty and df_tod["stream_count"].sum() > 0:
+            df_tod_chart = df_tod[df_tod["stream_count"] > 0]
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
             st.plotly_chart(
                 chart_donut(
-                    df_tod_sorted["time_of_day"].tolist(),
-                    df_tod_sorted["stream_count"].tolist(),
-                    [tod_colors[t] for t in df_tod_sorted["time_of_day"]]
+                    df_tod_chart["time_of_day"].tolist(),
+                    df_tod_chart["stream_count"].tolist(),
+                    [TOD_META[t]["color"] for t in df_tod_chart["time_of_day"]]
                 ),
                 use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
             )
@@ -1546,6 +1719,13 @@ elif current_tab == "habits":
         st.markdown('<div class="chart-container"><div class="chart-title">📈 Streams per Year</div>', unsafe_allow_html=True)
         if not df_years.empty:
             st.plotly_chart(chart_year_bar(df_years), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+            df_years_list = df_years.copy()
+            df_years_list["year_str"] = df_years_list["year"].astype(str)
+            df_years_list["subtitle"] = "Year"
+            df_years_list = df_years_list.sort_values("stream_count", ascending=False).reset_index(drop=True)
+            df_years_list["global_rank"] = df_years_list.index + 1
+            render_list_v2(df_years_list, "year_str", "subtitle", "stream_count", "hours_played",
+                           "year_str", "year", rank_col="global_rank")
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No data for this period</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)

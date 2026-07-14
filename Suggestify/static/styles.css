@@ -18,11 +18,12 @@ div[data-testid="stDecoration"] { display: none !important; }
 div[data-testid="stToolbar"] { display: none !important; }
 
 .block-container {
-    padding: 0 2rem 4rem !important;
+    padding: 0 2rem 6rem !important; /* 6rem κάτω κενό για να μην κρύβει το dock το περιεχόμενο */
     max-width: 100% !important;
 }
 .main .block-container {
     padding-top: 0 !important;
+    margin-top: -1.5rem !important; /* Τραβάει όλο το UI πάνω, τρώγοντας το νεκρό κενό */
 }
 
 /* ─── STREAMLIT ELEMENT SPACING FIXES ─── */
@@ -211,29 +212,19 @@ section.main > div.block-container {
     animation: revealUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* ─── STICKY NAVBAR ─── */
+/* ─── NAVBAR ─── */
 .navbar {
-    position: sticky;
-    top: 0;
-    z-index: 1000;
-    background: rgba(5, 5, 5, 0.92);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border-bottom: 1px solid VAR_BORDER;
-    padding: 0.75rem 0 0;
-    /* ΑΛΛΑΓΗ ΕΔΩ: Μηδενίζουμε το bottom margin */
-    margin: 0 -2rem 0 -2rem; 
-    padding-left: 2rem;
-    padding-right: 2rem;
+    padding: 0 !important;
+    margin-bottom: 0.5rem !important;
+    background: transparent !important;
+    border: none !important;
 }
-
 .navbar-content {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1.5rem;
-    flex-wrap: wrap;
-    margin-bottom: 0.85rem;
+    margin-bottom: 0.5rem;
 }
 
 .nav-brand {
@@ -707,26 +698,33 @@ div[data-testid="stPopoverBody"] button {
     }
 
     /* ─── FILTER BAR: clean 2x2 grid, Spotify-style, nothing clipped ─── */
+    /* ─── FILTER BAR (User / Period / From / To) ─── */
     .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
-        gap: 0.5rem !important;
-        padding: 0.6rem 0 0.75rem !important;
-    }
-    .st-key-filter_bar_row [data-testid="column"] {
-        flex: 1 1 47% !important;
-        min-width: 47% !important;
-        max-width: 47% !important;
+        align-items: flex-end;
+        gap: 0.75rem !important;
+        padding: 0 0 1rem 0 !important; 
+        border-top: none !important; /* Βγάζουμε τη γραμμή που έπιανε χώρο */
     }
     .filter-label {
-        font-size: 0.6rem !important;
-        margin-bottom: 0.25rem !important;
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: VAR_TEXT_DIM;
+        margin-bottom: 0.25rem;
     }
-    div[data-baseweb="select"] > div,
+
+    /* Μικραίνουμε το ύψος των inputs (select & dates) */
+    div[data-baseweb="select"] > div, 
     div[data-testid="stDateInput"] input {
-        font-size: 0.75rem !important;
-        min-height: 40px !important;
-        height: 40px !important;
-        padding-left: 0.55rem !important;
-        padding-right: 0.4rem !important;
+        min-height: 38px !important;
+        height: 38px !important;
+        font-size: 0.85rem !important;
+        border-radius: 8px !important;
+        padding: 0 0.75rem !important;
+        background: rgba(255,255,255,0.04) !important;
+        border: 1px solid VAR_BORDER !important;
+        color: VAR_TEXT !important;
     }
 
     /* ─── KPI CARDS ─── */
@@ -804,5 +802,101 @@ div[data-testid="stPopoverBody"] button {
         flex: 1 1 100% !important;
         min-width: 100% !important;
         max-width: 100% !important;
+    }
+}
+
+/* ═══════════════════════════════════════════════
+   FLOATING DOCK TAB BAR (Dynamic Bottom Bar)
+   ═══════════════════════════════════════════════ */
+.st-key-tab_nav_row {
+    position: fixed !important;
+    bottom: 2rem !important; /* Απόσταση από το κάτω μέρος */
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 9999 !important;
+    
+    /* Premium Glassmorphism Dock */
+    background: rgba(18, 18, 18, 0.65) !important;
+    backdrop-filter: blur(30px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(200%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 999px !important; /* Απόλυτα στρογγυλεμένο */
+    padding: 0.4rem 0.5rem !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+    
+    width: max-content !important;
+    margin: 0 !important;
+}
+
+/* Συμπιέζουμε τις στήλες του Streamlit για να αγκαλιάσουν τα κουμπιά (shrink-wrap) */
+.st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
+    gap: 0.25rem !important;
+    width: max-content !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+}
+
+.st-key-tab_nav_row [data-testid="column"] {
+    width: auto !important;
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+}
+
+/* Εμφάνιση Κουμπιών (Pills) μέσα στο Dock */
+.st-key-tab_nav_row div[data-testid="stButton"] button {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 999px !important;
+    color: VAR_TEXT_MID !important;
+    font-weight: 600 !important;
+    font-size: 0.88rem !important;
+    padding: 0.4rem 1.25rem !important;
+    min-height: 2.4rem !important;
+    line-height: 1 !important;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    box-shadow: none !important;
+}
+
+.st-key-tab_nav_row div[data-testid="stButton"] button:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: VAR_TEXT !important;
+    transform: scale(1.05) !important;
+}
+
+/* Active Tab — Πράσινο & Φωτεινό */
+.st-key-tab_nav_row div[data-testid="stButton"] button[kind="primary"] {
+    background: VAR_GREEN !important;
+    color: #000 !important;
+    font-weight: 800 !important;
+    box-shadow: 0 4px 15px VAR_GREEN_GLOW !important;
+}
+
+.st-key-tab_nav_row div[data-testid="stButton"] button[kind="primary"]:hover {
+    transform: scale(1.05) !important;
+    box-shadow: 0 6px 20px VAR_GREEN_GLOW !important;
+}
+
+/* ─── ΚΙΝΗΤΑ: Floating Action Menu ─── */
+@media (max-width: 768px) {
+    .st-key-tab_nav_mobile {
+        position: fixed !important;
+        bottom: 2rem !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        z-index: 9999 !important;
+        width: max-content !important;
+        min-width: 200px !important;
+        display: block !important;
+        margin: 0 !important;
+    }
+    .st-key-tab_nav_mobile button {
+        border-radius: 999px !important;
+        box-shadow: 0 15px 35px rgba(0,0,0,0.8) !important;
+        background: rgba(28, 28, 28, 0.9) !important;
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
+        justify-content: center !important;
+        text-align: center !important;
     }
 }
