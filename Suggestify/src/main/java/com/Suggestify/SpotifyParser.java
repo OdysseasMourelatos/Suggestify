@@ -26,12 +26,14 @@ public class SpotifyParser {
 
         String username = args.length > 1 ? args[1] : "Ody"; // <--- Παίρνουμε το username
 
+        String timeZoneStr = args.length > 2 ? args[2] : "Europe/Athens";
+
         List<StreamingRecord> allRecords = new ArrayList<>();
 
         System.out.println("Opening ZIP file in memory...");
 
         DatabaseManager.initializeSchema();
-        
+
         try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFilePath))) {
             ZipEntry entry;
 
@@ -54,7 +56,7 @@ public class SpotifyParser {
             extractor.extractEntities(allRecords);
 
             DatabaseImporter importer = new DatabaseImporter();
-            importer.importRecords(allRecords, username);
+            importer.importRecords(allRecords, username, timeZoneStr);
             System.out.println("✅ Import complete!");
 
         } catch (Exception e) {

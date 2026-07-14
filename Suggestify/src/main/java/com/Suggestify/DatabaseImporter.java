@@ -23,7 +23,7 @@ public class DatabaseImporter {
     private final Map<String, Integer> localAlbumCache = new HashMap<>();
     private final Map<String, Integer> localSongCache = new HashMap<>();
 
-    public void importRecords(List<StreamingRecord> records, String username) {
+    public void importRecords(List<StreamingRecord> records, String username, String timeZoneStr) {
         long totalStartTime = System.currentTimeMillis();
         System.out.println("🚀 Starting HIGH-PERFORMANCE Database Insertion...");
 
@@ -47,7 +47,7 @@ public class DatabaseImporter {
 
             // ΒΗΜΑ 3: Bulk Insert Streams & Σχέσεων (Song_Artists)
             System.out.println("🌊 Inserting Streams and Relationships (Bulk)...");
-            processStreamsAndRelationshipsBulk(conn, records, userId);
+            processStreamsAndRelationshipsBulk(conn, records, userId, timeZoneStr);
 
             // ----> ΝΕΟ ΒΗΜΑ 4: ΚΑΘΑΡΙΣΜΟΣ ΔΙΠΛΟΤΥΠΩΝ ΕΔΩ <----
             deduplicateSongs(conn);
@@ -147,10 +147,12 @@ public class DatabaseImporter {
         }
     }
 
-    private void processStreamsAndRelationshipsBulk(Connection conn, List<StreamingRecord> records, int userId) throws Exception {
+    private void processStreamsAndRelationshipsBulk(Connection conn, List<StreamingRecord> records, int userId, String timeZoneStr) throws Exception {
         String insertStreamSQL = "INSERT INTO streams (user_id, song_id, played_at, ms_played) VALUES (?, ?, ?, ?)";
         String insertRelationSQL = "INSERT INTO song_artists (song_id, artist_id, is_feature) VALUES (?, ?, ?) ON CONFLICT (song_id, artist_id) DO NOTHING";
 
+        java.time.ZoneId userZoneId = java.time.ZoneId.of(timeZoneStr);
+        
         try (PreparedStatement streamStmt = conn.prepareStatement(insertStreamSQL);
              PreparedStatement relationStmt = conn.prepareStatement(insertRelationSQL)) {
 
@@ -178,10 +180,12 @@ public class DatabaseImporter {
 
                 if (songId == null) continue; // Αν παρόλα αυτά δε βρεθεί, το προσπερνάμε για να μη σκάσει
 
-                // Streams Batch
+                java.time.Instant utcInstant = record.getTimestamp();
+                java.time.LocalDateTime localTime = utcInstant.atZone(userZoneId).toLocalDateTime();
+
                 streamStmt.setInt(1, userId);
                 streamStmt.setInt(2, songId);
-                streamStmt.setTimestamp(3, Timestamp.from(record.getTimestamp()));
+                streamStmt.setTimestamp(3, Timestamp.valueOf(localTime)); // <-- Χρησιμοποιούμε τη δυναμική τοπική ώρα
                 streamStmt.setInt(4, record.getMsPlayed());
                 streamStmt.addBatch();
 
