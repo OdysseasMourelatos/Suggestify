@@ -53,8 +53,13 @@ st.markdown("""
 }
 header { display: none !important; }
 
-/* Αποκρύπτουμε το default UI του File Uploader */
+/* ==================================================================
+   FILE UPLOADER - MAGIC CSS (ΧΩΡΙΣ JAVASCRIPT)
+   ================================================================== */
+/* Διώχνουμε την ετικέτα */
 div[data-testid="stFileUploader"] > label { display: none !important; }
+
+/* Βασικό στυλ του Dropzone */
 div[data-testid="stFileUploader"] section {
     position: relative !important;
     background: rgba(22, 22, 22, 0.9) !important;
@@ -63,25 +68,63 @@ div[data-testid="stFileUploader"] section {
     min-height: 190px !important;
     padding: 0 !important;
     margin-bottom: 0 !important;
+    transition: all 0.3s ease !important;
 }
+
 div[data-testid="stFileUploader"] section:hover {
     border-color: #1DB954 !important;
     background: rgba(29,185,84,0.04) !important;
 }
-div[data-testid="stFileUploader"] section > div,
+
+/* Κρύβουμε τα προεπιλεγμένα κείμενα του Streamlit (όχι όμως τη μπάρα!) */
+div[data-testid="stFileUploader"] section [data-testid="stMarkdownContainer"],
 div[data-testid="stFileUploader"] section button,
 div[data-testid="stFileUploader"] section small,
-div[data-testid="stFileUploader"] section svg { opacity: 0 !important; }
-
-div[data-testid="stFileUploader"] section::after {
-    content: ""; position: absolute; inset: 0; pointer-events: none;
+div[data-testid="stFileUploader"] section svg { 
+    opacity: 0 !important; 
 }
+
+/* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
 div[data-testid="stFileUploader"] section::before {
-    content: "📦"; position: absolute; top: 60%; left: 50%;
-    transform: translate(-50%, -90px); pointer-events: none;
+    content: "📦"; 
+    position: absolute; top: 60%; left: 50%;
+    transform: translate(-50%, -90px); 
+    pointer-events: none;
     width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;
     background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.2);
     border-radius: 18px; font-size: 1.8rem;
+}
+
+/* 2. ΣΤΑΔΙΟ UPLOADING (Ανιχνεύει αυτόματα τη μπάρα προόδου!) */
+div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section {
+    border-color: #1DB954 !important;
+    background: rgba(29,185,84,0.08) !important;
+}
+
+div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section::before {
+    content: "⏳" !important;
+    animation: breathe 1s ease-in-out infinite !important;
+}
+
+/* Κείμενο Uploading */
+div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"]) section::after {
+    content: "Uploading ZIP... παρακαλώ περιμένετε";
+    position: absolute; top: 75%; left: 50%;
+    transform: translate(-50%, 0);
+    color: #1DB954; font-weight: 700; font-size: 0.95rem;
+    pointer-events: none;
+}
+
+/* Εμφανίζουμε τη native πράσινη μπάρα κάτω από το κουτί */
+div[data-testid="stFileUploader"] [data-testid="stUploadedFile"] * {
+    opacity: 1 !important; 
+}
+div[data-testid="stFileUploader"] [data-testid="stProgressBar"] {
+    opacity: 1 !important;
+    display: block !important;
+}
+div[data-testid="stFileUploader"] [data-testid="stProgressBar"] > div > div {
+    background-color: #1DB954 !important;
 }
 
 /* ─── ΠΡΑΣΙΝΟ ΚΟΥΜΠΙ (Εφαρμόζεται στο primary type) ─── */
@@ -167,32 +210,6 @@ if st.session_state.upload_state == "idle":
 
     username_input = st.text_input("👤 Enter Username:")
     
-    st.components.v1.html("""
-    <script>
-    const doc = window.parent.document;
-    const observer = new MutationObserver(() => {
-        const section = doc.querySelector('div[data-testid="stFileUploader"] section');
-        if (section && !section.dataset.listenerAttached) {
-            section.dataset.listenerAttached = 'true';
-            
-            // Όταν γίνεται Drag & Drop του αρχείου
-            section.addEventListener('drop', () => {
-                section.setAttribute('data-uploading', 'true');
-            });
-            
-            // Όταν γίνεται επιλογή (κλικ) του αρχείου
-            const fileInput = section.querySelector('input[type="file"]');
-            if (fileInput) {
-                fileInput.addEventListener('change', () => {
-                    section.setAttribute('data-uploading', 'true');
-                });
-            }
-        }
-    });
-    observer.observe(doc.body, { childList: true, subtree: true });
-    </script>
-    """, height=0)
-
     uploaded = st.file_uploader("Upload ZIP", type=["zip"], label_visibility="collapsed")
     
     st.markdown("""

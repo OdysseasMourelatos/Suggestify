@@ -805,31 +805,3 @@ div[data-testid="stPopoverBody"] button {
         max-width: 100% !important;
     }
 }
-
-/* ─── ΕΜΦΑΝΙΣΗ ΚΑΤΑΣΤΑΣΗΣ "UPLOADING" ΣΤΟ ΚΟΥΤΙ ─── */
-div[data-testid="stFileUploader"] section[data-uploading="true"] {
-    border-color: #1DB954 !important;
-    background: rgba(29,185,84,0.08) !important;
-}
-div[data-testid="stFileUploader"] section[data-uploading="true"]::before {
-    content: "⏳" !important;
-    animation: breathe 1s ease-in-out infinite !important;
-}
-div[data-testid="stFileUploader"] section[data-uploading="true"]::after {
-    content: "Uploading ZIP... παρακαλώ περιμένετε" !important;
-    position: absolute; top: 75%; left: 50%;
-    transform: translate(-50%, 0);
-    color: #1DB954; font-weight: 700; font-size: 0.95rem;
-}
-
-/* ─── ΕΠΑΝΑΦΟΡΑ ΤΗΣ NATIVE ΜΠΑΡΑΣ ΠΡΟΟΔΟΥ ΤΟΥ STREAMLIT ─── */
-div[data-testid="stFileUploader"] [data-testid="stUploadedFile"] * {
-    opacity: 1 !important; 
-}
-div[data-testid="stFileUploader"] [data-testid="stProgressBar"] {
-    opacity: 1 !important;
-    display: block !important;
-}
-div[data-testid="stFileUploader"] [data-testid="stProgressBar"] > div > div {
-    background-color: #1DB954 !important;
-}
