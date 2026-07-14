@@ -80,7 +80,10 @@ div[data-testid="stFileUploader"] section:hover {
 div[data-testid="stFileUploader"] section [data-testid="stMarkdownContainer"],
 div[data-testid="stFileUploader"] section button,
 div[data-testid="stFileUploader"] section small,
-div[data-testid="stFileUploader"] section svg { 
+div[data-testid="stFileUploader"] section svg,
+div[data-testid="stFileUploaderDropzoneInstructions"],
+span[data-testid="stFileUploaderDropzoneInstructions"],
+div[data-testid="stFileUploader"] section > div > span { 
     opacity: 0 !important; 
     display: none !important;
 }
