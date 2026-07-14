@@ -786,6 +786,16 @@ with st.container(key="filter_bar_row"):
         st.date_input("To", min_value=min_date, max_value=max_date,
                       label_visibility="collapsed", key="end_date", on_change=mark_manual)
 
+# --- ΔΙΑΧΕΙΡΙΣΗ SHARED STATS ---
+from share_stats import render_share_stats_button
+
+render_share_stats_button(
+    run_query=run_query,
+    user_id=selected_user_id,
+    username=selected_username,
+    min_date=min_date,
+    max_date=max_date,
+)
 
 # Κλειδώνουμε τα φίλτρα για τα queries (Με το USER_ID)
 F = {

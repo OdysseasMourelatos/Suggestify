@@ -806,21 +806,22 @@ div[data-testid="stPopoverBody"] button {
 }
 
 /* ═══════════════════════════════════════════════
-   FLOATING DOCK TAB BAR (Dynamic Bottom Bar)
+   FLOATING DOCK TAB BAR (Bottom of screen)
    ═══════════════════════════════════════════════ */
 .st-key-tab_nav_row {
     position: fixed !important;
-    bottom: 2rem !important; /* Απόσταση από το κάτω μέρος */
+    bottom: 2rem !important; /* Κολλημένο στο κάτω μέρος της οθόνης */
+    top: auto !important;    /* Ακυρώνει τυχόν άνω margins του Streamlit */
     left: 50% !important;
     transform: translateX(-50%) !important;
-    z-index: 9999 !important;
+    z-index: 99999 !important;
     
     /* Premium Glassmorphism Dock */
     background: rgba(18, 18, 18, 0.65) !important;
     backdrop-filter: blur(30px) saturate(200%) !important;
     -webkit-backdrop-filter: blur(30px) saturate(200%) !important;
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 999px !important; /* Απόλυτα στρογγυλεμένο */
+    border-radius: 999px !important;
     padding: 0.4rem 0.5rem !important;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255,255,255,0.05) !important;
     
@@ -828,7 +829,7 @@ div[data-testid="stPopoverBody"] button {
     margin: 0 !important;
 }
 
-/* Συμπιέζουμε τις στήλες του Streamlit για να αγκαλιάσουν τα κουμπιά (shrink-wrap) */
+/* Συμπιέζουμε τις στήλες του Streamlit για να αγκαλιάσουν τα κουμπιά */
 .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
     gap: 0.25rem !important;
     width: max-content !important;
@@ -877,26 +878,15 @@ div[data-testid="stPopoverBody"] button {
     box-shadow: 0 6px 20px VAR_GREEN_GLOW !important;
 }
 
-/* ─── ΚΙΝΗΤΑ: Floating Action Menu ─── */
+/* Mobile Floating Menu Override */
 @media (max-width: 768px) {
     .st-key-tab_nav_mobile {
         position: fixed !important;
         bottom: 2rem !important;
         left: 50% !important;
         transform: translateX(-50%) !important;
-        z-index: 9999 !important;
+        z-index: 99999 !important;
         width: max-content !important;
-        min-width: 200px !important;
         display: block !important;
-        margin: 0 !important;
-    }
-    .st-key-tab_nav_mobile button {
-        border-radius: 999px !important;
-        box-shadow: 0 15px 35px rgba(0,0,0,0.8) !important;
-        background: rgba(28, 28, 28, 0.9) !important;
-        backdrop-filter: blur(20px) !important;
-        -webkit-backdrop-filter: blur(20px) !important;
-        justify-content: center !important;
-        text-align: center !important;
     }
 }
