@@ -85,29 +85,38 @@ div[data-testid="stFileUploader"] section svg {
     display: none !important;
 }
 
-/* Δίχτυ ασφαλείας: σε νεότερες εκδόσεις Streamlit το "Limit 200MB per file • ZIP"
-   ζει σε διαφορετικό tag/testid και ξέφευγε από τους παραπάνω selectors,
-   εμφανιζόμενο "διπλό" αριστερά. Κρύβουμε ΟΤΙΔΗΠΟΤΕ μέσα στο πρώτο wrapper div
-   του section, ό,τι tag κι αν είναι — μένει μόνο το δικό μας custom overlay.
-   ΣΗΜΑΝΤΙΚΟ: χρησιμοποιούμε visibility (όχι opacity) γιατί το opacity σε γονέα
-   ΔΕΝ μπορεί να ανατραπεί από παιδί με κανέναν τρόπο — θα έκρυβε και τη μπάρα
-   προόδου (progress bar) μαζί με το native κείμενο. Το visibility μπορεί να
-   ανατραπεί ρητά, οπότε πιο κάτω "ξαναδείχνουμε" τη μπάρα προόδου ρητά. */
+/* Κρύβουμε ΜΟΝΙΜΑ ολόκληρο το εσωτερικό wrapper div του section (native
+   κείμενα + button + native progress bar). Δεν χρειάζεται πια να δείχνουμε
+   τίποτα από εδώ μέσα — η δική μας progress bar παρακάτω είναι ένα εντελώς
+   ξεχωριστό, καθαρό CSS στοιχείο, οπότε δεν παλεύουμε πια με visibility/
+   opacity ανάμεσα σε γονείς και παιδιά. Το section κρατάει το ύψος του
+   χάρη στο δικό του min-height, οπότε η στοίχιση του overlay μας δεν χαλάει. */
 div[data-testid="stFileUploader"] section > div {
-    visibility: hidden !important;
-    pointer-events: none !important;
-}
-div[data-testid="stFileUploader"] section > div * {
-    visibility: hidden !important;
-    font-size: 0 !important;
+    display: none !important;
 }
 
-/* Ξαναδείχνουμε ρητά τη μπάρα προόδου και ΟΛΑ της τα εσωτερικά στοιχεία,
-   ώστε να μην επηρεαστεί από το δίχτυ ασφαλείας παραπάνω. */
-div[data-testid="stFileUploader"] [data-testid="stProgressBar"],
-div[data-testid="stFileUploader"] [data-testid="stProgressBar"] * {
-    visibility: visible !important;
-    opacity: 1 !important;
+/* ─── Δική μας progress bar, κάτω από το κουτί (CSS-only, indeterminate) ─── */
+div[data-testid="stFileUploader"] {
+    position: relative !important;
+}
+@keyframes uploadBarSlide {
+    0%   { background-position: -45% 0; }
+    100% { background-position: 145% 0; }
+}
+div[data-testid="stFileUploader"]:has([data-testid="stProgressBar"])::after {
+    content: "";
+    position: absolute;
+    left: 8%;
+    right: 8%;
+    bottom: -13px;
+    height: 4px;
+    border-radius: 999px;
+    background-color: rgba(255,255,255,0.08);
+    background-image: linear-gradient(90deg, transparent, #1DB954, transparent);
+    background-size: 45% 100%;
+    background-repeat: no-repeat;
+    animation: uploadBarSlide 1.1s infinite linear;
+    pointer-events: none;
 }
 
 /* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
