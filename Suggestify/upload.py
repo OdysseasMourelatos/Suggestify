@@ -88,14 +88,26 @@ div[data-testid="stFileUploader"] section svg {
 /* Δίχτυ ασφαλείας: σε νεότερες εκδόσεις Streamlit το "Limit 200MB per file • ZIP"
    ζει σε διαφορετικό tag/testid και ξέφευγε από τους παραπάνω selectors,
    εμφανιζόμενο "διπλό" αριστερά. Κρύβουμε ΟΤΙΔΗΠΟΤΕ μέσα στο πρώτο wrapper div
-   του section, ό,τι tag κι αν είναι — μένει μόνο το δικό μας custom overlay. */
+   του section, ό,τι tag κι αν είναι — μένει μόνο το δικό μας custom overlay.
+   ΣΗΜΑΝΤΙΚΟ: χρησιμοποιούμε visibility (όχι opacity) γιατί το opacity σε γονέα
+   ΔΕΝ μπορεί να ανατραπεί από παιδί με κανέναν τρόπο — θα έκρυβε και τη μπάρα
+   προόδου (progress bar) μαζί με το native κείμενο. Το visibility μπορεί να
+   ανατραπεί ρητά, οπότε πιο κάτω "ξαναδείχνουμε" τη μπάρα προόδου ρητά. */
 div[data-testid="stFileUploader"] section > div {
-    opacity: 0 !important;
+    visibility: hidden !important;
     pointer-events: none !important;
 }
 div[data-testid="stFileUploader"] section > div * {
-    opacity: 0 !important;
+    visibility: hidden !important;
     font-size: 0 !important;
+}
+
+/* Ξαναδείχνουμε ρητά τη μπάρα προόδου και ΟΛΑ της τα εσωτερικά στοιχεία,
+   ώστε να μην επηρεαστεί από το δίχτυ ασφαλείας παραπάνω. */
+div[data-testid="stFileUploader"] [data-testid="stProgressBar"],
+div[data-testid="stFileUploader"] [data-testid="stProgressBar"] * {
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 /* 1. ΣΤΑΔΙΟ ΑΝΑΜΟΝΗΣ: Το εικονίδιο 📦 */
