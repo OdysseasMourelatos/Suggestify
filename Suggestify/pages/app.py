@@ -117,6 +117,26 @@ div[data-testid="stTextInput"] input, div[data-baseweb="select"] > div, div[data
 div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input:focus {{ border-color: {GREEN} !important; box-shadow: 0 0 0 2px {GREEN_XLO} !important; }}
 
 .custom-link {{ text-decoration: none !important; display: block; }}
+
+.season-card {{ position: relative; overflow: visible !important; text-align: center; }}
+.season-badge {{
+    position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+    background: linear-gradient(135deg, {GREEN}, {GREEN_DIM});
+    color: #000; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em;
+    padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(29,185,84,0.45);
+    animation: fadeSlideUp 0.5s ease both;
+}}
+.tod-card {{
+    background: {CARD}; border: 1px solid {BORDER}; border-radius: 14px;
+    padding: 16px 14px; text-align: center; animation: fadeSlideUp 0.5s ease both;
+    transition: transform 0.25s ease, border-color 0.25s ease;
+}}
+.tod-card:hover {{ transform: translateY(-4px); border-color: rgba(29,185,84,0.3); }}
+.tod-icon {{ font-size: 1.6rem; margin-bottom: 4px; }}
+.tod-label {{ font-size: 0.78rem; color: {TEXT_MID}; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }}
+.tod-value {{ font-size: 1.4rem; font-weight: 700; color: {TEXT}; }}
+.tod-sub {{ font-size: 0.75rem; color: {TEXT_DIM}; margin-top: 2px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -321,7 +341,10 @@ def chart_multi_trend(df: pd.DataFrame) -> go.Figure:
     df = df.copy()
     df["period"] = pd.to_datetime(df["period"])
     fig = go.Figure()
-    colors = [GREEN, "#1ed760", "#A8E4A0", TEXT_MID, TEXT_DIM]
+    
+
+    colors = [GREEN, "#4FC3F7", "#F48FB1", "#FFD54F", "#B39DDB"]
+    
     for idx, track in enumerate(df["track_title"].unique()):
         track_df = df[df["track_title"] == track]
         fig.add_trace(go.Scatter(
@@ -360,6 +383,90 @@ def chart_bar(x, y, xlabel: str) -> go.Figure:
         hovertemplate="<b>%{x}</b><br>%{y:,} streams<extra></extra>"
     ))
     return themed(fig, xaxis_title=xlabel, yaxis_title="Streams", bargap=0.25)
+
+def chart_year_bar(df: pd.DataFrame) -> go.Figure:
+    years = df["year"].astype(str).tolist()
+    streams = df["stream_count"].tolist()
+    hours = df["hours_played"].tolist()
+    max_val = max(streams) if streams else 0
+    colors = [GREEN if v == max_val else "rgba(29,185,84,0.35)" for v in streams]
+    fig = go.Figure(go.Bar(
+        x=years, y=streams,
+        marker_color=colors,
+        marker_line=dict(width=0),
+        customdata=hours,
+        text=[f"{h:,.0f}h" for h in hours],
+        textposition="outside",
+        textfont=dict(color=TEXT_MID, size=11),
+        cliponaxis=False,
+        hovertemplate="<b>%{x}</b><br>%{y:,} streams<br>%{customdata:,.1f}h listened<extra></extra>"
+    ))
+    return themed(fig, xaxis_title="", yaxis_title="Streams", bargap=0.4, margin=dict(t=40, b=40, l=50, r=20))
+
+def chart_donut(labels, values, colors) -> go.Figure:
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values, hole=0.66,
+        marker=dict(colors=colors, line=dict(color=BG, width=4)),
+        sort=False,
+        textinfo="percent",
+        textfont=dict(color=TEXT, size=13, family="Inter, sans-serif"),
+        hovertemplate="<b>%{label}</b><br>%{value:,} streams (%{percent})<extra></extra>"
+    ))
+    fig.update_layout(showlegend=False)
+    return themed(fig, margin=dict(t=10, b=10, l=10, r=10))
+
+def render_season_cards(df: pd.DataFrame):
+    """Fancy 'era of the year' cards — Winter / Spring / Summer / Autumn."""
+    season_meta = {
+        "Winter": {"icon": "❄️", "color": "#4FC3F7"},
+        "Spring": {"icon": "🌸", "color": "#F48FB1"},
+        "Summer": {"icon": "☀️", "color": "#FFD54F"},
+        "Autumn": {"icon": "🍂", "color": "#FF8A65"},
+    }
+    data = {row["season"]: row for _, row in df.iterrows()} if not df.empty else {}
+    max_streams = int(df["stream_count"].max()) if not df.empty else 0
+
+    cols = st.columns(4)
+    for col, season in zip(cols, ["Winter", "Spring", "Summer", "Autumn"]):
+        meta = season_meta[season]
+        row = data.get(season)
+        streams = int(row["stream_count"]) if row is not None else 0
+        hours = float(row["hours_played"]) if row is not None else 0.0
+        is_top = streams > 0 and streams == max_streams
+        badge = '<div class="season-badge">👑 Favorite</div>' if is_top else ""
+        glow = f'box-shadow: 0 12px 30px {meta["color"]}33; border-color: {meta["color"]}66;' if is_top else ""
+        col.markdown(f'''
+        <div class="kpi-card season-card" style="{glow}">
+            {badge}
+            <div class="kpi-icon" style="font-size: 1.9rem;">{meta["icon"]}</div>
+            <div class="kpi-title">{season}</div>
+            <div class="kpi-value" style="color:{meta["color"]};">{streams:,}</div>
+            <div class="stat-label" style="margin-top:2px;">{hours:.1f}h listened</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+def render_time_of_day_cards(df: pd.DataFrame):
+    """Small stat cards for each time-of-day bucket, shown next to the donut chart."""
+    tod_meta = {
+        "Night":     {"icon": "🌙", "range": "12AM–5AM"},
+        "Morning":   {"icon": "🌅", "range": "5AM–12PM"},
+        "Afternoon": {"icon": "🌤️", "range": "12PM–5PM"},
+        "Evening":   {"icon": "🌆", "range": "5PM–12AM"},
+    }
+    data = {row["time_of_day"]: row for _, row in df.iterrows()} if not df.empty else {}
+
+    for label, meta in tod_meta.items():
+        row = data.get(label)
+        streams = int(row["stream_count"]) if row is not None else 0
+        hours = float(row["hours_played"]) if row is not None else 0.0
+        st.markdown(f'''
+        <div class="tod-card" style="margin-bottom: 10px;">
+            <div class="tod-icon">{meta["icon"]}</div>
+            <div class="tod-label">{label} · {meta["range"]}</div>
+            <div class="tod-value">{streams:,}</div>
+            <div class="tod-sub">{hours:.1f}h listened</div>
+        </div>
+        ''', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1368,6 +1475,79 @@ elif current_tab == "habits":
                 chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
                 use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
             )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # ─── 🌍 Seasonal Vibes ───
+    st.markdown('<div class="section-header" style="margin-top: 8px;"><span class="icon">🌍</span>Seasonal Vibes</div>', unsafe_allow_html=True)
+    df_seasons = run_query("""
+        SELECT
+            CASE
+                WHEN EXTRACT(MONTH FROM played_at) IN (12, 1, 2) THEN 'Winter'
+                WHEN EXTRACT(MONTH FROM played_at) IN (3, 4, 5) THEN 'Spring'
+                WHEN EXTRACT(MONTH FROM played_at) IN (6, 7, 8) THEN 'Summer'
+                ELSE 'Autumn'
+            END AS season,
+            COUNT(*) AS stream_count,
+            ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+        FROM streams
+        WHERE played_at::date BETWEEN :start_date AND :end_date
+          AND user_id = :user_id
+        GROUP BY 1;
+    """, F)
+    render_season_cards(df_seasons)
+
+    # ─── 🌙 Time of Day + 📆 Yearly Breakdown ───
+    c3, c4 = st.columns([1, 1.4])
+
+    with c3:
+        st.markdown('<div class="section-header"><span class="icon">🌙</span>Time of Day</div>', unsafe_allow_html=True)
+        df_tod = run_query("""
+            SELECT
+                CASE
+                    WHEN EXTRACT(HOUR FROM played_at) BETWEEN 5 AND 11 THEN 'Morning'
+                    WHEN EXTRACT(HOUR FROM played_at) BETWEEN 12 AND 16 THEN 'Afternoon'
+                    WHEN EXTRACT(HOUR FROM played_at) BETWEEN 17 AND 20 THEN 'Evening'
+                    ELSE 'Night'
+                END AS time_of_day,
+                COUNT(*) AS stream_count,
+                ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+            FROM streams
+            WHERE played_at::date BETWEEN :start_date AND :end_date
+              AND user_id = :user_id
+            GROUP BY 1;
+        """, F)
+
+        tod_order = ["Night", "Morning", "Afternoon", "Evening"]
+        tod_colors = {"Night": "#5C6BC0", "Morning": "#FFD54F", "Afternoon": "#4FC3F7", "Evening": "#FF7043"}
+        if not df_tod.empty:
+            df_tod_sorted = df_tod.set_index("time_of_day").reindex(tod_order).dropna().reset_index()
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.plotly_chart(
+                chart_donut(
+                    df_tod_sorted["time_of_day"].tolist(),
+                    df_tod_sorted["stream_count"].tolist(),
+                    [tod_colors[t] for t in df_tod_sorted["time_of_day"]]
+                ),
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+        render_time_of_day_cards(df_tod)
+
+    with c4:
+        st.markdown('<div class="section-header"><span class="icon">📆</span>Yearly Breakdown</div>', unsafe_allow_html=True)
+        df_years = run_query("""
+            SELECT EXTRACT(YEAR FROM played_at)::INT AS year, COUNT(*) AS stream_count,
+                   ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+            FROM streams
+            WHERE played_at::date BETWEEN :start_date AND :end_date
+              AND user_id = :user_id
+            GROUP BY 1 ORDER BY 1;
+        """, F)
+        st.markdown('<div class="chart-container"><div class="chart-title">📈 Streams per Year</div>', unsafe_allow_html=True)
+        if not df_years.empty:
+            st.plotly_chart(chart_year_bar(df_years), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>No data for this period</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
 elif current_tab == "genres":
