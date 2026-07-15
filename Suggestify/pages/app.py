@@ -5,8 +5,17 @@ from sqlalchemy import create_engine, text
 import datetime
 import warnings
 import os
+import sys
 from html import escape
+
 warnings.filterwarnings("ignore")
+
+# ─── HACK ΓΙΑ ΤΟ STREAMLIT CLOUD (Να βρίσκει το share_stats.py) ───
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
+from share_stats import render_share_stats_button
 
 # ══════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -46,21 +55,13 @@ def load_css():
             css = f.read()
             
         tokens = {
-            "VAR_CARD_HOVER": CARD_HOVER,
-            "VAR_GREEN_GLOW": GREEN_GLOW,
-            "VAR_BORDER_HL": BORDER_HL,
-            "VAR_GREEN_DIM": GREEN_DIM,
-            "VAR_GREEN_XLO": GREEN_XLO,
-            "VAR_TEXT_MID": TEXT_MID,
-            "VAR_TEXT_DIM": TEXT_DIM,
-            "VAR_SURFACE": SURFACE,
-            "VAR_BORDER": BORDER,
-            "VAR_GREEN": GREEN,
-            "VAR_CARD": CARD,
-            "VAR_TEXT": TEXT,
-            "VAR_BG": BG,
+            "VAR_CARD_HOVER": CARD_HOVER, "VAR_GREEN_GLOW": GREEN_GLOW,
+            "VAR_BORDER_HL": BORDER_HL, "VAR_GREEN_DIM": GREEN_DIM,
+            "VAR_GREEN_XLO": GREEN_XLO, "VAR_TEXT_MID": TEXT_MID,
+            "VAR_TEXT_DIM": TEXT_DIM, "VAR_SURFACE": SURFACE,
+            "VAR_BORDER": BORDER, "VAR_GREEN": GREEN,
+            "VAR_CARD": CARD, "VAR_TEXT": TEXT, "VAR_BG": BG,
         }
-        
         for key, val in tokens.items():
             css = css.replace(key, val)
             
@@ -71,10 +72,20 @@ def load_css():
 load_css()
 
 # ══════════════════════════════════════════════════════════════════
-# EXTRA UX TRANSITIONS
+# EXTRA UX TRANSITIONS & UI FIXES
 # ══════════════════════════════════════════════════════════════════
 st.markdown(f"""
 <style>
+/* ΔΙΟΡΘΩΣΗ ΤΕΡΑΣΤΙΟΥ ΚΕΝΟΥ & ΣΤΟΙΧΙΣΕΩΝ */
+.block-container {{ padding: 1rem 2rem 6rem !important; max-width: 100% !important; }}
+.main .block-container {{ padding-top: 1rem !important; margin-top: -4.5rem !important; }}
+div[data-testid="stVerticalBlock"] {{ gap: 0.2rem !important; }}
+div[data-testid="column"] {{ gap: 0.5rem !important; }}
+header {{ display: none !important; }}
+
+.brand-title {{ font-size: 2.2rem !important; font-weight: 800 !important; display: flex; align-items: center; gap: 0.5rem; }}
+.brand-title span {{ font-size: 2.8rem !important; }}
+
 @keyframes fadeSlideUp {{
     from {{ opacity: 0; transform: translateY(14px); }}
     to   {{ opacity: 1; transform: translateY(0); }}
@@ -143,13 +154,9 @@ div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input
 # ══════════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════════
-import streamlit as st
-
-# FORCE OVERRIDE: Διαβάζουμε ΑΠΕΥΘΕΙΑΣ από τα secrets, αγνοώντας το OS environment
 try:
     CONNECTION_STRING = st.secrets["DATABASE_URL"]
 except KeyError:
-    # Αν για κάποιο λόγο δεν βρει τα secrets, χρησιμοποιεί κατευθείαν το σωστό
     CONNECTION_STRING = "postgresql://postgres.pxpplxyszvrzubdqykmw:dKPJjO2jZtkmwjYh@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require"
 
 @st.cache_resource
@@ -168,11 +175,9 @@ def get_date_bounds() -> tuple[datetime.date, datetime.date]:
         return datetime.date(2023, 1, 1), datetime.date.today()
     return df["mn"].iloc[0], df["mx"].iloc[0]
 
-
 # ══════════════════════════════════════════════════════════════════
 # UI COMPONENTS
 # ══════════════════════════════════════════════════════════════════
-
 def get_rank_class(rank: int) -> str:
     if rank == 1: return "gold"
     if rank == 2: return "silver"
@@ -184,7 +189,6 @@ def get_item_icon(link_type: str) -> str:
     return icons.get(link_type, "🎵")
 
 def build_filtered_href(view_type: str, id_val: str) -> str:
-    """Build a nav URL for a dimension (season/tod/year) that preserves the current filters."""
     current_tab = st.query_params.get("tab", "habits")
     p_preset = st.query_params.get("preset")
     p_start = st.query_params.get("start")
@@ -250,8 +254,6 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
 
         if can_navigate:
             item_id = str(row[id_col])
-            
-            # Τραβάμε τις τρέχουσες παραμέτρους με ασφάλεια (αποφεύγουμε τα "None")
             p_view = st.query_params.get("view")
             p_id = st.query_params.get("id")
             p_preset = st.query_params.get("preset")
@@ -259,18 +261,12 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             p_end = st.query_params.get("end")
             p_user = st.query_params.get("user")
             
-            # Χτίζουμε το URL καθαρά, προσθέτοντας μόνο ό,τι έχει πραγματική τιμή
             href = f"?tab={current_tab}&view={link_type}&id={item_id}"
-            if p_view and p_id: 
-                href += f"&pview={p_view}&pid={p_id}"
-            if p_preset: 
-                href += f"&preset={p_preset}"
-            if p_start: 
-                href += f"&start={p_start}"
-            if p_end: 
-                href += f"&end={p_end}"
-            if p_user:
-                href += f"&user={p_user}"
+            if p_view and p_id:  href += f"&pview={p_view}&pid={p_id}"
+            if p_preset:  href += f"&preset={p_preset}"
+            if p_start:  href += f"&start={p_start}"
+            if p_end:  href += f"&end={p_end}"
+            if p_user: href += f"&user={p_user}"
 
             st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
         else:
@@ -312,8 +308,7 @@ def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, 
 
 # ── Plotly Helpers ──
 _LAYOUT_BASE = dict(
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
     font=dict(family="Inter, sans-serif", color=TEXT_DIM, size=12),
     xaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
     yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
@@ -333,58 +328,34 @@ def chart_trend(df: pd.DataFrame) -> go.Figure:
     df["period"] = pd.to_datetime(df["period"])
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["period"], y=df["stream_count"],
-        name="Streams", mode="lines+markers",
+        x=df["period"], y=df["stream_count"], name="Streams", mode="lines+markers",
         line=dict(color=GREEN, width=3, shape='spline'),
-        marker=dict(size=7, color=GREEN, line=dict(width=2, color=BG)),
-        fill="tozeroy", fillcolor=GREEN_XLO
+        marker=dict(size=7, color=GREEN, line=dict(width=2, color=BG)), fill="tozeroy", fillcolor=GREEN_XLO
     ))
-    fig.add_trace(go.Bar(
-        x=df["period"], y=df["hours_played"],
-        name="Hours", marker_color="rgba(29,185,84,0.2)",
-        yaxis="y2"
-    ))
-    return themed(fig,
-        yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))),
+    fig.add_trace(go.Bar(x=df["period"], y=df["hours_played"], name="Hours", marker_color="rgba(29,185,84,0.2)", yaxis="y2"))
+    return themed(fig, yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))),
         yaxis2=dict(title=dict(text="Hours", font=dict(color=TEXT_MID)), overlaying="y", side="right", showgrid=False, fixedrange=True),
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center")
+        hovermode="x unified", legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center")
     )
 
 def chart_multi_trend(df: pd.DataFrame) -> go.Figure:
     df = df.copy()
     df["period"] = pd.to_datetime(df["period"])
     fig = go.Figure()
-    
-    # Νέα, πιο διακριτά χρώματα για να ξεχωρίζουν τα 5 τραγούδια
     colors = [GREEN, "#4FC3F7", "#F48FB1", "#FFD54F", "#B39DDB"]
-    
     for idx, track in enumerate(df["track_title"].unique()):
         track_df = df[df["track_title"] == track]
-        fig.add_trace(go.Scatter(
-            x=track_df["period"], 
-            y=track_df["stream_count"],
-            name=track, 
-            mode="lines",
+        fig.add_trace(go.Scatter(x=track_df["period"], y=track_df["stream_count"], name=track, mode="lines",
             line=dict(width=2.5, shape='spline', color=colors[idx % len(colors)]),
         ))
-    return themed(fig, 
-        yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))),
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center")
-    )
+    return themed(fig, yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))), hovermode="x unified", legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center"))
     
 def chart_heatmap(df: pd.DataFrame) -> go.Figure:
     DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     pivot = df.pivot(index="dow", columns="hour", values="stream_count").reindex(index=range(1, 8), columns=range(24)).fillna(0)
-    fig = go.Figure(go.Heatmap(
-        z=pivot.values,
-        x=[f"{h:02d}" for h in range(24)],
-        y=DOW,
+    fig = go.Figure(go.Heatmap(z=pivot.values, x=[f"{h:02d}" for h in range(24)], y=DOW,
         colorscale=[[0, BG], [0.15, "rgba(29,185,84,0.1)"], [0.4, GREEN_DIM], [1, GREEN]],
-        hoverongaps=False,
-        xgap=3, ygap=3,
-        hovertemplate="<b>%{y}</b> at <b>%{x}:00</b><br>%{z} streams<extra></extra>"
+        hoverongaps=False, xgap=3, ygap=3, hovertemplate="<b>%{y}</b> at <b>%{x}:00</b><br>%{z} streams<extra></extra>"
     ))
     return themed(fig, xaxis_title="Hour", yaxis_title="", margin=dict(t=20, b=50, l=60, r=20),
                   height=300, yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True, autorange="reversed"))
@@ -392,12 +363,7 @@ def chart_heatmap(df: pd.DataFrame) -> go.Figure:
 def chart_bar(x, y, xlabel: str) -> go.Figure:
     max_val = max(y) if y else 0
     colors = [GREEN if v == max_val else "rgba(29,185,84,0.35)" for v in y]
-    fig = go.Figure(go.Bar(
-        x=x, y=y,
-        marker_color=colors,
-        marker_line=dict(width=0),
-        hovertemplate="<b>%{x}</b><br>%{y:,} streams<extra></extra>"
-    ))
+    fig = go.Figure(go.Bar(x=x, y=y, marker_color=colors, marker_line=dict(width=0), hovertemplate="<b>%{x}</b><br>%{y:,} streams<extra></extra>"))
     return themed(fig, xaxis_title=xlabel, yaxis_title="Streams", bargap=0.25)
 
 def chart_year_bar(df: pd.DataFrame) -> go.Figure:
@@ -407,25 +373,16 @@ def chart_year_bar(df: pd.DataFrame) -> go.Figure:
     max_val = max(streams) if streams else 0
     colors = [GREEN if v == max_val else "rgba(29,185,84,0.35)" for v in streams]
     fig = go.Figure(go.Bar(
-        x=years, y=streams,
-        marker_color=colors,
-        marker_line=dict(width=0),
-        customdata=hours,
-        text=[f"{h:,.0f}h" for h in hours],
-        textposition="outside",
-        textfont=dict(color=TEXT_MID, size=11),
-        cliponaxis=False,
-        hovertemplate="<b>%{x}</b><br>%{y:,} streams<br>%{customdata:,.1f}h listened<extra></extra>"
+        x=years, y=streams, marker_color=colors, marker_line=dict(width=0), customdata=hours,
+        text=[f"{h:,.0f}h" for h in hours], textposition="outside", textfont=dict(color=TEXT_MID, size=11),
+        cliponaxis=False, hovertemplate="<b>%{x}</b><br>%{y:,} streams<br>%{customdata:,.1f}h listened<extra></extra>"
     ))
     return themed(fig, xaxis_title="", yaxis_title="Streams", bargap=0.4, margin=dict(t=40, b=40, l=50, r=20))
 
 def chart_donut(labels, values, colors) -> go.Figure:
     fig = go.Figure(go.Pie(
-        labels=labels, values=values, hole=0.66,
-        marker=dict(colors=colors, line=dict(color=BG, width=4)),
-        sort=False,
-        textinfo="percent",
-        textfont=dict(color=TEXT, size=13, family="Inter, sans-serif"),
+        labels=labels, values=values, hole=0.66, marker=dict(colors=colors, line=dict(color=BG, width=4)),
+        sort=False, textinfo="percent", textfont=dict(color=TEXT, size=13, family="Inter, sans-serif"),
         hovertemplate="<b>%{label}</b><br>%{value:,} streams (%{percent})<extra></extra>"
     ))
     fig.update_layout(showlegend=False)
@@ -439,18 +396,15 @@ SEASON_META = {
 }
 
 TOD_META = {
-    # Night now runs 9PM -> 5AM per user preference
     "Night":     {"icon": "🌙", "range": "9PM–5AM",  "color": "#5C6BC0"},
-    "Morning":   {"icon": "🌅", "range": "5AM–12PM",  "color": "#FFD54F"},
+    "Morning":   {"icon": "🌅", "range": "5AM–12PM", "color": "#FFD54F"},
     "Afternoon": {"icon": "🌤️", "range": "12PM–5PM",  "color": "#4FC3F7"},
     "Evening":   {"icon": "🌆", "range": "5PM–9PM",   "color": "#FF7043"},
 }
 
 def render_season_cards(df: pd.DataFrame):
-    """Fancy, clickable 'era of the year' cards — Winter / Spring / Summer / Autumn."""
     data = {row["season"]: row for _, row in df.iterrows()} if not df.empty else {}
     max_streams = int(df["stream_count"].max()) if not df.empty else 0
-
     cols = st.columns(4)
     for col, season in zip(cols, ["Winter", "Spring", "Summer", "Autumn"]):
         meta = SEASON_META[season]
@@ -460,8 +414,6 @@ def render_season_cards(df: pd.DataFrame):
         is_top = streams > 0 and streams == max_streams
         badge = '<div class="season-badge">👑 Favorite</div>' if is_top else ""
         glow = f'box-shadow: 0 12px 30px {meta["color"]}33; border-color: {meta["color"]}66;' if is_top else ""
-        
-        # Ανοσία στο auto-formatting του IDE ενώνοντας το string σε μια γραμμή!
         card_html = (
             f'<div class="kpi-card season-card" style="{glow}">'
             f'{badge}'
@@ -476,15 +428,11 @@ def render_season_cards(df: pd.DataFrame):
 
 
 def render_time_of_day_cards(df: pd.DataFrame):
-    """Small, clickable stat cards for each time-of-day bucket."""
     data = {row["time_of_day"]: row for _, row in df.iterrows()} if not df.empty else {}
-
     for label, meta in TOD_META.items():
         row = data.get(label)
         streams = int(row["stream_count"]) if row is not None else 0
         hours = float(row["hours_played"]) if row is not None else 0.0
-        
-        # Ανοσία στο auto-formatting
         card_html = (
             f'<div class="tod-card" style="margin-bottom: 10px;">'
             f'<div class="tod-icon">{meta["icon"]}</div>'
@@ -498,7 +446,6 @@ def render_time_of_day_cards(df: pd.DataFrame):
 
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str):
-    """Shared drill-down view for clicking a season / time-of-day / year card: shows top tracks, artists, albums."""
     header_df = run_query(f"""
         SELECT COUNT(*) AS streams, ROUND(COALESCE(SUM(ms_played), 0) / 3600000.0, 2) AS hours,
                COUNT(DISTINCT song_id) AS unique_songs
@@ -584,6 +531,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album")
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
+
 # ══════════════════════════════════════════════════════════════════
 # NAVIGATION HANDLING
 # ══════════════════════════════════════════════════════════════════
@@ -614,7 +562,7 @@ def go_back():
     if start: st.query_params["start"] = start
     if end: st.query_params["end"] = end
     if user: st.query_params["user"] = user
-    
+
 # ══════════════════════════════════════════════════════════════════
 # MAIN APP & STATE MANAGEMENT (CALLBACKS)
 # ══════════════════════════════════════════════════════════════════
@@ -627,6 +575,24 @@ def get_parsed_date(date_str, default_date):
 
 params = st.query_params
 
+# 1. ΥΠΟΛΟΓΙΣΜΟΣ ΧΡΗΣΤΗ ΠΡΩΤΑ
+try:
+    users_df = run_query("SELECT id, username FROM users ORDER BY username")
+    user_dict = dict(zip(users_df['username'], users_df['id']))
+except:
+    user_dict = {"Ody": 1}
+
+url_user_id = params.get("user")
+usernames = list(user_dict.keys())
+if url_user_id:
+    selected_username = next((k for k, v in user_dict.items() if str(v) == url_user_id), usernames[0] if usernames else "Ody")
+else:
+    selected_username = st.session_state.get("username_to_import", usernames[0] if usernames else "Ody")
+
+selected_user_id = user_dict.get(selected_username, 1)
+st.query_params["user"] = str(selected_user_id)
+
+# 2. ΥΠΟΛΟΓΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΩΝ
 if "start_date" not in st.session_state:
     st.session_state.start_date = get_parsed_date(params.get("start"), min_date)
     st.session_state.end_date = get_parsed_date(params.get("end"), max_date)
@@ -658,38 +624,45 @@ def mark_manual():
     st.query_params["start"] = st.session_state.start_date.isoformat()
     st.query_params["end"] = st.session_state.end_date.isoformat()
 
-preset_options = {
-    "all": "♾️ All Time",
-    "wrapped": "🎁 Wrapped",
-    "month": "📅 Month",
-    "week": "📅 Week"
-}
+preset_options = {"all": "♾️ All Time", "wrapped": "🎁 Wrapped", "month": "📅 Month", "week": "📅 Week"}
 
 view_state = get_current_view()
 current_tab = view_state["tab"]
 detail_type = view_state["type"]
 detail_id = view_state["id"]
 
-# ─── NAVBAR: brand + tab row ───
-st.markdown('''
-<div class="navbar">
-    <div class="navbar-content">
-        <div class="nav-brand"><span>🎧</span>Suggestify</div>
-    </div>
-</div>
-''', unsafe_allow_html=True)
+# 3. NAVBAR & SHARE BUTTON ΠΑΝΩ ΔΕΞΙΑ
+col_brand, col_share = st.columns([4, 1])
 
+with col_brand:
+    st.markdown('''
+    <div class="navbar" style="padding: 0; margin-bottom: 0;">
+        <div class="nav-brand brand-title">
+            <span>🎧</span> Suggestify
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+with col_share:
+    st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
+    render_share_stats_button(
+        run_query=run_query,
+        user_id=selected_user_id,
+        username=selected_username,
+        min_date=min_date,
+        max_date=max_date,
+        label="📸 Share Stats"
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# 4. TABS
 tabs = [
-    ("overview", "📊 Overview"),
-    ("tracks", "🎵 Tracks"),
-    ("artists", "🎤 Artists"),
-    ("albums", "💿 Albums"),
-    ("genres", "🎸 Genres"),
-    ("habits", "🕐 Habits"),
+    ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
+    ("artists", "🎤 Artists"), ("albums", "💿 Albums"),
+    ("genres", "🎸 Genres"), ("habits", "🕐 Habits"),
 ]
 
 def navigate_to_tab(tab_id: str):
-    """Switch tabs while preserving the current filters (preset/dates/user) in the URL."""
     curr_preset = st.query_params.get("preset")
     curr_start = st.query_params.get("start")
     curr_end = st.query_params.get("end")
@@ -708,96 +681,38 @@ def navigate_to_tab(tab_id: str):
 tab_labels = dict(tabs)
 active_tab_id = current_tab if (current_tab in tab_labels and not detail_type) else "overview"
 
-# ─── Desktop: full horizontal tab row ───
 with st.container(key="tab_nav_row"):
     cols = st.columns(len(tabs))
     for i, (tab_id, tab_label) in enumerate(tabs):
         with cols[i]:
             is_active = (current_tab == tab_id) and not detail_type
-            if st.button(
-                tab_label,
-                key=f"nav_{tab_id}",
-                type="primary" if is_active else "secondary",
-                use_container_width=True
-            ):
+            if st.button(tab_label, key=f"nav_{tab_id}", type="primary" if is_active else "secondary", use_container_width=True):
                 navigate_to_tab(tab_id)
 
-# ─── Mobile: single button that opens a popover menu with all tabs ───
 with st.container(key="tab_nav_mobile"):
     with st.popover(f"{tab_labels[active_tab_id]}   ▾", use_container_width=True):
         for tab_id, tab_label in tabs:
             is_active = (current_tab == tab_id) and not detail_type
-            if st.button(
-                tab_label,
-                key=f"nav_mobile_{tab_id}",
-                type="primary" if is_active else "secondary",
-                use_container_width=True
-            ):
+            if st.button(tab_label, key=f"nav_mobile_{tab_id}", type="primary" if is_active else "secondary", use_container_width=True):
                 navigate_to_tab(tab_id)
 
-try:
-    users_df = run_query("SELECT id, username FROM users ORDER BY username")
-    user_dict = dict(zip(users_df['username'], users_df['id']))
-except:
-    user_dict = {"Ody": 1}
-
-# ─── FILTER BAR ───
+# 5. FILTER BAR (Χωρίς το User dropdown)
 with st.container(key="filter_bar_row"):
-    f_user, f_preset, f_start, f_end = st.columns([1.2, 1.2, 1, 1])
-
-    with f_user:
-        st.markdown('<div class="filter-label">👤 User</div>', unsafe_allow_html=True)
-        usernames = list(user_dict.keys())
-        default_index = 0
-        url_user_id = st.query_params.get("user")
-        if url_user_id:
-            for idx, uname in enumerate(usernames):
-                if str(user_dict[uname]) == str(url_user_id):
-                    default_index = idx
-                    break
-        selected_username = st.selectbox(
-            "User", options=usernames, index=default_index,
-            label_visibility="collapsed", key="selected_username"
-        )
-        selected_user_id = user_dict.get(selected_username, 1)
-        # Κρατάμε το URL συγχρονισμένο με τον επιλεγμένο χρήστη, ώστε η πλοήγηση
-        # (tabs, back, κλικ σε τραγούδι/artist/album) να μη γυρνάει στον πρώτο χρήστη.
-        st.query_params["user"] = str(selected_user_id)
+    f_preset, f_start, f_end = st.columns([1.5, 1, 1])
 
     with f_preset:
         st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
-        st.selectbox(
-            "Period",
-            options=list(preset_options.keys()),
-            format_func=lambda x: preset_options[x],
-            placeholder="⚙️ Manual",
-            label_visibility="collapsed",
-            key="date_preset",
-            on_change=update_dates_from_preset
-        )
+        st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], placeholder="⚙️ Manual", label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
 
     with f_start:
         st.markdown('<div class="filter-label">From</div>', unsafe_allow_html=True)
-        st.date_input("From", min_value=min_date, max_value=max_date,
-                      label_visibility="collapsed", key="start_date", on_change=mark_manual)
+        st.date_input("From", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="start_date", on_change=mark_manual)
 
     with f_end:
         st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
-        st.date_input("To", min_value=min_date, max_value=max_date,
-                      label_visibility="collapsed", key="end_date", on_change=mark_manual)
+        st.date_input("To", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="end_date", on_change=mark_manual)
 
-# --- ΔΙΑΧΕΙΡΙΣΗ SHARED STATS ---
-from share_stats import render_share_stats_button
-
-render_share_stats_button(
-    run_query=run_query,
-    user_id=selected_user_id,
-    username=selected_username,
-    min_date=min_date,
-    max_date=max_date,
-)
-
-# Κλειδώνουμε τα φίλτρα για τα queries (Με το USER_ID)
+# 6. ΚΛΕΙΔΩΜΑ ΦΙΛΤΡΩΝ ΓΙΑ ΤΑ QUERIES
 F = {
     "start_date": st.session_state.start_date, 
     "end_date": st.session_state.end_date,
