@@ -35,6 +35,7 @@ PERIODS = {
     "Wrapped": "wrapped",
     "Last Month": "month",
     "Last Week": "week",
+    "Custom Range": "custom",
 }
 
 STAT_TYPES = {
@@ -43,6 +44,7 @@ STAT_TYPES = {
     "Top 5 Tracks":   ("tracks", 5),
     "Top 10 Tracks":  ("tracks", 10),
     "Top Albums":     ("albums", 10),
+    "Overview":       ("overview", 1),
 }
 
 RANK_COLORS = {
@@ -238,7 +240,13 @@ def _glass_card(bg_rgba, box, radius=32, blur=22, tint=(255, 255, 255, 24),
 # DATA ACCESS  (share-dialog periods are independent of the page's
 # own filter bar, so we query fresh with our own date range)
 # ══════════════════════════════════════════════════════════════════
-def _date_range(period_key, min_date, max_date):
+def _date_range(period_key, min_date, max_date, custom_start=None, custom_end=None):
+    if period_key == "custom":
+        start = custom_start or min_date
+        end = custom_end or max_date
+        if start > end:
+            start, end = end, start
+        return start, end
     if period_key == "wrapped":
         return datetime.date(max_date.year, 1, 1), max_date
     if period_key == "month":
@@ -248,15 +256,19 @@ def _date_range(period_key, min_date, max_date):
     return min_date, max_date  # "all"
 
 
-def _period_label_and_range(period_key, min_date, max_date):
-    start, end = _date_range(period_key, min_date, max_date)
+def _period_label_and_range(period_key, min_date, max_date, custom_start=None, custom_end=None):
+    start, end = _date_range(period_key, min_date, max_date, custom_start, custom_end)
     if period_key == "all":
         return "ALL TIME", "All time"
     if period_key == "wrapped":
         return f"WRAPPED {max_date.year}", f"Jan – {max_date.strftime('%b %Y')}"
     if period_key == "month":
         return "LAST MONTH", f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
-    return "LAST WEEK", f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
+    if period_key == "week":
+        return "LAST WEEK", f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
+    # custom
+    year_label = f"{start.year}" if start.year == end.year else f"{start.year}–{end.year}"
+    return f"{year_label}", f"{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}"
 
 
 def _fetch_data(run_query, kind, limit, user_id, start_date, end_date):
@@ -308,6 +320,65 @@ def _fetch_data(run_query, kind, limit, user_id, start_date, end_date):
     return run_query(sql, params)
 
 
+def _fetch_totals(run_query, user_id, start_date, end_date):
+    """Total streams/hours across the WHOLE selected date range — independent
+    of whatever Top-N list is being shown, so the footer never undercounts."""
+    sql = """
+        SELECT COUNT(s.id) AS streams,
+               ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
+        FROM streams s
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date
+          AND s.user_id = :user_id;
+    """
+    params = {"start_date": start_date, "end_date": end_date, "user_id": user_id}
+    result = run_query(sql, params)
+    if result is None or result.empty:
+        return 0, 0.0
+    row = result.iloc[0]
+    return int(row.get("streams") or 0), float(row.get("hours") or 0.0)
+
+
+def _fetch_overview_data(run_query, user_id, start_date, end_date):
+    """Aggregate stats for the 'Overview' card: totals + #1 artist + #1 track."""
+    params = {"start_date": start_date, "end_date": end_date, "user_id": user_id}
+
+    totals_sql = """
+        SELECT
+            COUNT(s.id) AS total_streams,
+            ROUND(SUM(s.ms_played) / 3600000.0, 1) AS total_hours,
+            COUNT(DISTINCT sa.artist_id) AS unique_artists,
+            COUNT(DISTINCT s.song_id) AS unique_tracks
+        FROM streams s
+        LEFT JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date
+          AND s.user_id = :user_id;
+    """
+    totals_df = run_query(totals_sql, params)
+
+    overview = {
+        "total_streams": 0, "total_hours": 0.0,
+        "unique_artists": 0, "unique_tracks": 0,
+        "top_artist": None, "top_track": None,
+    }
+
+    if totals_df is not None and not totals_df.empty:
+        row = totals_df.iloc[0]
+        overview["total_streams"] = int(row.get("total_streams") or 0)
+        overview["total_hours"] = float(row.get("total_hours") or 0.0)
+        overview["unique_artists"] = int(row.get("unique_artists") or 0)
+        overview["unique_tracks"] = int(row.get("unique_tracks") or 0)
+
+    top_artist_df = _fetch_data(run_query, "artists", 1, user_id, start_date, end_date)
+    if top_artist_df is not None and not top_artist_df.empty:
+        overview["top_artist"] = top_artist_df.iloc[0].to_dict()
+
+    top_track_df = _fetch_data(run_query, "tracks", 1, user_id, start_date, end_date)
+    if top_track_df is not None and not top_track_df.empty:
+        overview["top_track"] = top_track_df.iloc[0].to_dict()
+
+    return overview
+
+
 def _title_lines(kind, n):
     if kind == "artists":
         return ["MY TOP", f"{n} ARTISTS"]
@@ -319,7 +390,8 @@ def _title_lines(kind, n):
 # ══════════════════════════════════════════════════════════════════
 # CARD BUILDER  (1080 × 1920 PNG, Instagram Story sized)
 # ══════════════════════════════════════════════════════════════════
-def build_share_card(df, kind, username, period_label, theme_name, date_range_label, n):
+def build_share_card(df, kind, username, period_label, theme_name, date_range_label, n,
+                      total_streams=0, total_hours=0.0):
     theme = THEMES[theme_name]
     accent = theme["accent"]
 
@@ -420,10 +492,7 @@ def build_share_card(df, kind, username, period_label, theme_name, date_range_la
         draw.text((stats_x, box[1] + row_h * 0.68), "STREAMS", font=label_font,
                    fill=(255, 255, 255, 140), anchor="rm")
 
-    # ── Footer ──
-    total_streams = int(df["streams"].sum()) if "streams" in df.columns else 0
-    total_hours = float(df["hours"].sum()) if "hours" in df.columns else 0.0
-
+    # ── Footer (totals for the FULL selected period, not just the Top-N shown above) ──
     foot_box = [MARGIN, CARD_H - footer_h + 20, CARD_W - MARGIN, CARD_H - 60]
     bg = _drop_shadow(bg, foot_box, radius=26, blur=16, offset=(0, 6), alpha=70)
     bg = _glass_card(bg, foot_box, radius=26, blur=16, tint=(255, 255, 255, 18))
@@ -444,6 +513,135 @@ def build_share_card(df, kind, username, period_label, theme_name, date_range_la
     wm_text = f"Made with Suggestify \u2022 {datetime.date.today().strftime('%b %d, %Y')}"
     w = _text_w(draw, wm_text, wm_font)
     draw.text(((CARD_W - w) / 2, CARD_H - 40), wm_text, font=wm_font, fill=(255, 255, 255, 120))
+
+    return bg.convert("RGB")
+
+
+def build_overview_card(overview, username, period_label, theme_name, date_range_label):
+    """A summary card: total streams/hours/artists/tracks for the WHOLE period
+    plus your #1 artist and #1 track — no ranked list."""
+    theme = THEMES[theme_name]
+    accent = theme["accent"]
+
+    bg = _make_gradient((CARD_W, CARD_H), theme["stops"])
+    bg = _add_glow(bg, (CARD_W * 0.12, CARD_H * 0.06), 460, theme["accent2"], 65)
+    bg = _add_glow(bg, (CARD_W * 0.92, CARD_H * 0.9), 520, theme["accent"], 55)
+
+    draw = ImageDraw.Draw(bg)
+
+    # ── Logo ──
+    logo_font = _font(34)
+    draw.text((MARGIN, 74), "\u266A  SUGGESTIFY", font=logo_font, fill=(255, 255, 255, 235))
+
+    # ── Period pill ──
+    pill_font = _font(26)
+    pill_text = period_label
+    pw = _text_w(draw, pill_text, pill_font) + 56
+    pill_box = [CARD_W - MARGIN - pw, 62, CARD_W - MARGIN, 62 + 54]
+    draw.rounded_rectangle(pill_box, radius=27, fill=accent + (255,))
+    draw.text(((pill_box[0] + pill_box[2]) / 2, (pill_box[1] + pill_box[3]) / 2),
+               pill_text, font=pill_font, fill=(0, 0, 0, 255), anchor="mm")
+
+    # ── Title ──
+    title_font = _font(88)
+    y = 190
+    for line in ["MY LISTENING", "OVERVIEW"]:
+        w = _text_w(draw, line, title_font)
+        draw.text(((CARD_W - w) / 2, y), line, font=title_font, fill=(255, 255, 255, 255))
+        y += 100
+
+    # ── Subtitle ──
+    sub_font = _font(30)
+    sub_text = f"@{username}  ·  {date_range_label}"
+    w = _text_w(draw, sub_text, sub_font)
+    draw.text(((CARD_W - w) / 2, y + 14), sub_text, font=sub_font, fill=(255, 255, 255, 170))
+
+    content_top = y + 100
+
+    # ── 2x2 big stat grid ──
+    grid_gap = 24
+    grid_h = 260
+    col_w = (CARD_W - 2 * MARGIN - grid_gap) / 2
+
+    stats = [
+        (f"{overview['total_streams']:,}", "TOTAL STREAMS"),
+        (f"{overview['total_hours']:,.1f}h", "TIME LISTENED"),
+        (f"{overview['unique_artists']:,}", "UNIQUE ARTISTS"),
+        (f"{overview['unique_tracks']:,}", "UNIQUE TRACKS"),
+    ]
+
+    for i, (value, label) in enumerate(stats):
+        col = i % 2
+        row_i = i // 2
+        x0 = MARGIN + col * (col_w + grid_gap)
+        y0 = content_top + row_i * (grid_h + grid_gap)
+        box = [x0, y0, x0 + col_w, y0 + grid_h]
+
+        bg = _drop_shadow(bg, box, radius=32, blur=18, offset=(0, 8), alpha=85)
+        bg = _glass_card(bg, box, radius=32, blur=18)
+        draw = ImageDraw.Draw(bg)
+
+        val_font = _font(72)
+        lab_font = _font(24, bold=False)
+        cx = (box[0] + box[2]) / 2
+        draw.text((cx, box[1] + grid_h * 0.42), value, font=val_font,
+                   fill=accent + (255,), anchor="mm")
+        draw.text((cx, box[1] + grid_h * 0.72), label, font=lab_font,
+                   fill=(255, 255, 255, 160), anchor="mm")
+
+    highlight_top = content_top + 2 * grid_h + grid_gap + 36
+    highlight_h = 200
+
+    def _highlight_row(y0, art_url, is_circle, name, sub, streams, tag):
+        nonlocal bg
+        box = [MARGIN, y0, CARD_W - MARGIN, y0 + highlight_h]
+        bg = _drop_shadow(bg, box, radius=28, blur=18, offset=(0, 8), alpha=85)
+        bg = _glass_card(bg, box, radius=28, blur=18)
+        d = ImageDraw.Draw(bg)
+
+        tag_font = _font(20)
+        d.text((box[0] + 24, box[1] + 16), tag, font=tag_font, fill=accent + (255,))
+
+        art_size = int(highlight_h - 70)
+        art_x = box[0] + 24
+        art_y = box[1] + 54
+        art = _get_art(art_url, (art_size, art_size), circle=is_circle, accent=accent)
+        bg.paste(art, (int(art_x), int(art_y)), art)
+
+        info_x = art_x + art_size + 28
+        name_font = _font(38)
+        sub_font_ = _font(24, bold=False)
+        info_max_w = CARD_W - MARGIN - 130 - info_x
+        name_txt = _truncate(d, name, name_font, info_max_w)
+        d.text((info_x, box[1] + 78), name_txt, font=name_font, fill=(255, 255, 255, 255), anchor="lm")
+        if sub:
+            sub_txt = _truncate(d, sub, sub_font_, info_max_w)
+            d.text((info_x, box[1] + 122), sub_txt, font=sub_font_, fill=(255, 255, 255, 170), anchor="lm")
+
+        stat_font = _font(34)
+        lab_font = _font(16, bold=False)
+        d.text((box[2] - 24, box[1] + 78), f"{streams:,}", font=stat_font,
+               fill=accent + (255,), anchor="rm")
+        d.text((box[2] - 24, box[1] + 112), "STREAMS", font=lab_font,
+               fill=(255, 255, 255, 140), anchor="rm")
+
+    if overview.get("top_artist"):
+        ta = overview["top_artist"]
+        _highlight_row(highlight_top, ta.get("image_url"), True, ta.get("name", ""), "",
+                       int(ta.get("streams") or 0), "TOP ARTIST")
+        highlight_top += highlight_h + 20
+
+    if overview.get("top_track"):
+        tt = overview["top_track"]
+        _highlight_row(highlight_top, tt.get("image_url"), False, tt.get("name", ""), tt.get("sub", ""),
+                       int(tt.get("streams") or 0), "TOP TRACK")
+
+    # ── Footer watermark ──
+    draw = ImageDraw.Draw(bg)
+    wm_font = _font(20, bold=False)
+    wm_text = f"Made with Suggestify \u2022 {datetime.date.today().strftime('%b %d, %Y')}"
+    w = _text_w(draw, wm_text, wm_font)
+    draw.text(((CARD_W - w) / 2, CARD_H - 50), wm_text, font=wm_font, fill=(255, 255, 255, 120))
 
     return bg.convert("RGB")
 
@@ -558,30 +756,75 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date):
 
     kind, n = STAT_TYPES[stat_choice]
     period_key = PERIODS[period_choice]
-    start_date, end_date = _date_range(period_key, min_date, max_date)
-    period_label, date_range_label = _period_label_and_range(period_key, min_date, max_date)
 
-    df = _fetch_data(run_query, kind, n, user_id, start_date, end_date)
+    # ── Custom range picker (only shown when "Custom Range" is selected) ──
+    custom_start, custom_end = None, None
+    if period_key == "custom":
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            custom_start = st.date_input("From", value=min_date, min_value=min_date,
+                                          max_value=max_date, key="share_custom_start")
+        with cc2:
+            custom_end = st.date_input("To", value=max_date, min_value=min_date,
+                                        max_value=max_date, key="share_custom_end")
+        if custom_start > custom_end:
+            st.warning("Start date is after end date — swapping them.")
+            custom_start, custom_end = custom_end, custom_start
 
-    if df is None or df.empty:
-        st.warning("No listening data for this period yet — try a different range.")
-        return
-
-    components.html(
-        _html_preview(df, kind, username, period_label, theme_choice, date_range_label, n),
-        height=565,
-        scrolling=False,
+    start_date, end_date = _date_range(period_key, min_date, max_date, custom_start, custom_end)
+    period_label, date_range_label = _period_label_and_range(
+        period_key, min_date, max_date, custom_start, custom_end
     )
 
-    st.write("")
+    # Totals for the footer always reflect the FULL selected date range,
+    # regardless of whether we're showing a Top 5 / Top 10 / Overview card.
+    total_streams, total_hours = _fetch_totals(run_query, user_id, start_date, end_date)
 
-    generate = st.button("✨ Generate high-res PNG", use_container_width=True,
-                          type="primary", key="share_generate_btn")
+    if kind == "overview":
+        overview = _fetch_overview_data(run_query, user_id, start_date, end_date)
 
-    if generate:
-        with st.spinner("Rendering your 1080×1920 card…"):
-            card = build_share_card(df, kind, username, period_label, theme_choice, date_range_label, n)
-            st.session_state["_share_png_bytes"] = image_to_bytes(card)
+        if not overview["total_streams"]:
+            st.warning("No listening data for this period yet — try a different range.")
+            return
+
+        st.info(
+            f"**{overview['total_streams']:,}** streams · **{overview['total_hours']:,.1f}h** listened · "
+            f"{overview['unique_artists']:,} artists · {overview['unique_tracks']:,} tracks"
+        )
+
+        generate = st.button("✨ Generate high-res PNG", use_container_width=True,
+                              type="primary", key="share_generate_btn")
+
+        if generate:
+            with st.spinner("Rendering your 1080×1920 overview card…"):
+                card = build_overview_card(overview, username, period_label, theme_choice, date_range_label)
+                st.session_state["_share_png_bytes"] = image_to_bytes(card)
+
+    else:
+        df = _fetch_data(run_query, kind, n, user_id, start_date, end_date)
+
+        if df is None or df.empty:
+            st.warning("No listening data for this period yet — try a different range.")
+            return
+
+        components.html(
+            _html_preview(df, kind, username, period_label, theme_choice, date_range_label, n),
+            height=565,
+            scrolling=False,
+        )
+
+        st.write("")
+
+        generate = st.button("✨ Generate high-res PNG", use_container_width=True,
+                              type="primary", key="share_generate_btn")
+
+        if generate:
+            with st.spinner("Rendering your 1080×1920 card…"):
+                card = build_share_card(
+                    df, kind, username, period_label, theme_choice, date_range_label, n,
+                    total_streams=total_streams, total_hours=total_hours,
+                )
+                st.session_state["_share_png_bytes"] = image_to_bytes(card)
 
     if st.session_state.get("_share_png_bytes"):
         st.download_button(
