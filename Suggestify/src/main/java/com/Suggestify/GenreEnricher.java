@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 
 public class GenreEnricher {
 
-    private static final String LASTFM_API_KEY = "ΒΑΛΕ_ΕΔΩ_ΤΟ_API_KEY_ΣΟΥ"; // Μην το ξεχάσεις!
+    private static final String LASTFM_API_KEY = "9eee586b5f031e6b2740463c6d5f96a1";
     private static final Pattern TAG_PATTERN = Pattern.compile("\"name\":\"([^\"]+)\"");
 
     public void enrichAlbums() {
