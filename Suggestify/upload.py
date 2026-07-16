@@ -344,12 +344,20 @@ elif st.session_state.upload_state == "processing":
             flags = subprocess.CREATE_NO_WINDOW
 
         try:
+            # 1. Spotify Cover Art (Images)
             subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ImageUpdater"], creationflags=flags)
             subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ArtistImageUpdater"], creationflags=flags)
+            
+            # 2. Last.fm Album Genres
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.GenreEnricher"], creationflags=flags)
+            
+            # 3. iTunes Track Metadata & Feature Hunter
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.TrackMetadataEnricher"], creationflags=flags)
+            
         except Exception as e:
             print(f"Background tasks failed: {e}")
-
-        st.session_state.log_lines.append("🖼️  Fetching initial cover art from Spotify...")
+            
+        st.session_state.log_lines.append("✨ Fetching artwork, genres & metadata in the background...")
         for i in range(1, 101):
             pct = 80 + int(20 * (i / 100))
             render_proc(pct, st.session_state.log_lines)

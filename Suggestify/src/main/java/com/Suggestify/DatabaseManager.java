@@ -56,7 +56,13 @@ public class DatabaseManager {
                 title VARCHAR(255) NOT NULL,
                 album_id INT REFERENCES albums(id),
                 track_uri VARCHAR(255),
-                image_url VARCHAR(500)
+                image_url VARCHAR(500),
+                duration_ms INT,
+                release_date DATE,
+                primary_genre VARCHAR(100),
+                is_explicit BOOLEAN DEFAULT FALSE,
+                preview_url VARCHAR(500),
+                rating DECIMAL(2,1) DEFAULT NULL
             );
         """;
 
