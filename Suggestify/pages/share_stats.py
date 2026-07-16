@@ -1,16 +1,28 @@
 import io
 import os
+import math
+import random
+import colorsys
+import zipfile
 import datetime
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+try:
+    import qrcode
+except ImportError:
+    qrcode = None
+
 # ══════════════════════════════════════════════════════════════════
 # OPTIONAL: point these at bundled font files for pixel-perfect type
 # ══════════════════════════════════════════════════════════════════
 FONT_REGULAR_PATH = None   # e.g. os.path.join(os.path.dirname(__file__), "assets", "Inter-Regular.ttf")
 FONT_BOLD_PATH = None      # e.g. os.path.join(os.path.dirname(__file__), "assets", "Inter-Bold.ttf")
+
+# Link embedded in the QR code / referenced by the watermark.
+APP_URL = "https://suggestify.app"
 
 # ══════════════════════════════════════════════════════════════════
 # THEMES
@@ -30,6 +42,11 @@ THEMES = {
                        "accent": (212, 175, 55), "accent2": (245, 222, 140)},
 }
 
+# Special sentinel entry shown alongside the named themes above. Selecting it
+# triggers `_get_dynamic_theme(...)`, which builds a bespoke gradient out of
+# the top artist's actual artwork colors instead of a fixed palette.
+DYNAMIC_THEME_LABEL = "🎨 Auto (Top Artist Colors)"
+
 PERIODS = {
     "All Time": "all",
     "Wrapped": "wrapped",
@@ -39,12 +56,13 @@ PERIODS = {
 }
 
 STAT_TYPES = {
-    "Top 5 Artists":  ("artists", 5),
-    "Top 10 Artists": ("artists", 10),
-    "Top 5 Tracks":   ("tracks", 5),
-    "Top 10 Tracks":  ("tracks", 10),
-    "Top Albums":     ("albums", 10),
-    "Overview":       ("overview", 1),
+    "Top 5 Artists":         ("artists", 5),
+    "Top 10 Artists":        ("artists", 10),
+    "Top 5 Tracks":          ("tracks", 5),
+    "Top 10 Tracks":         ("tracks", 10),
+    "Top Albums":            ("albums", 10),
+    "Overview":              ("overview", 1),
+    "Listening Personality": ("personality", 1),
 }
 
 RANK_COLORS = {
@@ -53,14 +71,34 @@ RANK_COLORS = {
     3: (205, 127, 50),
 }
 
-CARD_W, CARD_H = 1080, 1920
+# Both export sizes. Layout math below scales against the height of
+# whichever of these is being rendered, so a single set of drawing
+# routines produces both a tall Story card and a boxy Square card.
+FORMATS = {
+    "Story (1080×1920)":  (1080, 1920),
+    "Square (1080×1080)": (1080, 1080),
+}
+CARD_W, CARD_H = FORMATS["Story (1080×1920)"]
 MARGIN = 60
+
+PERSONALITIES = {
+    "night_owl":       {"label": "Night Owl",        "emoji": "🦉", "desc": "Your best playlists come alive after dark."},
+    "superfan":        {"label": "Superfan",          "emoji": "💜", "desc": "One artist, unwavering loyalty."},
+    "marathoner":      {"label": "Marathon Listener", "emoji": "⏱️", "desc": "Hours upon hours — the music never stops."},
+    "weekend_warrior": {"label": "Weekend Warrior",   "emoji": "🎉", "desc": "Your speakers really come alive on weekends."},
+    "repeater":        {"label": "Repeat Offender",   "emoji": "🔁", "desc": "When you find a favorite, you ride with it."},
+    "explorer":        {"label": "Explorer",          "emoji": "🧭", "desc": "Always chasing the next new sound."},
+    "collector":       {"label": "Collector",         "emoji": "📀", "desc": "A vast, ever-growing library of tracks."},
+    "newcomer":        {"label": "Fresh Start",       "emoji": "🌱", "desc": "Just getting started — the story is unfolding."},
+    "default":         {"label": "Music Lover",       "emoji": "🎧", "desc": "A well-rounded, ever-curious listener."},
+}
 
 
 # ══════════════════════════════════════════════════════════════════
 # FONT LOADING
 # ══════════════════════════════════════════════════════════════════
 def _font(size, bold=True):
+    size = max(int(size), 8)
     if bold and FONT_BOLD_PATH and os.path.exists(FONT_BOLD_PATH):
         return ImageFont.truetype(FONT_BOLD_PATH, size)
     if not bold and FONT_REGULAR_PATH and os.path.exists(FONT_REGULAR_PATH):
@@ -100,6 +138,26 @@ def _truncate(draw, text, font, max_w):
     return (text + "…") if text else "…"
 
 
+def _wrap_text(draw, text, font, max_w, max_lines=3):
+    words = text.split()
+    lines, cur = [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if _text_w(draw, trial, font) <= max_w:
+            cur = trial
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+        if len(lines) == max_lines - 1:
+            break
+    if cur:
+        lines.append(cur)
+    if len(lines) < len(text.split()) and len(lines) >= max_lines:
+        lines[-1] = _truncate(draw, lines[-1] + "…", font, max_w)
+    return lines[:max_lines]
+
+
 # ══════════════════════════════════════════════════════════════════
 # IMAGE HELPERS
 # ══════════════════════════════════════════════════════════════════
@@ -115,6 +173,8 @@ def _download_image(url: str):
 
 
 def _load_cached_image(url):
+    if not url:
+        return None
     cached = _download_image(url)
     if cached is None:
         return None
@@ -174,6 +234,120 @@ def _get_art(url, size, circle=False, accent=(29, 185, 84)):
     return out
 
 
+def _initials(name):
+    parts = [p for p in (name or "").strip().split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _avatar_image(username, accent, size=96, avatar_url=None):
+    """User avatar: their photo if a URL is provided, otherwise a clean
+    initials badge in the card's accent color."""
+    if avatar_url:
+        img = _load_cached_image(avatar_url)
+        if img is not None:
+            img = _fit_cover(img, (size, size))
+            img = img.convert("RGBA")
+            img.putalpha(_circle_mask((size, size)))
+            return img
+
+    img = Image.new("RGBA", (size, size), tuple(accent) + (255,))
+    d = ImageDraw.Draw(img)
+    f = _font(size * 0.4)
+    text = _initials(username)
+    bbox = d.textbbox((0, 0), text, font=f)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    d.text(((size - w) / 2 - bbox[0], (size - h) / 2 - bbox[1]), text, font=f, fill=(255, 255, 255, 240))
+    img.putalpha(_circle_mask((size, size)))
+    return img
+
+
+def _qr_image(url=APP_URL, size=140, pad_ratio=0.16):
+    """Small scannable QR badge linking back to Suggestify. Returns None
+    (silently) if the optional `qrcode` package isn't installed."""
+    if qrcode is None:
+        return None
+    try:
+        qr = qrcode.QRCode(border=1, box_size=10)
+        qr.add_data(url)
+        qr.make(fit=True)
+        code_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+        code_img = code_img.resize((size, size), Image.LANCZOS)
+
+        pad = int(size * pad_ratio)
+        card = Image.new("RGBA", (size + pad * 2, size + pad * 2), (255, 255, 255, 255))
+        card.putalpha(_rounded_mask(card.size, int(pad * 1.1)))
+        card.paste(code_img, (pad, pad), code_img)
+        return card
+    except Exception:
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════
+# DOMINANT-COLOR EXTRACTION  (drives the "Auto" dynamic theme)
+# ══════════════════════════════════════════════════════════════════
+def _extract_dominant_colors(img, n=5):
+    small = img.convert("RGB").resize((64, 64))
+    paletted = small.quantize(colors=max(n, 5), method=Image.MEDIANCUT)
+    palette = paletted.getpalette()
+    counts = sorted(paletted.getcolors(), reverse=True, key=lambda c: c[0])
+    colors = []
+    for count, idx in counts[:n]:
+        colors.append(tuple(palette[idx * 3: idx * 3 + 3]))
+    return colors
+
+
+def _adjust(color, factor):
+    return tuple(max(0, min(255, int(c * factor))) for c in color)
+
+
+def _dynamic_theme_from_colors(colors):
+    def sat_val(c):
+        h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
+        return s * v
+
+    ordered = sorted(colors, key=sat_val, reverse=True)
+    base = ordered[0]
+    h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in base))
+    s = max(s, 0.55)
+    v = max(v, 0.75)
+    accent = tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h, s, v))
+    accent2 = tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h, max(s - 0.3, 0.15), min(v + 0.15, 1)))
+    stops = [_adjust(accent, 0.34), _adjust(accent, 0.55), _adjust(accent, 0.10)]
+    return {"stops": stops, "accent": accent, "accent2": accent2}
+
+
+def _get_dynamic_theme(image_url, fallback_theme):
+    img = _load_cached_image(image_url) if image_url else None
+    if img is None:
+        return fallback_theme
+    try:
+        colors = _extract_dominant_colors(img, n=5)
+        if not colors:
+            return fallback_theme
+        return _dynamic_theme_from_colors(colors)
+    except Exception:
+        return fallback_theme
+
+
+def _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, overview=None):
+    if theme_choice != DYNAMIC_THEME_LABEL:
+        return THEMES[theme_choice]
+
+    top_artist_img = None
+    if overview and overview.get("top_artist"):
+        top_artist_img = overview["top_artist"].get("image_url")
+    if not top_artist_img:
+        ta_df = _fetch_data(run_query, "artists", 1, user_id, start_date, end_date)
+        if ta_df is not None and not ta_df.empty:
+            top_artist_img = ta_df.iloc[0].get("image_url")
+
+    return _get_dynamic_theme(top_artist_img, THEMES["Spotify Green"])
+
+
 # ══════════════════════════════════════════════════════════════════
 # BACKGROUND / GLASS EFFECTS
 # ══════════════════════════════════════════════════════════════════
@@ -202,6 +376,35 @@ def _add_glow(bg_rgba, center, radius, color, alpha=80):
               fill=tuple(color) + (alpha,))
     glow = glow.filter(ImageFilter.GaussianBlur(radius // 2))
     return Image.alpha_composite(bg_rgba, glow)
+
+
+def _add_particles(bg_rgba, accent, seed=0, density=1.0):
+    """Bakes a still frame of the 'floating particles' effect into the PNG
+    (a real animation isn't possible in a static export — the live preview
+    inside the share dialog shows the true CSS-animated version). Small
+    bright dots plus a few soft oversized bokeh circles, scattered with a
+    per-user seed so re-generating the same card looks the same."""
+    w, h = bg_rgba.size
+    rnd = random.Random(seed)
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    dot_count = int(46 * density * (w * h) / (1080 * 1920))
+    for _ in range(max(dot_count, 12)):
+        x, y = rnd.uniform(0, w), rnd.uniform(0, h)
+        r = rnd.uniform(2, 6) * (w / 1080)
+        color = accent if rnd.random() < 0.35 else (255, 255, 255)
+        alpha = rnd.randint(20, 85)
+        d.ellipse([x - r, y - r, x + r, y + r], fill=tuple(color) + (alpha,))
+
+    for _ in range(max(int(6 * density), 3)):
+        x, y = rnd.uniform(0, w), rnd.uniform(0, h)
+        r = rnd.uniform(26, 80) * (w / 1080)
+        alpha = rnd.randint(10, 24)
+        d.ellipse([x - r, y - r, x + r, y + r], fill=tuple(accent) + (alpha,))
+
+    layer = layer.filter(ImageFilter.GaussianBlur(1))
+    return Image.alpha_composite(bg_rgba, layer)
 
 
 def _drop_shadow(bg_rgba, box, radius=32, blur=26, offset=(0, 12), alpha=100):
@@ -379,6 +582,67 @@ def _fetch_overview_data(run_query, user_id, start_date, end_date):
     return overview
 
 
+def _fetch_personality_signals(run_query, user_id, start_date, end_date):
+    sql = """
+        SELECT
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5) AS night_count,
+          COUNT(*) FILTER (WHERE EXTRACT(ISODOW FROM s.played_at) IN (6,7)) AS weekend_count,
+          COUNT(DISTINCT s.song_id) AS unique_tracks,
+          COUNT(DISTINCT sa.artist_id) AS unique_artists
+        FROM streams s
+        LEFT JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date
+          AND s.user_id = :user_id;
+    """
+    params = {"start_date": start_date, "end_date": end_date, "user_id": user_id}
+    df = run_query(sql, params)
+    if df is None or df.empty:
+        return {"total": 0, "night_count": 0, "weekend_count": 0, "unique_tracks": 0, "unique_artists": 0}
+    row = df.iloc[0]
+    return {
+        "total": int(row.get("total") or 0),
+        "night_count": int(row.get("night_count") or 0),
+        "weekend_count": int(row.get("weekend_count") or 0),
+        "unique_tracks": int(row.get("unique_tracks") or 0),
+        "unique_artists": int(row.get("unique_artists") or 0),
+    }
+
+
+def _compute_personality(signals, overview):
+    total = signals["total"]
+    if total < 20:
+        return PERSONALITIES["newcomer"]
+
+    night_pct = signals["night_count"] / total
+    weekend_pct = signals["weekend_count"] / total
+    unique_tracks = signals["unique_tracks"] or 1
+    unique_artists = signals["unique_artists"] or 1
+    repeat_rate = total / unique_tracks
+    diversity = unique_artists / total
+
+    top_artist_streams = 0
+    if overview.get("top_artist"):
+        top_artist_streams = int(overview["top_artist"].get("streams") or 0)
+    concentration = (top_artist_streams / total) if total else 0
+
+    if night_pct >= 0.42:
+        return PERSONALITIES["night_owl"]
+    if concentration >= 0.22:
+        return PERSONALITIES["superfan"]
+    if overview.get("total_hours", 0) >= 250:
+        return PERSONALITIES["marathoner"]
+    if weekend_pct >= 0.45:
+        return PERSONALITIES["weekend_warrior"]
+    if repeat_rate >= 7:
+        return PERSONALITIES["repeater"]
+    if diversity >= 0.12 or unique_artists >= 120:
+        return PERSONALITIES["explorer"]
+    if unique_tracks >= total * 0.55:
+        return PERSONALITIES["collector"]
+    return PERSONALITIES["default"]
+
+
 def _title_lines(kind, n):
     if kind == "artists":
         return ["MY TOP", f"{n} ARTISTS"]
@@ -388,180 +652,223 @@ def _title_lines(kind, n):
 
 
 # ══════════════════════════════════════════════════════════════════
-# CARD BUILDER  (1080 × 1920 PNG, Instagram Story sized)
+# SHARED CARD SHELL  (background + header + footer, used by all 3
+# card builders below so Story/Square scaling logic lives in one place)
 # ══════════════════════════════════════════════════════════════════
-def build_share_card(df, kind, username, period_label, theme_name, date_range_label, n,
-                      total_streams=0, total_hours=0.0):
-    theme = THEMES[theme_name]
-    accent = theme["accent"]
+def _card_background(card_w, card_h, theme, seed):
+    bg = _make_gradient((card_w, card_h), theme["stops"])
+    bg = _add_glow(bg, (card_w * 0.12, card_h * 0.06), int(card_h * 0.24), theme["accent2"], 65)
+    bg = _add_glow(bg, (card_w * 0.92, card_h * 0.9), int(card_h * 0.27), theme["accent"], 55)
+    bg = _add_particles(bg, theme["accent"], seed=seed, density=card_h / 1920)
+    return bg
 
-    bg = _make_gradient((CARD_W, CARD_H), theme["stops"])
-    bg = _add_glow(bg, (CARD_W * 0.12, CARD_H * 0.06), 460, theme["accent2"], 65)
-    bg = _add_glow(bg, (CARD_W * 0.92, CARD_H * 0.9), 520, theme["accent"], 55)
 
+def _card_header(bg, card_w, card_h, scale, accent, username, avatar_url, period_label,
+                  title_lines, subtitle_text, title_font_size=92):
     draw = ImageDraw.Draw(bg)
 
-    # ── Logo ──
-    logo_font = _font(34)
-    draw.text((MARGIN, 74), "\u266A  SUGGESTIFY", font=logo_font, fill=(255, 255, 255, 235))
+    # ── Avatar + logo (top-left) ──
+    avatar_size = int(64 * scale)
+    avatar_img = _avatar_image(username, accent, size=avatar_size, avatar_url=avatar_url)
+    avatar_y = int(56 * scale)
+    bg.paste(avatar_img, (MARGIN, avatar_y), avatar_img)
+    draw = ImageDraw.Draw(bg)
+    ring_box = [MARGIN - 2, avatar_y - 2, MARGIN + avatar_size + 2, avatar_y + avatar_size + 2]
+    draw.ellipse(ring_box, outline=(255, 255, 255, 90), width=2)
 
-    # ── Period pill ──
-    pill_font = _font(26)
-    pill_text = period_label
-    pw = _text_w(draw, pill_text, pill_font) + 56
-    pill_box = [CARD_W - MARGIN - pw, 62, CARD_W - MARGIN, 62 + 54]
-    draw.rounded_rectangle(pill_box, radius=27, fill=accent + (255,))
+    logo_font = _font(24 * scale)
+    logo_x = MARGIN + avatar_size + int(18 * scale)
+    draw.text((logo_x, avatar_y + avatar_size / 2 - 8 * scale), "\u266A SUGGESTIFY",
+               font=logo_font, fill=(255, 255, 255, 235))
+    uname_font = _font(18 * scale, bold=False)
+    draw.text((logo_x, avatar_y + avatar_size / 2 + 14 * scale), f"@{username}",
+               font=uname_font, fill=(255, 255, 255, 150))
+
+    # ── Period pill (top-right) ──
+    pill_font = _font(26 * scale)
+    pw = _text_w(draw, period_label, pill_font) + int(56 * scale)
+    ph = int(54 * scale)
+    pill_top = int(62 * scale)
+    pill_box = [card_w - MARGIN - pw, pill_top, card_w - MARGIN, pill_top + ph]
+    draw.rounded_rectangle(pill_box, radius=ph // 2, fill=tuple(accent) + (255,))
     draw.text(((pill_box[0] + pill_box[2]) / 2, (pill_box[1] + pill_box[3]) / 2),
-               pill_text, font=pill_font, fill=(0, 0, 0, 255), anchor="mm")
+               period_label, font=pill_font, fill=(0, 0, 0, 255), anchor="mm")
 
     # ── Title ──
-    title_font = _font(92)
-    y = 190
-    for line in _title_lines(kind, n):
+    title_font = _font(title_font_size * scale)
+    y = int(190 * scale)
+    line_h = int(title_font_size * scale * 1.13)
+    for line in title_lines:
         w = _text_w(draw, line, title_font)
-        draw.text(((CARD_W - w) / 2, y), line, font=title_font, fill=(255, 255, 255, 255))
-        y += 104
+        draw.text(((card_w - w) / 2, y), line, font=title_font, fill=(255, 255, 255, 255))
+        y += line_h
 
     # ── Subtitle ──
-    sub_font = _font(30)
-    sub_text = f"@{username}  ·  {date_range_label}"
-    w = _text_w(draw, sub_text, sub_font)
-    draw.text(((CARD_W - w) / 2, y + 14), sub_text, font=sub_font, fill=(255, 255, 255, 170))
+    sub_font = _font(30 * scale)
+    w = _text_w(draw, subtitle_text, sub_font)
+    draw.text(((card_w - w) / 2, y + 14 * scale), subtitle_text, font=sub_font, fill=(255, 255, 255, 170))
 
-    list_top = y + 90
-    footer_h = 190
-    list_bottom = CARD_H - footer_h
+    return bg, y + int(90 * scale)
+
+
+def _card_footer(bg, card_w, card_h, scale, accent, total_streams, total_hours):
+    """Glass stat strip (total streams / total hours) + a thin bottom band
+    with the QR code and the 'Generated by Suggestify' watermark."""
+    extras_h = int(140 * scale)
+    footer_h = int(150 * scale)
+    footer_top = card_h - extras_h - footer_h - int(20 * scale)
+    foot_box = [MARGIN, footer_top, card_w - MARGIN, footer_top + footer_h]
+
+    bg = _drop_shadow(bg, foot_box, radius=int(26 * scale), blur=int(16 * scale), offset=(0, int(6 * scale)), alpha=70)
+    bg = _glass_card(bg, foot_box, radius=int(26 * scale), blur=16, tint=(255, 255, 255, 18))
+    draw = ImageDraw.Draw(bg)
+
+    stat_big = _font(40 * scale)
+    stat_small = _font(20 * scale, bold=False)
+    half_w = (foot_box[2] - foot_box[0]) / 2
+    cx1 = foot_box[0] + half_w / 2
+    cx2 = foot_box[0] + half_w + half_w / 2
+    cy1 = foot_box[1] + footer_h * 0.38
+    cy2 = foot_box[1] + footer_h * 0.72
+
+    draw.text((cx1, cy1), f"{total_streams:,}", font=stat_big, fill=(255, 255, 255, 255), anchor="mm")
+    draw.text((cx1, cy2), "TOTAL STREAMS", font=stat_small, fill=(255, 255, 255, 150), anchor="mm")
+    draw.text((cx2, cy1), f"{total_hours:,.1f}h", font=stat_big, fill=tuple(accent) + (255,), anchor="mm")
+    draw.text((cx2, cy2), "TIME LISTENED", font=stat_small, fill=(255, 255, 255, 150), anchor="mm")
+
+    # ── Bottom band: watermark (left) + QR code (right) ──
+    extras_top = card_h - extras_h
+    qr_size = int(96 * scale)
+    qr_img = _qr_image(size=qr_size)
+
+    wm_font = _font(20 * scale)
+    date_font = _font(16 * scale, bold=False)
+    wm_text = "Generated by Suggestify"
+    date_text = datetime.date.today().strftime("%b %d, %Y")
+
+    text_right_edge = card_w - MARGIN - (qr_img.width + 18 * scale if qr_img else 0)
+    draw.text((MARGIN, extras_top + extras_h * 0.38), wm_text, font=wm_font,
+               fill=(255, 255, 255, 200), anchor="lm")
+    draw.text((MARGIN, extras_top + extras_h * 0.68), date_text, font=date_font,
+               fill=(255, 255, 255, 130), anchor="lm")
+
+    if qr_img:
+        qr_x = card_w - MARGIN - qr_img.width
+        qr_y = int(extras_top + (extras_h - qr_img.height) / 2)
+        bg.paste(qr_img, (qr_x, qr_y), qr_img)
+        draw = ImageDraw.Draw(bg)
+        scan_font = _font(14 * scale, bold=False)
+        draw.text((qr_x + qr_img.width / 2, qr_y - 6 * scale), "SCAN ME", font=scan_font,
+                   fill=(255, 255, 255, 130), anchor="mb")
+
+    return bg
+
+
+def _finalize(bg):
+    return bg.convert("RGB")
+
+
+# ══════════════════════════════════════════════════════════════════
+# CARD BUILDER 1 — Top-N ranked list (artists / tracks / albums)
+# ══════════════════════════════════════════════════════════════════
+def build_share_card(df, kind, username, period_label, theme, date_range_label, n,
+                      total_streams=0, total_hours=0.0, avatar_url=None,
+                      card_w=CARD_W, card_h=CARD_H):
+    accent = theme["accent"]
+    scale = card_h / 1920.0
+    seed = abs(hash((username, kind, period_label, n))) % (2 ** 32)
+
+    bg = _card_background(card_w, card_h, theme, seed)
+    subtitle_text = f"@{username}  ·  {date_range_label}"
+    bg, list_top = _card_header(bg, card_w, card_h, scale, accent, username, avatar_url,
+                                 period_label, _title_lines(kind, n), subtitle_text)
+
+    extras_h = int(140 * scale)
+    footer_h = int(150 * scale)
+    list_bottom = card_h - extras_h - footer_h - int(40 * scale)
 
     rows = df.to_dict("records")
-    n_rows = len(rows)
-    gap = 16
-    row_h = min(220, (list_bottom - list_top - gap * (n_rows - 1)) / n_rows)
-    row_h = max(row_h, 84)
+    n_rows = max(len(rows), 1)
+    gap = int(16 * scale)
+    row_h = min(220 * scale, (list_bottom - list_top - gap * (n_rows - 1)) / n_rows)
+    row_h = max(row_h, int(70 * scale))
 
     is_circle = (kind == "artists")
-    rank_col_w = 96
+    rank_col_w = int(96 * scale)
 
     for i, row in enumerate(rows):
         box = [MARGIN, list_top + i * (row_h + gap),
-               CARD_W - MARGIN, list_top + i * (row_h + gap) + row_h]
+               card_w - MARGIN, list_top + i * (row_h + gap) + row_h]
 
-        bg = _drop_shadow(bg, box, radius=28, blur=18, offset=(0, 8), alpha=85)
-        bg = _glass_card(bg, box, radius=28, blur=18)
+        bg = _drop_shadow(bg, box, radius=int(28 * scale), blur=18, offset=(0, 8), alpha=85)
+        bg = _glass_card(bg, box, radius=int(28 * scale), blur=18)
         draw = ImageDraw.Draw(bg)
 
         rank = i + 1
         rank_color = RANK_COLORS.get(rank, (255, 255, 255))
-        rank_font = _font(int(row_h * 0.4))
+        rank_font = _font(row_h * 0.4)
         draw.text((box[0] + rank_col_w / 2, (box[1] + box[3]) / 2),
                    str(rank), font=rank_font, fill=rank_color + (255,), anchor="mm")
 
-        art_size = int(row_h - 24)
+        art_size = int(row_h - 24 * scale)
         art_x = box[0] + rank_col_w
         art_y = box[1] + (row_h - art_size) / 2
         art = _get_art(row.get("image_url"), (art_size, art_size), circle=is_circle, accent=accent)
         bg.paste(art, (int(art_x), int(art_y)), art)
 
-        info_x = art_x + art_size + 28
-        stats_col_w = 230
-        info_max_w = (box[2] - stats_col_w) - info_x - 16
+        info_x = art_x + art_size + 28 * scale
+        stats_col_w = 230 * scale
+        info_max_w = (box[2] - stats_col_w) - info_x - 16 * scale
 
         has_sub = "sub" in df.columns and row.get("sub")
         name = str(row.get("name", ""))
 
         if has_sub:
-            title_f = _font(int(row_h * 0.22))
-            sub_f = _font(int(row_h * 0.16), bold=False)
+            title_f = _font(row_h * 0.22)
+            sub_f = _font(row_h * 0.16, bold=False)
             title_txt = _truncate(draw, name, title_f, info_max_w)
             sub_txt = _truncate(draw, str(row["sub"]), sub_f, info_max_w)
             title_y = box[1] + row_h * 0.28
             draw.text((info_x, title_y), title_txt, font=title_f, fill=(255, 255, 255, 255), anchor="lm")
             draw.text((info_x, box[1] + row_h * 0.66), sub_txt, font=sub_f, fill=(255, 255, 255, 170), anchor="lm")
         else:
-            title_f = _font(int(row_h * 0.24))
+            title_f = _font(row_h * 0.24)
             title_txt = _truncate(draw, name, title_f, info_max_w)
             draw.text((info_x, (box[1] + box[3]) / 2), title_txt, font=title_f,
                        fill=(255, 255, 255, 255), anchor="lm")
 
         streams_val = int(row.get("streams") or 0)
-        stat_font = _font(int(row_h * 0.24))
-        label_font = _font(int(row_h * 0.13), bold=False)
-        stats_x = box[2] - 24
-        streams_txt = f"{streams_val:,}"
-        draw.text((stats_x, box[1] + row_h * 0.38), streams_txt, font=stat_font,
-                   fill=accent + (255,), anchor="rm")
+        stat_font = _font(row_h * 0.24)
+        label_font = _font(row_h * 0.13, bold=False)
+        stats_x = box[2] - 24 * scale
+        draw.text((stats_x, box[1] + row_h * 0.38), f"{streams_val:,}", font=stat_font,
+                   fill=tuple(accent) + (255,), anchor="rm")
         draw.text((stats_x, box[1] + row_h * 0.68), "STREAMS", font=label_font,
                    fill=(255, 255, 255, 140), anchor="rm")
 
-    # ── Footer (totals for the FULL selected period, not just the Top-N shown above) ──
-    foot_box = [MARGIN, CARD_H - footer_h + 20, CARD_W - MARGIN, CARD_H - 60]
-    bg = _drop_shadow(bg, foot_box, radius=26, blur=16, offset=(0, 6), alpha=70)
-    bg = _glass_card(bg, foot_box, radius=26, blur=16, tint=(255, 255, 255, 18))
-    draw = ImageDraw.Draw(bg)
-
-    stat_big = _font(40)
-    stat_small = _font(20, bold=False)
-    third_w = (foot_box[2] - foot_box[0]) / 2
-    cx1 = foot_box[0] + third_w / 2
-    cx2 = foot_box[0] + third_w + third_w / 2
-
-    draw.text((cx1, foot_box[1] + 24), f"{total_streams:,}", font=stat_big, fill=(255, 255, 255, 255), anchor="mm")
-    draw.text((cx1, foot_box[1] + 62), "TOTAL STREAMS", font=stat_small, fill=(255, 255, 255, 150), anchor="mm")
-    draw.text((cx2, foot_box[1] + 24), f"{total_hours:,.1f}h", font=stat_big, fill=accent + (255,), anchor="mm")
-    draw.text((cx2, foot_box[1] + 62), "TIME LISTENED", font=stat_small, fill=(255, 255, 255, 150), anchor="mm")
-
-    wm_font = _font(20, bold=False)
-    wm_text = f"Made with Suggestify \u2022 {datetime.date.today().strftime('%b %d, %Y')}"
-    w = _text_w(draw, wm_text, wm_font)
-    draw.text(((CARD_W - w) / 2, CARD_H - 40), wm_text, font=wm_font, fill=(255, 255, 255, 120))
-
-    return bg.convert("RGB")
+    bg = _card_footer(bg, card_w, card_h, scale, accent, total_streams, total_hours)
+    return _finalize(bg)
 
 
-def build_overview_card(overview, username, period_label, theme_name, date_range_label):
-    """A summary card: total streams/hours/artists/tracks for the WHOLE period
-    plus your #1 artist and #1 track — no ranked list."""
-    theme = THEMES[theme_name]
+# ══════════════════════════════════════════════════════════════════
+# CARD BUILDER 2 — Overview (2×2 stat grid + top artist/track highlight)
+# ══════════════════════════════════════════════════════════════════
+def build_overview_card(overview, username, period_label, theme, date_range_label,
+                         avatar_url=None, card_w=CARD_W, card_h=CARD_H):
     accent = theme["accent"]
+    scale = card_h / 1920.0
+    seed = abs(hash((username, "overview", period_label))) % (2 ** 32)
 
-    bg = _make_gradient((CARD_W, CARD_H), theme["stops"])
-    bg = _add_glow(bg, (CARD_W * 0.12, CARD_H * 0.06), 460, theme["accent2"], 65)
-    bg = _add_glow(bg, (CARD_W * 0.92, CARD_H * 0.9), 520, theme["accent"], 55)
+    bg = _card_background(card_w, card_h, theme, seed)
+    subtitle_text = f"@{username}  ·  {date_range_label}"
+    bg, content_top = _card_header(bg, card_w, card_h, scale, accent, username, avatar_url,
+                                    period_label, ["MY LISTENING", "OVERVIEW"], subtitle_text,
+                                    title_font_size=88)
 
-    draw = ImageDraw.Draw(bg)
-
-    # ── Logo ──
-    logo_font = _font(34)
-    draw.text((MARGIN, 74), "\u266A  SUGGESTIFY", font=logo_font, fill=(255, 255, 255, 235))
-
-    # ── Period pill ──
-    pill_font = _font(26)
-    pill_text = period_label
-    pw = _text_w(draw, pill_text, pill_font) + 56
-    pill_box = [CARD_W - MARGIN - pw, 62, CARD_W - MARGIN, 62 + 54]
-    draw.rounded_rectangle(pill_box, radius=27, fill=accent + (255,))
-    draw.text(((pill_box[0] + pill_box[2]) / 2, (pill_box[1] + pill_box[3]) / 2),
-               pill_text, font=pill_font, fill=(0, 0, 0, 255), anchor="mm")
-
-    # ── Title ──
-    title_font = _font(88)
-    y = 190
-    for line in ["MY LISTENING", "OVERVIEW"]:
-        w = _text_w(draw, line, title_font)
-        draw.text(((CARD_W - w) / 2, y), line, font=title_font, fill=(255, 255, 255, 255))
-        y += 100
-
-    # ── Subtitle ──
-    sub_font = _font(30)
-    sub_text = f"@{username}  ·  {date_range_label}"
-    w = _text_w(draw, sub_text, sub_font)
-    draw.text(((CARD_W - w) / 2, y + 14), sub_text, font=sub_font, fill=(255, 255, 255, 170))
-
-    content_top = y + 100
-
-    # ── 2x2 big stat grid ──
-    grid_gap = 24
-    grid_h = 260
-    col_w = (CARD_W - 2 * MARGIN - grid_gap) / 2
+    # ── 2×2 big stat grid ──
+    grid_gap = int(24 * scale)
+    grid_h = int(230 * scale)
+    col_w = (card_w - 2 * MARGIN - grid_gap) / 2
 
     stats = [
         (f"{overview['total_streams']:,}", "TOTAL STREAMS"),
@@ -571,79 +878,138 @@ def build_overview_card(overview, username, period_label, theme_name, date_range
     ]
 
     for i, (value, label) in enumerate(stats):
-        col = i % 2
-        row_i = i // 2
+        col, row_i = i % 2, i // 2
         x0 = MARGIN + col * (col_w + grid_gap)
         y0 = content_top + row_i * (grid_h + grid_gap)
         box = [x0, y0, x0 + col_w, y0 + grid_h]
 
-        bg = _drop_shadow(bg, box, radius=32, blur=18, offset=(0, 8), alpha=85)
-        bg = _glass_card(bg, box, radius=32, blur=18)
+        bg = _drop_shadow(bg, box, radius=int(32 * scale), blur=18, offset=(0, 8), alpha=85)
+        bg = _glass_card(bg, box, radius=int(32 * scale), blur=18)
         draw = ImageDraw.Draw(bg)
 
-        val_font = _font(72)
-        lab_font = _font(24, bold=False)
+        val_font = _font(64 * scale)
+        lab_font = _font(22 * scale, bold=False)
         cx = (box[0] + box[2]) / 2
-        draw.text((cx, box[1] + grid_h * 0.42), value, font=val_font,
-                   fill=accent + (255,), anchor="mm")
-        draw.text((cx, box[1] + grid_h * 0.72), label, font=lab_font,
-                   fill=(255, 255, 255, 160), anchor="mm")
+        draw.text((cx, box[1] + grid_h * 0.42), value, font=val_font, fill=tuple(accent) + (255,), anchor="mm")
+        draw.text((cx, box[1] + grid_h * 0.72), label, font=lab_font, fill=(255, 255, 255, 160), anchor="mm")
 
-    highlight_top = content_top + 2 * grid_h + grid_gap + 36
-    highlight_h = 200
+    highlight_top = content_top + 2 * grid_h + grid_gap + int(30 * scale)
+    highlight_h = int(180 * scale)
 
     def _highlight_row(y0, art_url, is_circle, name, sub, streams, tag):
         nonlocal bg
-        box = [MARGIN, y0, CARD_W - MARGIN, y0 + highlight_h]
-        bg = _drop_shadow(bg, box, radius=28, blur=18, offset=(0, 8), alpha=85)
-        bg = _glass_card(bg, box, radius=28, blur=18)
+        box = [MARGIN, y0, card_w - MARGIN, y0 + highlight_h]
+        bg = _drop_shadow(bg, box, radius=int(28 * scale), blur=18, offset=(0, 8), alpha=85)
+        bg = _glass_card(bg, box, radius=int(28 * scale), blur=18)
         d = ImageDraw.Draw(bg)
 
-        tag_font = _font(20)
-        d.text((box[0] + 24, box[1] + 16), tag, font=tag_font, fill=accent + (255,))
+        tag_font = _font(18 * scale)
+        d.text((box[0] + 24 * scale, box[1] + 14 * scale), tag, font=tag_font, fill=tuple(accent) + (255,))
 
-        art_size = int(highlight_h - 70)
-        art_x = box[0] + 24
-        art_y = box[1] + 54
+        art_size = int(highlight_h - 62 * scale)
+        art_x = box[0] + 24 * scale
+        art_y = box[1] + 48 * scale
         art = _get_art(art_url, (art_size, art_size), circle=is_circle, accent=accent)
         bg.paste(art, (int(art_x), int(art_y)), art)
 
-        info_x = art_x + art_size + 28
-        name_font = _font(38)
-        sub_font_ = _font(24, bold=False)
-        info_max_w = CARD_W - MARGIN - 130 - info_x
+        info_x = art_x + art_size + 26 * scale
+        name_font = _font(34 * scale)
+        sub_font_ = _font(22 * scale, bold=False)
+        info_max_w = card_w - MARGIN - 120 * scale - info_x
         name_txt = _truncate(d, name, name_font, info_max_w)
-        d.text((info_x, box[1] + 78), name_txt, font=name_font, fill=(255, 255, 255, 255), anchor="lm")
+        d.text((info_x, box[1] + 70 * scale), name_txt, font=name_font, fill=(255, 255, 255, 255), anchor="lm")
         if sub:
             sub_txt = _truncate(d, sub, sub_font_, info_max_w)
-            d.text((info_x, box[1] + 122), sub_txt, font=sub_font_, fill=(255, 255, 255, 170), anchor="lm")
+            d.text((info_x, box[1] + 110 * scale), sub_txt, font=sub_font_, fill=(255, 255, 255, 170), anchor="lm")
 
-        stat_font = _font(34)
-        lab_font = _font(16, bold=False)
-        d.text((box[2] - 24, box[1] + 78), f"{streams:,}", font=stat_font,
-               fill=accent + (255,), anchor="rm")
-        d.text((box[2] - 24, box[1] + 112), "STREAMS", font=lab_font,
+        stat_font = _font(30 * scale)
+        lab_font = _font(15 * scale, bold=False)
+        d.text((box[2] - 24 * scale, box[1] + 70 * scale), f"{streams:,}", font=stat_font,
+               fill=tuple(accent) + (255,), anchor="rm")
+        d.text((box[2] - 24 * scale, box[1] + 100 * scale), "STREAMS", font=lab_font,
                fill=(255, 255, 255, 140), anchor="rm")
 
     if overview.get("top_artist"):
         ta = overview["top_artist"]
         _highlight_row(highlight_top, ta.get("image_url"), True, ta.get("name", ""), "",
                        int(ta.get("streams") or 0), "TOP ARTIST")
-        highlight_top += highlight_h + 20
+        highlight_top += highlight_h + int(18 * scale)
 
     if overview.get("top_track"):
         tt = overview["top_track"]
         _highlight_row(highlight_top, tt.get("image_url"), False, tt.get("name", ""), tt.get("sub", ""),
                        int(tt.get("streams") or 0), "TOP TRACK")
 
-    # ── Footer watermark ──
-    draw = ImageDraw.Draw(bg)
-    wm_font = _font(20, bold=False)
-    wm_text = f"Made with Suggestify \u2022 {datetime.date.today().strftime('%b %d, %Y')}"
-    w = _text_w(draw, wm_text, wm_font)
-    draw.text(((CARD_W - w) / 2, CARD_H - 50), wm_text, font=wm_font, fill=(255, 255, 255, 120))
+    bg = _card_footer(bg, card_w, card_h, scale, accent, overview["total_streams"], overview["total_hours"])
+    return _finalize(bg)
 
-    return bg.convert("RGB")
+
+# ══════════════════════════════════════════════════════════════════
+# CARD BUILDER 3 — Listening Personality
+# ══════════════════════════════════════════════════════════════════
+def build_personality_card(personality, overview, username, period_label, theme, date_range_label,
+                            avatar_url=None, card_w=CARD_W, card_h=CARD_H):
+    accent = theme["accent"]
+    scale = card_h / 1920.0
+    seed = abs(hash((username, "personality", period_label))) % (2 ** 32)
+
+    bg = _card_background(card_w, card_h, theme, seed)
+    subtitle_text = f"@{username}  ·  {date_range_label}"
+    bg, content_top = _card_header(bg, card_w, card_h, scale, accent, username, avatar_url,
+                                    period_label, ["YOUR LISTENING", "PERSONALITY"], subtitle_text,
+                                    title_font_size=76)
+    draw = ImageDraw.Draw(bg)
+
+    # ── Big glass hero card: emoji + archetype label + description ──
+    hero_h = int(560 * scale)
+    hero_box = [MARGIN, content_top, card_w - MARGIN, content_top + hero_h]
+    bg = _drop_shadow(bg, hero_box, radius=int(40 * scale), blur=20, offset=(0, 10), alpha=90)
+    bg = _glass_card(bg, hero_box, radius=int(40 * scale), blur=20, tint=(255, 255, 255, 22))
+    draw = ImageDraw.Draw(bg)
+
+    emoji_font = _font(150 * scale)
+    cx = (hero_box[0] + hero_box[2]) / 2
+    emoji_y = hero_box[1] + hero_h * 0.28
+    draw.text((cx, emoji_y), personality["emoji"], font=emoji_font, anchor="mm")
+
+    label_font = _font(64 * scale)
+    label_y = hero_box[1] + hero_h * 0.56
+    w = _text_w(draw, personality["label"], label_font)
+    draw.text(((card_w - w) / 2, label_y - 40 * scale), personality["label"], font=label_font,
+               fill=tuple(accent) + (255,))
+
+    desc_font = _font(28 * scale, bold=False)
+    desc_lines = _wrap_text(draw, personality["desc"], desc_font, hero_box[2] - hero_box[0] - 120 * scale, max_lines=2)
+    dy = hero_box[1] + hero_h * 0.72
+    for line in desc_lines:
+        w = _text_w(draw, line, desc_font)
+        draw.text(((card_w - w) / 2, dy), line, font=desc_font, fill=(255, 255, 255, 190))
+        dy += 40 * scale
+
+    # ── Supporting stat row ──
+    stats_top = hero_box[3] + int(30 * scale)
+    stats_h = int(190 * scale)
+    stats_gap = int(20 * scale)
+    stats = [
+        (f"{overview['total_streams']:,}", "STREAMS"),
+        (f"{overview['total_hours']:,.1f}h", "HOURS"),
+        (f"{overview['unique_artists']:,}", "ARTISTS"),
+    ]
+    col_w = (card_w - 2 * MARGIN - 2 * stats_gap) / 3
+    for i, (value, label) in enumerate(stats):
+        x0 = MARGIN + i * (col_w + stats_gap)
+        box = [x0, stats_top, x0 + col_w, stats_top + stats_h]
+        bg = _drop_shadow(bg, box, radius=int(26 * scale), blur=16, offset=(0, 6), alpha=80)
+        bg = _glass_card(bg, box, radius=int(26 * scale), blur=16)
+        d = ImageDraw.Draw(bg)
+        val_font = _font(42 * scale)
+        lab_font = _font(17 * scale, bold=False)
+        cxi = (box[0] + box[2]) / 2
+        d.text((cxi, box[1] + stats_h * 0.42), value, font=val_font, fill=(255, 255, 255, 255), anchor="mm")
+        d.text((cxi, box[1] + stats_h * 0.72), label, font=lab_font, fill=(255, 255, 255, 150), anchor="mm")
+
+    bg = _card_footer(bg, card_w, card_h, scale, accent, overview["total_streams"], overview["total_hours"])
+    return _finalize(bg)
 
 
 def image_to_bytes(img):
@@ -652,17 +1018,49 @@ def image_to_bytes(img):
     return buf.getvalue()
 
 
+def _zip_bytes(named_pngs: dict):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in named_pngs.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
 # ══════════════════════════════════════════════════════════════════
 # LIVE HTML/CSS PREVIEW (cosmetic, shown inside the modal only —
-# the downloadable PNG below is the real, CORS-safe export)
+# the downloadable PNG below is the real, CORS-safe export). This is
+# where the particle animation and avatar are actually alive/moving —
+# the PNG bakes in a still frame of the same effect since a raster
+# image can't animate.
 # ══════════════════════════════════════════════════════════════════
-def _html_preview(df, kind, username, period_label, theme_name, date_range_label, n):
-    theme = THEMES[theme_name]
+def _particles_html(seed, accent_css, count=22):
+    rnd = random.Random(seed)
+    spans = []
+    for _ in range(count):
+        left = rnd.uniform(2, 98)
+        size = rnd.uniform(3, 8)
+        delay = rnd.uniform(0, 6)
+        duration = rnd.uniform(6, 14)
+        color = accent_css if rnd.random() < 0.4 else "rgba(255,255,255,0.8)"
+        spans.append(
+            f'<span class="sh-particle" style="left:{left:.1f}%; width:{size:.1f}px; height:{size:.1f}px; '
+            f'background:{color}; animation-delay:-{delay:.1f}s; animation-duration:{duration:.1f}s;"></span>'
+        )
+    return "".join(spans)
+
+
+def _html_preview(df, kind, username, period_label, theme, date_range_label, n, avatar_url=None):
     accent = "rgb({},{},{})".format(*theme["accent"])
     s0, s1, s2 = theme["stops"]
     grad = f"linear-gradient(160deg, rgb{tuple(s1)} 0%, rgb{tuple(s0)} 45%, rgb{tuple(s2)} 100%)"
     is_circle = kind == "artists"
     radius = "50%" if is_circle else "12px"
+    seed = abs(hash((username, kind, period_label))) % (2 ** 32)
+
+    avatar_html = (
+        f'<img src="{avatar_url}" class="sh-avatar-img">' if avatar_url
+        else f'<div class="sh-avatar-fallback" style="background:{accent}">{_initials(username)}</div>'
+    )
 
     rows_html = ""
     for i, row in df.head(n).iterrows():
@@ -687,19 +1085,24 @@ def _html_preview(df, kind, username, period_label, theme_name, date_range_label
         </div>"""
 
     title = _title_lines(kind, n)
+    particles = _particles_html(seed, accent)
     return f"""
     <!doctype html><html><head><meta charset="utf-8"></head>
     <body>
     <div class="sh-card" style="background:{grad}">
+        <div class="sh-particles">{particles}</div>
         <div class="sh-glow" style="background:radial-gradient(circle, {accent}55, transparent 70%)"></div>
         <div class="sh-header">
-            <div class="sh-logo">\u266A SUGGESTIFY</div>
+            <div class="sh-id">
+                {avatar_html}
+                <div class="sh-logo">\u266A SUGGESTIFY</div>
+            </div>
             <div class="sh-pill" style="background:{accent}">{period_label}</div>
         </div>
         <div class="sh-title">{title[0]}<br>{title[1]}</div>
         <div class="sh-subtitle">@{username} &middot; {date_range_label}</div>
         <div class="sh-list">{rows_html}</div>
-        <div class="sh-footer">Made with Suggestify</div>
+        <div class="sh-footer">Generated by Suggestify</div>
     </div>
     <style>
         html, body {{ margin: 0; padding: 0; background: transparent; }}
@@ -711,7 +1114,27 @@ def _html_preview(df, kind, username, period_label, theme_name, date_range_label
             font-family: 'Inter', -apple-system, sans-serif; color: #fff;
         }}
         .sh-glow {{ position:absolute; top:-60px; right:-60px; width:220px; height:220px; filter: blur(10px); }}
+        .sh-particles {{ position:absolute; inset:0; overflow:hidden; pointer-events:none; }}
+        .sh-particle {{
+            position:absolute; bottom:-10px; border-radius:50%; opacity:0.9;
+            animation-name: sh-float; animation-timing-function: linear; animation-iteration-count: infinite;
+        }}
+        @keyframes sh-float {{
+            0%   {{ transform: translateY(0) translateX(0); opacity: 0; }}
+            10%  {{ opacity: 0.9; }}
+            90%  {{ opacity: 0.5; }}
+            100% {{ transform: translateY(-560px) translateX(14px); opacity: 0; }}
+        }}
         .sh-header {{ display:flex; justify-content:space-between; align-items:center; position:relative; z-index:1; }}
+        .sh-id {{ display:flex; align-items:center; gap:8px; }}
+        .sh-avatar-img, .sh-avatar-fallback {{
+            width:26px; height:26px; border-radius:50%; object-fit:cover;
+            border:1px solid rgba(255,255,255,0.5);
+        }}
+        .sh-avatar-fallback {{
+            display:flex; align-items:center; justify-content:center;
+            font-size:9px; font-weight:800; color:#000;
+        }}
         .sh-logo {{ font-size:11px; font-weight:800; letter-spacing:0.06em; opacity:0.9; }}
         .sh-pill {{ font-size:9px; font-weight:800; color:#000; padding:4px 10px; border-radius:20px; letter-spacing:0.04em; }}
         .sh-title {{ font-size:26px; font-weight:900; line-height:1.05; margin-top:16px; text-align:center; letter-spacing:-0.02em; position:relative; z-index:1; }}
@@ -731,7 +1154,7 @@ def _html_preview(df, kind, username, period_label, theme_name, date_range_label
         .sh-stats {{ text-align:right; flex-shrink:0; }}
         .sh-streams {{ font-size:12px; font-weight:800; }}
         .sh-label {{ font-size:7px; opacity:0.55; text-transform:uppercase; letter-spacing:0.05em; }}
-        .sh-footer {{ position:absolute; bottom:10px; left:0; right:0; text-align:center; font-size:8px; opacity:0.45; }}
+        .sh-footer {{ position:absolute; bottom:10px; left:0; right:0; text-align:center; font-size:8px; opacity:0.45; z-index:1; }}
     </style>
     </body></html>
     """
@@ -743,8 +1166,20 @@ def _html_preview(df, kind, username, period_label, theme_name, date_range_label
 _dialog_decorator = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
 
 
-def _run_share_dialog(run_query, user_id, username, min_date, max_date):
+def _generate_both_formats(builder_fn, **kwargs):
+    """Runs a card builder once per entry in FORMATS and returns
+    {"Story (1080×1920)": png_bytes, "Square (1080×1080)": png_bytes}."""
+    out = {}
+    for fmt_label, (w, h) in FORMATS.items():
+        img = builder_fn(card_w=w, card_h=h, **kwargs)
+        out[fmt_label] = image_to_bytes(img)
+    return out
+
+
+def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_url=None):
     st.caption("Create a Wrapped-style card of your listening stats and share it anywhere.")
+
+    theme_options = list(THEMES.keys()) + [DYNAMIC_THEME_LABEL]
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -752,7 +1187,7 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date):
     with c2:
         period_choice = st.selectbox("Time period", list(PERIODS.keys()), key="share_period_choice")
     with c3:
-        theme_choice = st.selectbox("Theme", list(THEMES.keys()), key="share_theme_choice")
+        theme_choice = st.selectbox("Theme", theme_options, key="share_theme_choice")
 
     kind, n = STAT_TYPES[stat_choice]
     period_key = PERIODS[period_choice]
@@ -780,9 +1215,10 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date):
     # regardless of whether we're showing a Top 5 / Top 10 / Overview card.
     total_streams, total_hours = _fetch_totals(run_query, user_id, start_date, end_date)
 
+    generate = False
+
     if kind == "overview":
         overview = _fetch_overview_data(run_query, user_id, start_date, end_date)
-
         if not overview["total_streams"]:
             st.warning("No listening data for this period yet — try a different range.")
             return
@@ -791,60 +1227,115 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date):
             f"**{overview['total_streams']:,}** streams · **{overview['total_hours']:,.1f}h** listened · "
             f"{overview['unique_artists']:,} artists · {overview['unique_tracks']:,} tracks"
         )
-
-        generate = st.button("✨ Generate high-res PNG", use_container_width=True,
+        generate = st.button("✨ Generate high-res PNGs", use_container_width=True,
                               type="primary", key="share_generate_btn")
-
         if generate:
-            with st.spinner("Rendering your 1080×1920 overview card…"):
-                card = build_overview_card(overview, username, period_label, theme_choice, date_range_label)
-                st.session_state["_share_png_bytes"] = image_to_bytes(card)
+            with st.spinner("Rendering your overview cards (Story + Square)…"):
+                theme = _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, overview)
+                pngs = _generate_both_formats(
+                    build_overview_card, overview=overview, username=username,
+                    period_label=period_label, theme=theme, date_range_label=date_range_label,
+                    avatar_url=avatar_url,
+                )
+                st.session_state["_share_png_bytes"] = pngs
+                st.session_state["_share_file_stub"] = f"suggestify_overview_{period_key}"
+
+    elif kind == "personality":
+        overview = _fetch_overview_data(run_query, user_id, start_date, end_date)
+        signals = _fetch_personality_signals(run_query, user_id, start_date, end_date)
+        if not overview["total_streams"]:
+            st.warning("No listening data for this period yet — try a different range.")
+            return
+
+        personality = _compute_personality(signals, overview)
+        st.info(f"{personality['emoji']} **{personality['label']}** — {personality['desc']}")
+
+        generate = st.button("✨ Generate high-res PNGs", use_container_width=True,
+                              type="primary", key="share_generate_btn")
+        if generate:
+            with st.spinner("Rendering your personality cards (Story + Square)…"):
+                theme = _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, overview)
+                pngs = _generate_both_formats(
+                    build_personality_card, personality=personality, overview=overview,
+                    username=username, period_label=period_label, theme=theme,
+                    date_range_label=date_range_label, avatar_url=avatar_url,
+                )
+                st.session_state["_share_png_bytes"] = pngs
+                st.session_state["_share_file_stub"] = f"suggestify_personality_{period_key}"
 
     else:
         df = _fetch_data(run_query, kind, n, user_id, start_date, end_date)
-
         if df is None or df.empty:
             st.warning("No listening data for this period yet — try a different range.")
             return
 
+        theme = _resolve_theme(theme_choice, run_query, user_id, start_date, end_date)
+
         components.html(
-            _html_preview(df, kind, username, period_label, theme_choice, date_range_label, n),
+            _html_preview(df, kind, username, period_label, theme, date_range_label, n, avatar_url=avatar_url),
             height=565,
             scrolling=False,
         )
 
         st.write("")
-
-        generate = st.button("✨ Generate high-res PNG", use_container_width=True,
+        generate = st.button("✨ Generate high-res PNGs", use_container_width=True,
                               type="primary", key="share_generate_btn")
 
         if generate:
-            with st.spinner("Rendering your 1080×1920 card…"):
-                card = build_share_card(
-                    df, kind, username, period_label, theme_choice, date_range_label, n,
-                    total_streams=total_streams, total_hours=total_hours,
+            with st.spinner("Rendering your cards (Story + Square)…"):
+                pngs = _generate_both_formats(
+                    build_share_card, df=df, kind=kind, username=username, period_label=period_label,
+                    theme=theme, date_range_label=date_range_label, n=n,
+                    total_streams=total_streams, total_hours=total_hours, avatar_url=avatar_url,
                 )
-                st.session_state["_share_png_bytes"] = image_to_bytes(card)
+                st.session_state["_share_png_bytes"] = pngs
+                st.session_state["_share_file_stub"] = f"suggestify_{kind}_{period_key}"
 
-    if st.session_state.get("_share_png_bytes"):
+    pngs = st.session_state.get("_share_png_bytes")
+    if pngs:
+        stub = st.session_state.get("_share_file_stub", "suggestify")
+        today = datetime.date.today().isoformat()
+
+        dcol1, dcol2 = st.columns(2)
+        with dcol1:
+            st.download_button(
+                "⬇️ Download Story (9:16)",
+                data=pngs["Story (1080×1920)"],
+                file_name=f"{stub}_story_{today}.png",
+                mime="image/png", use_container_width=True, type="primary",
+                key="share_download_story_btn",
+            )
+        with dcol2:
+            st.download_button(
+                "⬇️ Download Square (1:1)",
+                data=pngs["Square (1080×1080)"],
+                file_name=f"{stub}_square_{today}.png",
+                mime="image/png", use_container_width=True, type="primary",
+                key="share_download_square_btn",
+            )
+
+        zip_data = _zip_bytes({
+            f"{stub}_story_{today}.png": pngs["Story (1080×1920)"],
+            f"{stub}_square_{today}.png": pngs["Square (1080×1080)"],
+        })
         st.download_button(
-            "⬇️ Download PNG",
-            data=st.session_state["_share_png_bytes"],
-            file_name=f"suggestify_{kind}_{period_key}_{datetime.date.today().isoformat()}.png",
-            mime="image/png",
-            use_container_width=True,
-            type="primary",
-            key="share_download_btn",
+            "📦 Download Both (.zip)",
+            data=zip_data,
+            file_name=f"{stub}_{today}.zip",
+            mime="application/zip", use_container_width=True,
+            key="share_download_zip_btn",
         )
-        st.success("Ready! Sized for Instagram Stories (1080×1920).")
+        st.success("Ready! One story-sized and one square-sized card, both 1080px wide.")
 
     if st.button("Close", use_container_width=True, key="share_close_btn"):
         st.session_state.pop("_share_png_bytes", None)
+        st.session_state.pop("_share_file_stub", None)
         st.rerun()
 
 
 def render_share_stats_button(run_query, user_id, username, min_date, max_date,
-                               label="📤 Share Your Stats", accent="#1DB954", accent_dim="#169C46"):
+                               label="📤 Share Your Stats", accent="#1DB954", accent_dim="#169C46",
+                               avatar_url=None):
     """
     Renders the trigger as a right-aligned gradient pill button.
 
@@ -855,6 +1346,10 @@ def render_share_stats_button(run_query, user_id, username, min_date, max_date,
         render_share_stats_button(run_query=run_query, user_id=selected_user_id,
                                    username=selected_username, min_date=min_date, max_date=max_date)
         # ...tabs, filter bar, etc.
+
+    `avatar_url` is optional — pass a profile photo URL if you have one and
+    it'll be used on the generated cards; otherwise a colored initials
+    badge is drawn automatically.
 
     NOTE: this intentionally does NOT use position:fixed/absolute. Your
     app's global CSS animates `.main .block-container`, `[data-testid=
@@ -909,9 +1404,10 @@ def render_share_stats_button(run_query, user_id, username, min_date, max_date,
     with st.container(key="share_stats_btn_wrap"):
         if st.button(label, key="share_stats_trigger"):
             st.session_state.pop("_share_png_bytes", None)
-            _open_dialog(run_query, user_id, username, min_date, max_date)
+            st.session_state.pop("_share_file_stub", None)
+            _open_dialog(run_query, user_id, username, min_date, max_date, avatar_url)
 
 
 @_dialog_decorator("🎉 Share Your Stats") if _dialog_decorator else (lambda f: f)
-def _open_dialog(run_query, user_id, username, min_date, max_date):
-    _run_share_dialog(run_query, user_id, username, min_date, max_date)
+def _open_dialog(run_query, user_id, username, min_date, max_date, avatar_url=None):
+    _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_url=avatar_url)

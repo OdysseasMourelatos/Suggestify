@@ -145,12 +145,30 @@ div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input
 }}
 .tod-card:hover {{ transform: translateY(-4px); border-color: rgba(29,185,84,0.3); }}
 .tod-icon {{ font-size: 1.6rem; margin-bottom: 4px; }}
+.tod-icon-img {{ width: 44px; height: 44px; border-radius: 10px; object-fit: cover; margin: 0 auto 6px; display: block; }}
+.season-icon-img {{ width: 56px; height: 56px; border-radius: 12px; object-fit: cover; margin: 0 auto; display: block; }}
 .tod-label {{ font-size: 0.78rem; color: {TEXT_MID}; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }}
 .tod-value {{ font-size: 1.4rem; font-weight: 700; color: {TEXT}; }}
 .tod-sub {{ font-size: 0.75rem; color: {TEXT_DIM}; margin-top: 2px; }}
+/* --- METADATA CHIPS --- */
+.meta-chip-container {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; margin-bottom: 25px; }}
+.meta-chip {{ 
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); 
+    border-radius: 6px; padding: 6px 12px; font-size: 0.8rem; color: #B3B3B3; 
+    display: flex; align-items: center; gap: 6px; transition: all 0.2s ease;
+}}
+.meta-chip strong {{ color: #FFFFFF; font-weight: 600; }}
+a.meta-chip-link {{ text-decoration: none !important; }}
+a.meta-chip-link:hover .meta-chip {{ 
+    background: rgba(29,185,84,0.1); border-color: #1DB954; color: #1DB954; transform: translateY(-2px); 
+}}
+a.meta-chip-link:hover .meta-chip strong {{ color: #1DB954; }}
+.explicit-badge {{ 
+    background: rgba(255, 255, 255, 0.1); color: #fff; padding: 2px 6px; 
+    border-radius: 4px; font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; margin-left: 8px;
+}}
 </style>
 """, unsafe_allow_html=True)
-
 # ══════════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════════
@@ -388,18 +406,31 @@ def chart_donut(labels, values, colors) -> go.Figure:
     fig.update_layout(showlegend=False)
     return themed(fig, margin=dict(t=10, b=10, l=10, r=10))
 
+MONTH_NAMES = {
+    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
+}
+
 SEASON_META = {
-    "Winter": {"icon": "❄️", "color": "#4FC3F7", "months": (12, 1, 2)},
-    "Spring": {"icon": "🌸", "color": "#F48FB1", "months": (3, 4, 5)},
-    "Summer": {"icon": "☀️", "color": "#FFD54F", "months": (6, 7, 8)},
-    "Autumn": {"icon": "🍂", "color": "#FF8A65", "months": (9, 10, 11)},
+    "Winter": {"icon": "❄️", "color": "#4FC3F7", "months": (12, 1, 2),
+               "image": "https://images.unsplash.com/photo-1418985991508-e47386d96a71?w=400&q=80&auto=format&fit=crop"},
+    "Spring": {"icon": "🌸", "color": "#F48FB1", "months": (3, 4, 5),
+               "image": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&q=80&auto=format&fit=crop"},
+    "Summer": {"icon": "☀️", "color": "#FFD54F", "months": (6, 7, 8),
+               "image": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&q=80&auto=format&fit=crop"},
+    "Autumn": {"icon": "🍂", "color": "#FF8A65", "months": (9, 10, 11),
+               "image": "https://images.unsplash.com/photo-1477414348463-c0eb7f1359b6?w=400&q=80&auto=format&fit=crop"},
 }
 
 TOD_META = {
-    "Night":     {"icon": "🌙", "range": "9PM–5AM",  "color": "#5C6BC0"},
-    "Morning":   {"icon": "🌅", "range": "5AM–12PM", "color": "#FFD54F"},
-    "Afternoon": {"icon": "🌤️", "range": "12PM–5PM",  "color": "#4FC3F7"},
-    "Evening":   {"icon": "🌆", "range": "5PM–9PM",   "color": "#FF7043"},
+    "Night":     {"icon": "🌙", "range": "9PM–5AM",  "color": "#5C6BC0", "hours": [21, 22, 23, 0, 1, 2, 3, 4],
+                  "image": "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=400&q=80&auto=format&fit=crop"},
+    "Morning":   {"icon": "🌅", "range": "5AM–12PM", "color": "#FFD54F", "hours": list(range(5, 12)),
+                  "image": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=80&auto=format&fit=crop"},
+    "Afternoon": {"icon": "🌤️", "range": "12PM–5PM",  "color": "#4FC3F7", "hours": list(range(12, 17)),
+                  "image": "https://images.unsplash.com/photo-1500964757637-c85e8a162699?w=400&q=80&auto=format&fit=crop"},
+    "Evening":   {"icon": "🌆", "range": "5PM–9PM",   "color": "#FF7043", "hours": list(range(17, 21)),
+                  "image": "https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=400&q=80&auto=format&fit=crop"},
 }
 
 def render_season_cards(df: pd.DataFrame):
@@ -414,10 +445,15 @@ def render_season_cards(df: pd.DataFrame):
         is_top = streams > 0 and streams == max_streams
         badge = '<div class="season-badge">👑 Favorite</div>' if is_top else ""
         glow = f'box-shadow: 0 12px 30px {meta["color"]}33; border-color: {meta["color"]}66;' if is_top else ""
+        img = meta.get("image")
+        icon_html = (
+            f'<img class="season-icon-img" src="{img}" alt="{season}">'
+            if img else f'<div class="kpi-icon" style="font-size: 1.9rem;">{meta["icon"]}</div>'
+        )
         card_html = (
             f'<div class="kpi-card season-card" style="{glow}">'
             f'{badge}'
-            f'<div class="kpi-icon" style="font-size: 1.9rem;">{meta["icon"]}</div>'
+            f'{icon_html}'
             f'<div class="kpi-title">{season}</div>'
             f'<div class="kpi-value" style="color:{meta["color"]};">{streams:,}</div>'
             f'<div class="stat-label" style="margin-top:2px;">{hours:.1f}h listened</div>'
@@ -433,9 +469,14 @@ def render_time_of_day_cards(df: pd.DataFrame):
         row = data.get(label)
         streams = int(row["stream_count"]) if row is not None else 0
         hours = float(row["hours_played"]) if row is not None else 0.0
+        img = meta.get("image")
+        icon_html = (
+            f'<img class="tod-icon-img" src="{img}" alt="{label}">'
+            if img else f'<div class="tod-icon">{meta["icon"]}</div>'
+        )
         card_html = (
             f'<div class="tod-card" style="margin-bottom: 10px;">'
-            f'<div class="tod-icon">{meta["icon"]}</div>'
+            f'{icon_html}'
             f'<div class="tod-label">{label} · {meta["range"]}</div>'
             f'<div class="tod-value">{streams:,}</div>'
             f'<div class="tod-sub">{hours:.1f}h listened</div>'
@@ -445,7 +486,7 @@ def render_time_of_day_cards(df: pd.DataFrame):
         st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
 
 
-def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str):
+def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
     header_df = run_query(f"""
         SELECT COUNT(*) AS streams, ROUND(COALESCE(SUM(ms_played), 0) / 3600000.0, 2) AS hours,
                COUNT(DISTINCT song_id) AS unique_songs
@@ -465,7 +506,8 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             {"value": f"{streams:,}", "label": "Streams"},
             {"value": f"{hours:.1f}h", "label": "Listened"},
             {"value": f"{unique_songs:,}", "label": "Unique Songs"},
-        ]
+        ],
+        image_url=image_url
     )
 
     c1, c2, c3 = st.columns(3)
@@ -742,28 +784,46 @@ if detail_type and detail_id:
             SELECT song_id, streams, hours,
                 RANK() OVER (ORDER BY streams DESC, hours DESC) as global_rank
             FROM song_streams
+        ),
+        TrackArtists AS (
+            SELECT sa.song_id, 
+                   MIN(sa.artist_id) as primary_artist_id,
+                   STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
+            FROM song_artists sa
+            JOIN artists a ON a.id = sa.artist_id
+            GROUP BY sa.song_id
         )
-        SELECT so.title, COALESCE(a.name, 'Unknown') as artist, so.image_url,
+        SELECT so.title, COALESCE(ta.all_artists, 'Unknown') as artist, so.image_url,
             COALESCE(r.streams, 0) as streams,
             COALESCE(r.hours, 0) as hours,
             r.global_rank,
-            MIN(s.played_at) as first_play
+            MIN(s.played_at) as first_play,
+            so.duration_ms, so.release_date, so.primary_genre, so.is_explicit, so.preview_url,
+            so.album_id, al.title as album_title, ta.primary_artist_id
         FROM songs so
-        LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-        LEFT JOIN artists a ON a.id = sa.artist_id
+        LEFT JOIN TrackArtists ta ON ta.song_id = so.id
+        LEFT JOIN albums al ON al.id = so.album_id
         LEFT JOIN ranked r ON r.song_id = so.id
         LEFT JOIN streams s ON s.song_id = so.id 
              AND s.played_at::date BETWEEN :start_date AND :end_date 
              AND s.user_id = :user_id
         WHERE so.id = :id
-        GROUP BY so.id, so.title, a.name, so.image_url, r.streams, r.hours, r.global_rank
+        GROUP BY so.id, so.title, ta.all_artists, so.image_url, r.streams, r.hours, r.global_rank,
+                 so.duration_ms, so.release_date, so.primary_genre, so.is_explicit, so.preview_url,
+                 so.album_id, al.title, ta.primary_artist_id
     """, {"id": detail_id, **F})
 
         if not song_info.empty:
             row = song_info.iloc[0]
             rank_display = f"#{int(row['global_rank'])}" if pd.notnull(row.get('global_rank')) else "—"
+            
+            # Φτιάχνουμε τον τίτλο με το [E] αν είναι explicit
+            display_title = str(row["title"])
+            if row.get("is_explicit"):
+                display_title += ' <span class="explicit-badge">E</span>'
+            
             render_detail_header(
-                type_label="Track", title=str(row["title"]),
+                type_label="Track", title=display_title,
                 subtitle=f"by {row['artist']}", icon="🎵",
                 stats=[
                     {"value": rank_display, "label": "Song Rank"},
@@ -772,6 +832,45 @@ if detail_type and detail_id:
                 ],
                 image_url=row.get("image_url")
             )
+            
+            # --- RENDERING METADATA CHIPS ---
+            chips_html = '<div class="meta-chip-container">'
+            
+            # 1. Clickable Artist Chip
+            if pd.notnull(row.get("primary_artist_id")):
+                artist_href = build_filtered_href("artist", str(row["primary_artist_id"]))
+                chips_html += f'<a href="{artist_href}" class="meta-chip-link" target="_self"><div class="meta-chip">🎤 <span>Artist:</span> <strong>{escape(str(row["artist"]).split(",")[0])}</strong></div></a>'
+            
+            # 2. Clickable Album Chip
+            if pd.notnull(row.get("album_id")) and pd.notnull(row.get("album_title")):
+                album_href = build_filtered_href("album", str(row["album_id"]))
+                chips_html += f'<a href="{album_href}" class="meta-chip-link" target="_self"><div class="meta-chip">💿 <span>Album:</span> <strong>{escape(str(row["album_title"]))}</strong></div></a>'
+
+            # 3. Duration
+            if pd.notnull(row.get("duration_ms")) and row["duration_ms"] > 0:
+                mins = int(row["duration_ms"]) // 60000
+                secs = (int(row["duration_ms"]) % 60000) // 1000
+                chips_html += f'<div class="meta-chip">⏱️ <span>Length:</span> <strong>{mins}:{secs:02d}</strong></div>'
+                
+            # 4. Release Date
+            if pd.notnull(row.get("release_date")):
+                # Metatropi tou date se fomat p.x. "14 Feb 2016"
+                try:
+                    r_date = pd.to_datetime(row["release_date"]).strftime('%d %b %Y')
+                    chips_html += f'<div class="meta-chip">📅 <span>Released:</span> <strong>{r_date}</strong></div>'
+                except: pass
+                
+            # 5. Genre
+            if pd.notnull(row.get("primary_genre")):
+                chips_html += f'<div class="meta-chip">🎸 <span>Genre:</span> <strong>{escape(str(row["primary_genre"]))}</strong></div>'
+                
+            chips_html += '</div>'
+            st.markdown(chips_html, unsafe_allow_html=True)
+            
+            # Audio Preview Player
+            if pd.notnull(row.get("preview_url")):
+                st.audio(row["preview_url"], format="audio/mp4")
+                st.markdown("<br>", unsafe_allow_html=True)
             if pd.notnull(row['first_play']):
                 st.info(f"✨ **First played:** {row['first_play'].strftime('%B %d, %Y')}")
 
@@ -1178,44 +1277,93 @@ if detail_type and detail_id:
 
     elif detail_type == "season":
         if detail_id in SEASON_META:
-            months = SEASON_META[detail_id]["months"]
-            month_list = ",".join(str(m) for m in months)
+            meta = SEASON_META[detail_id]
+            months = meta["months"]
+            month_options = [f"All of {detail_id}"] + [MONTH_NAMES[m] for m in months]
+            selected_month = st.selectbox(
+                "📅 Narrow down to a specific month", month_options,
+                key=f"month_filter_{detail_id}"
+            )
+
+            if selected_month == month_options[0]:
+                month_list = ",".join(str(m) for m in months)
+                cond = f"EXTRACT(MONTH FROM s.played_at) IN ({month_list})"
+                extra_params = {}
+                subtitle = f"Everything you played during {detail_id.lower()}"
+            else:
+                month_num = next(m for m in months if MONTH_NAMES[m] == selected_month)
+                cond = "EXTRACT(MONTH FROM s.played_at) = :month_val"
+                extra_params = {"month_val": month_num}
+                subtitle = f"Everything you played in {selected_month}"
+
             render_dimension_detail(
-                extra_where=f"EXTRACT(MONTH FROM s.played_at) IN ({month_list})",
-                extra_params={},
+                extra_where=cond,
+                extra_params=extra_params,
                 type_label="Season", title=detail_id,
-                subtitle=f"Everything you played during {detail_id.lower()}",
-                icon=SEASON_META[detail_id]["icon"]
+                subtitle=subtitle,
+                icon=meta["icon"],
+                image_url=meta.get("image")
             )
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Unknown season</div>', unsafe_allow_html=True)
 
     elif detail_type == "tod":
         if detail_id in TOD_META:
-            if detail_id == "Night":
-                cond = "(EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5)"
-            elif detail_id == "Morning":
-                cond = "EXTRACT(HOUR FROM s.played_at) BETWEEN 5 AND 11"
-            elif detail_id == "Afternoon":
-                cond = "EXTRACT(HOUR FROM s.played_at) BETWEEN 12 AND 16"
+            meta = TOD_META[detail_id]
+            hours_in_range = meta["hours"]
+            hour_options = [f"All {detail_id} ({meta['range']})"] + [f"{h:02d}:00" for h in hours_in_range]
+            selected_hour = st.selectbox(
+                "🕐 Narrow down to a specific hour", hour_options,
+                key=f"hour_filter_{detail_id}"
+            )
+
+            if selected_hour == hour_options[0]:
+                if detail_id == "Night":
+                    cond = "(EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5)"
+                else:
+                    cond = f"EXTRACT(HOUR FROM s.played_at) BETWEEN {hours_in_range[0]} AND {hours_in_range[-1]}"
+                extra_params = {}
+                subtitle = f"Streams during {meta['range']}"
             else:
-                cond = "EXTRACT(HOUR FROM s.played_at) BETWEEN 17 AND 20"
+                hour_val = int(selected_hour.split(":")[0])
+                cond = "EXTRACT(HOUR FROM s.played_at) = :hour_val"
+                extra_params = {"hour_val": hour_val}
+                subtitle = f"Streams at {selected_hour}"
+
             render_dimension_detail(
-                extra_where=cond, extra_params={},
+                extra_where=cond,
+                extra_params=extra_params,
                 type_label="Time of Day", title=detail_id,
-                subtitle=f"Streams during {TOD_META[detail_id]['range']}",
-                icon=TOD_META[detail_id]["icon"]
+                subtitle=subtitle,
+                icon=meta["icon"],
+                image_url=meta.get("image")
             )
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Unknown time of day</div>', unsafe_allow_html=True)
 
     elif detail_type == "year":
         if detail_id and str(detail_id).isdigit() and 1900 <= int(detail_id) <= 2100:
+            month_options = ["All Year"] + list(MONTH_NAMES.values())
+            selected_month = st.selectbox(
+                "📅 Filter by month", month_options,
+                key=f"year_month_filter_{detail_id}"
+            )
+
+            if selected_month == "All Year":
+                cond = "EXTRACT(YEAR FROM s.played_at) = :year"
+                extra_params = {"year": int(detail_id)}
+                subtitle = "Your year in review"
+            else:
+                month_num = next(k for k, v in MONTH_NAMES.items() if v == selected_month)
+                cond = "EXTRACT(YEAR FROM s.played_at) = :year AND EXTRACT(MONTH FROM s.played_at) = :month_val"
+                extra_params = {"year": int(detail_id), "month_val": month_num}
+                subtitle = f"{selected_month} {detail_id}"
+
             render_dimension_detail(
-                extra_where="EXTRACT(YEAR FROM s.played_at) = :year",
-                extra_params={"year": int(detail_id)},
+                extra_where=cond,
+                extra_params=extra_params,
                 type_label="Year", title=str(detail_id),
-                subtitle="Your year in review", icon="📆"
+                subtitle=subtitle, icon="📆"
             )
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Invalid year</div>', unsafe_allow_html=True)
