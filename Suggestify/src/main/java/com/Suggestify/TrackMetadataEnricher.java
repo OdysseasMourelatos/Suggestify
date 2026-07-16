@@ -12,14 +12,13 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.Statement;
 
 public class TrackMetadataEnricher {
 
     public static void main(String[] args) {
         System.out.println("🚀 Starting iTunes Track Metadata & Feature Hunter...");
 
-        // Βρίσκουμε τραγούδια χωρίς metadata, ταξινομημένα με βάση τη δημοτικότητά τους στα streams σου
+        // ΒΕΛΤΙΩΣΗ 1: LIMIT 1000 για ταχύτητα. Φέρνει τα Top 1000 που ΔΕΝ έχουμε ελέγξει ακόμα.
         String selectOrphansSQL = """
             SELECT so.id, so.title, MAX(a.name) AS artist_name
             FROM songs so
@@ -29,18 +28,24 @@ public class TrackMetadataEnricher {
             WHERE so.duration_ms IS NULL
             GROUP BY so.id, so.title
             ORDER BY COUNT(s.id) DESC
+            LIMIT 1000
         """;
 
         String updateSongSQL = "UPDATE songs SET duration_ms=?, release_date=?::date, primary_genre=?, is_explicit=?, preview_url=? WHERE id=?";
+        
+        // ΒΕΛΤΙΩΣΗ 2: Νέο query για να μαρκάρουμε όσα ΔΕΝ βρέθηκαν με duration_ms = 0
+        String markNotFoundSQL = "UPDATE songs SET duration_ms = 0 WHERE id = ?";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement selectStmt = conn.prepareStatement(selectOrphansSQL);
              PreparedStatement updateStmt = conn.prepareStatement(updateSongSQL);
+             PreparedStatement notFoundStmt = conn.prepareStatement(markNotFoundSQL);
              ResultSet rs = selectStmt.executeQuery()) {
 
             HttpClient client = HttpClient.newHttpClient();
             ObjectMapper mapper = new ObjectMapper();
             int successCount = 0;
+            int notFoundCount = 0;
 
             while (rs.next()) {
                 int songId = rs.getInt("id");
@@ -60,7 +65,6 @@ public class TrackMetadataEnricher {
                     if (root.has("resultCount") && root.get("resultCount").asInt() > 0) {
                         JsonNode track = root.get("results").get(0);
 
-                        // 1. Εξαγωγή βασικών Metadata
                         int durationMs = track.has("trackTimeMillis") ? track.get("trackTimeMillis").asInt() : 0;
                         String releaseDate = track.has("releaseDate") ? track.get("releaseDate").asText().substring(0, 10) : null;
                         String genre = track.has("primaryGenreName") ? track.get("primaryGenreName").asText() : null;
@@ -69,7 +73,6 @@ public class TrackMetadataEnricher {
                         String itunesArtistName = track.has("artistName") ? track.get("artistName").asText() : null;
 
                         if (durationMs > 0) {
-                            // Update the songs table
                             updateStmt.setInt(1, durationMs);
                             if (releaseDate != null) updateStmt.setString(2, releaseDate); else updateStmt.setNull(2, java.sql.Types.VARCHAR);
                             if (genre != null) updateStmt.setString(3, genre); else updateStmt.setNull(3, java.sql.Types.VARCHAR);
@@ -78,28 +81,34 @@ public class TrackMetadataEnricher {
                             updateStmt.setInt(6, songId);
                             updateStmt.executeUpdate();
 
-                            // 2. FEATURE HUNTER: Ψάχνουμε για κρυφούς καλλιτέχνες στο όνομα από το iTunes!
                             if (itunesArtistName != null && (itunesArtistName.contains("&") || itunesArtistName.contains(",") || itunesArtistName.toLowerCase().contains("feat"))) {
                                 addMissingArtists(conn, songId, itunesArtistName);
                             }
 
                             System.out.println("✅ Updated: " + artist + " - " + title + (isExplicit ? " [E]" : ""));
                             successCount++;
+                        } else {
+                            // Το βρήκε αλλά δεν έχει duration, μαρκάρισμα ως 0
+                            notFoundStmt.setInt(1, songId);
+                            notFoundStmt.executeUpdate();
                         }
                     } else {
                         System.out.println("⚠️ Not found on iTunes: " + artist + " - " + title);
+                        // ΒΕΛΤΙΩΣΗ 3: Μαρκάρουμε το τραγούδι με 0 για να μην ξανακολλήσει εδώ!
+                        notFoundStmt.setInt(1, songId);
+                        notFoundStmt.executeUpdate();
+                        notFoundCount++;
                     }
                 }
                 Thread.sleep(120); // Rate Limit Protection
             }
-            System.out.println("🎉 Metadata Enrichment Complete! Tracks Updated: " + successCount);
+            System.out.println("🎉 Metadata Enrichment Complete! Tracks Updated: " + successCount + " | Not Found: " + notFoundCount);
 
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // Η μαγεία που προσθέτει τους καλλιτέχνες που ξέχασε το Spotify
     private static void addMissingArtists(Connection conn, int songId, String itunesArtistName) {
         String[] artists = itunesArtistName.split(",\\s*|\\s*&\\s*|\\s+(?i)feat\\.?\\s+|\\s+(?i)ft\\.?\\s+");
 
@@ -112,13 +121,11 @@ public class TrackMetadataEnricher {
                 artist = artist.trim();
                 if (artist.isEmpty()) continue;
 
-                // 1. Προσθήκη Καλλιτέχνη αν δεν υπάρχει
                 try (PreparedStatement insertStmt = conn.prepareStatement(insertArtistSQL)) {
                     insertStmt.setString(1, artist);
                     insertStmt.executeUpdate();
                 }
 
-                // 2. Εύρεση του ID του
                 int artistId = -1;
                 try (PreparedStatement selectStmt = conn.prepareStatement(selectArtistSQL)) {
                     selectStmt.setString(1, artist);
@@ -127,7 +134,6 @@ public class TrackMetadataEnricher {
                     }
                 }
 
-                // 3. Δέσιμο με το Τραγούδι!
                 if (artistId != -1) {
                     try (PreparedStatement relStmt = conn.prepareStatement(insertRelationSQL)) {
                         relStmt.setInt(1, songId);

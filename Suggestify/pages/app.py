@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, text
 import datetime
 import warnings
 import os
+import streamlit.components.v1 as components
 import sys
 from html import escape
 
@@ -45,6 +46,45 @@ TEXT_MID  = "#B3B3B3"
 TEXT_DIM  = "#727272"
 
 # ══════════════════════════════════════════════════════════════════
+# ANIMATED COUNTERS
+# ══════════════════════════════════════════════════════════════════
+def counter_span(value: float, decimals: int = 0, prefix: str = "", suffix: str = "") -> str:
+    """HTML span that counts up from 0 to `value` when it appears on screen."""
+    return (
+        f'<span class="count-up" data-target="{value}" data-decimals="{decimals}" '
+        f'data-prefix="{escape(prefix)}" data-suffix="{escape(suffix)}">{prefix}0{suffix}</span>'
+    )
+
+def inject_counter_script():
+    components.html("""
+    <script>
+    (function() {
+        const doc = window.parent.document;
+        function animate(el) {
+            if (el.dataset.animated) return;
+            el.dataset.animated = "1";
+            const target = parseFloat(el.dataset.target || "0");
+            const decimals = parseInt(el.dataset.decimals || "0");
+            const prefix = el.dataset.prefix || "";
+            const suffix = el.dataset.suffix || "";
+            const duration = 900, start = performance.now();
+            function frame(now) {
+                const p = Math.min((now - start) / duration, 1);
+                const eased = 1 - Math.pow(1 - p, 3);
+                el.textContent = prefix + (target * eased).toLocaleString(undefined,
+                    {minimumFractionDigits: decimals, maximumFractionDigits: decimals}) + suffix;
+                if (p < 1) requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+        }
+        function scan() { doc.querySelectorAll('.count-up:not([data-animated])').forEach(animate); }
+        new MutationObserver(scan).observe(doc.body, {childList: true, subtree: true});
+        scan();
+    })();
+    </script>
+    """, height=0)
+
+# ══════════════════════════════════════════════════════════════════
 # LOAD EXTERNAL CSS
 # ══════════════════════════════════════════════════════════════════
 def load_css():
@@ -70,6 +110,7 @@ def load_css():
         pass
 
 load_css()
+inject_counter_script()
 
 # ══════════════════════════════════════════════════════════════════
 # EXTRA UX TRANSITIONS & UI FIXES
@@ -94,6 +135,8 @@ header {{ display: none !important; }}
     from {{ opacity: 0; }}
     to   {{ opacity: 1; }}
 }}
+
+.count-up {{ display: inline-block; font-variant-numeric: tabular-nums; }}
 
 .list-item {{ transition: transform 0.22s ease, background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease; }}
 .list-item:hover {{ transform: translateX(5px); background: rgba(255,255,255,0.045); border-color: rgba(29,185,84,0.35); box-shadow: 0 6px 22px rgba(0,0,0,0.28); }}
@@ -150,19 +193,25 @@ div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input
 .tod-label {{ font-size: 0.78rem; color: {TEXT_MID}; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }}
 .tod-value {{ font-size: 1.4rem; font-weight: 700; color: {TEXT}; }}
 .tod-sub {{ font-size: 0.75rem; color: {TEXT_DIM}; margin-top: 2px; }}
+
 /* --- METADATA CHIPS --- */
-.meta-chip-container {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; margin-bottom: 25px; }}
-.meta-chip {{ 
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); 
-    border-radius: 6px; padding: 6px 12px; font-size: 0.8rem; color: #B3B3B3; 
-    display: flex; align-items: center; gap: 6px; transition: all 0.2s ease;
+.meta-chip-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 18px; margin-bottom: 28px; }}
+.meta-chip {{
+    background: linear-gradient(145deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px 14px;
+    display: flex; align-items: center; gap: 12px; transition: all 0.25s ease;
 }}
-.meta-chip strong {{ color: #FFFFFF; font-weight: 600; }}
+.meta-chip-icon {{
+    width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center;
+    justify-content: center; border-radius: 9px; background: rgba(29,185,84,0.1); font-size: 1rem;
+}}
+.meta-chip-text {{ display: flex; flex-direction: column; gap: 1px; min-width: 0; }}
+.meta-chip-label {{ font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: {TEXT_DIM}; }}
+.meta-chip-value {{ font-size: 0.88rem; font-weight: 600; color: {TEXT}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 a.meta-chip-link {{ text-decoration: none !important; }}
-a.meta-chip-link:hover .meta-chip {{ 
-    background: rgba(29,185,84,0.1); border-color: #1DB954; color: #1DB954; transform: translateY(-2px); 
-}}
-a.meta-chip-link:hover .meta-chip strong {{ color: #1DB954; }}
+a.meta-chip-link:hover .meta-chip {{ border-color: {GREEN}; background: rgba(29,185,84,0.08); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(29,185,84,0.15); }}
+a.meta-chip-link:hover .meta-chip-icon {{ background: rgba(29,185,84,0.25); }}
+a.meta-chip-link:hover .meta-chip-value {{ color: {GREEN}; }}
 .explicit-badge {{ 
     background: rgba(255, 255, 255, 0.1); color: #fff; padding: 2px 6px; 
     border-radius: 4px; font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; margin-left: 8px;
@@ -294,19 +343,30 @@ def render_kpi_grid(kpis: list[dict]):
     cols = st.columns(len(kpis))
     for col, kpi in zip(cols, kpis):
         unit_html = f'<span class="kpi-unit">{kpi.get("unit", "")}</span>' if kpi.get("unit") else ""
+        if "raw" in kpi:
+            value_html = counter_span(kpi["raw"], kpi.get("decimals", 0), kpi.get("prefix", ""), kpi.get("suffix", ""))
+        else:
+            value_html = kpi.get("value", "")
         col.markdown(f'''
         <div class="kpi-card">
             <div class="kpi-icon">{kpi["icon"]}</div>
             <div class="kpi-title">{kpi["title"]}</div>
-            <div class="kpi-value">{kpi["value"]}{unit_html}</div>
+            <div class="kpi-value">{value_html}{unit_html}</div>
         </div>
         ''', unsafe_allow_html=True)
 
 def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, stats: list[dict], image_url: str = None):
-    stats_html = "".join([
-        f'<div class="detail-stat"><div class="detail-stat-value">{s["value"]}</div><div class="detail-stat-label">{s["label"]}</div></div>'
-        for s in stats
-    ])
+    stats_html = ""
+    for s in stats:
+        if "raw" in s:
+            value_html = counter_span(s["raw"], s.get("decimals", 0), s.get("prefix", ""), s.get("suffix", ""))
+        else:
+            value_html = s.get("value", "")
+        stats_html += (
+            f'<div class="detail-stat"><div class="detail-stat-value">{value_html}</div>'
+            f'<div class="detail-stat-label">{s["label"]}</div></div>'
+        )
+
     if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
         art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover;">'
     else:
@@ -503,9 +563,9 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
     render_detail_header(
         type_label=type_label, title=title, subtitle=subtitle, icon=icon,
         stats=[
-            {"value": f"{streams:,}", "label": "Streams"},
-            {"value": f"{hours:.1f}h", "label": "Listened"},
-            {"value": f"{unique_songs:,}", "label": "Unique Songs"},
+            {"raw": streams, "label": "Streams"},
+            {"raw": hours, "decimals": 1, "suffix": "h", "label": "Listened"},
+            {"raw": unique_songs, "label": "Unique Songs"},
         ],
         image_url=image_url
     )
@@ -827,8 +887,8 @@ if detail_type and detail_id:
                 subtitle=f"by {row['artist']}", icon="🎵",
                 stats=[
                     {"value": rank_display, "label": "Song Rank"},
-                    {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
-                    {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                    {"raw": int(row['streams'] or 0), "label": "Streams"},
+                    {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
                 ],
                 image_url=row.get("image_url")
             )
@@ -839,30 +899,54 @@ if detail_type and detail_id:
             # 1. Clickable Artist Chip
             if pd.notnull(row.get("primary_artist_id")):
                 artist_href = build_filtered_href("artist", str(row["primary_artist_id"]))
-                chips_html += f'<a href="{artist_href}" class="meta-chip-link" target="_self"><div class="meta-chip">🎤 <span>Artist:</span> <strong>{escape(str(row["artist"]).split(",")[0])}</strong></div></a>'
+                chips_html += (
+                    f'<a href="{artist_href}" class="meta-chip-link" target="_self"><div class="meta-chip">'
+                    f'<div class="meta-chip-icon">🎤</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Artist</div>'
+                    f'<div class="meta-chip-value">{escape(str(row["artist"]).split(",")[0])}</div>'
+                    f'</div></div></a>'
+                )
             
             # 2. Clickable Album Chip
             if pd.notnull(row.get("album_id")) and pd.notnull(row.get("album_title")):
                 album_href = build_filtered_href("album", str(row["album_id"]))
-                chips_html += f'<a href="{album_href}" class="meta-chip-link" target="_self"><div class="meta-chip">💿 <span>Album:</span> <strong>{escape(str(row["album_title"]))}</strong></div></a>'
+                chips_html += (
+                    f'<a href="{album_href}" class="meta-chip-link" target="_self"><div class="meta-chip">'
+                    f'<div class="meta-chip-icon">💿</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Album</div>'
+                    f'<div class="meta-chip-value">{escape(str(row["album_title"]))}</div>'
+                    f'</div></div></a>'
+                )
 
             # 3. Duration
             if pd.notnull(row.get("duration_ms")) and row["duration_ms"] > 0:
                 mins = int(row["duration_ms"]) // 60000
                 secs = (int(row["duration_ms"]) % 60000) // 1000
-                chips_html += f'<div class="meta-chip">⏱️ <span>Length:</span> <strong>{mins}:{secs:02d}</strong></div>'
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">⏱️</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Length</div>'
+                    f'<div class="meta-chip-value">{mins}:{secs:02d}</div></div></div>'
+                )
                 
             # 4. Release Date
             if pd.notnull(row.get("release_date")):
                 # Metatropi tou date se fomat p.x. "14 Feb 2016"
                 try:
                     r_date = pd.to_datetime(row["release_date"]).strftime('%d %b %Y')
-                    chips_html += f'<div class="meta-chip">📅 <span>Released:</span> <strong>{r_date}</strong></div>'
+                    chips_html += (
+                        f'<div class="meta-chip"><div class="meta-chip-icon">📅</div><div class="meta-chip-text">'
+                        f'<div class="meta-chip-label">Released</div>'
+                        f'<div class="meta-chip-value">{r_date}</div></div></div>'
+                    )
                 except: pass
                 
             # 5. Genre
             if pd.notnull(row.get("primary_genre")):
-                chips_html += f'<div class="meta-chip">🎸 <span>Genre:</span> <strong>{escape(str(row["primary_genre"]))}</strong></div>'
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">🎸</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Genre</div>'
+                    f'<div class="meta-chip-value">{escape(str(row["primary_genre"]))}</div></div></div>'
+                )
                 
             chips_html += '</div>'
             st.markdown(chips_html, unsafe_allow_html=True)
@@ -945,8 +1029,8 @@ if detail_type and detail_id:
                 subtitle=f"{int(row['unique_tracks'] or 0)} tracks played", icon="🎤",
                 stats=[
                     {"value": rank_display, "label": "Artist Rank"},
-                    {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
-                    {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                    {"raw": int(row['streams'] or 0), "label": "Streams"},
+                    {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
                 ],
                 image_url=row.get("image_url")
             )
@@ -1110,8 +1194,8 @@ if detail_type and detail_id:
                 icon="💿",
                 stats=[
                     {"value": rank_display, "label": "Album Rank"},
-                    {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
-                    {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                    {"raw": int(row['streams'] or 0), "label": "Streams"},
+                    {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
                 ],
                 image_url=row.get("image_url")
             )
@@ -1225,8 +1309,8 @@ if detail_type and detail_id:
                     type_label="Genre", title=genre_name,
                     subtitle=f"{int(row['unique_artists'] or 0)} artists in your library", icon="🎸",
                     stats=[
-                        {"value": f"{int(row['streams'] or 0):,}", "label": "Streams"},
-                        {"value": f"{float(row['hours'] or 0):.1f}h", "label": "Listened"},
+                        {"raw": int(row['streams'] or 0), "label": "Streams"},
+                        {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
                     ]
                 )
 
@@ -1397,10 +1481,10 @@ elif current_tab == "overview":
     if not df_kpi.empty:
         row = df_kpi.iloc[0]
         render_kpi_grid([
-            {"icon": "⏱️", "title": "Listening Time", "value": f"{float(row['total_hours'] or 0):,.1f}", "unit": "hrs"},
-            {"icon": "🎵", "title": "Total Streams", "value": f"{int(row['total_streams'] or 0):,}"},
-            {"icon": "🎤", "title": "Unique Artists", "value": f"{int(row['unique_artists'] or 0):,}"},
-            {"icon": "🎶", "title": "Unique Songs", "value": f"{int(row['unique_songs'] or 0):,}"},
+            {"icon": "⏱️", "title": "Listening Time", "raw": float(row['total_hours'] or 0), "decimals": 1, "unit": "hrs"},
+            {"icon": "🎵", "title": "Total Streams", "raw": int(row['total_streams'] or 0)},
+            {"icon": "🎤", "title": "Unique Artists", "raw": int(row['unique_artists'] or 0)},
+            {"icon": "🎶", "title": "Unique Songs", "raw": int(row['unique_songs'] or 0)},
         ])
 
     c1, c2 = st.columns(2)
