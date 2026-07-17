@@ -1231,15 +1231,16 @@ if detail_type and detail_id:
     elif detail_type == "album":
         alb_info = run_query("""
         WITH AlbumPrimaryArtists AS (
-            SELECT a.name, COUNT(DISTINCT so.id) as track_cnt
+            SELECT a.id AS artist_id, a.name, COUNT(DISTINCT so.id) as track_cnt
             FROM songs so
             JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
             JOIN artists a ON a.id = sa.artist_id
             WHERE so.album_id = :id
-            GROUP BY a.name
+            GROUP BY a.id, a.name
         ),
         TopAlbumArtists AS (
-            SELECT STRING_AGG(name, ', ') as artist_names
+            SELECT STRING_AGG(name, ', ') as artist_names,
+                   MIN(artist_id) as primary_artist_id
             FROM AlbumPrimaryArtists
             WHERE track_cnt = (SELECT MAX(track_cnt) FROM AlbumPrimaryArtists)
         ),
@@ -1261,7 +1262,9 @@ if detail_type and detail_id:
             COALESCE(ars.hours, 0) as hours,
             COUNT(DISTINCT s.song_id) as track_count,
             (SELECT artist_names FROM TopAlbumArtists) as artist_name,
-            r.global_rank
+            (SELECT primary_artist_id FROM TopAlbumArtists) as primary_artist_id,
+            r.global_rank,
+            al.release_date, al.primary_genre, al.label, al.is_explicit, al.total_tracks
         FROM albums al
         LEFT JOIN songs so ON so.album_id = al.id
         LEFT JOIN streams s ON s.song_id = so.id 
@@ -1270,15 +1273,23 @@ if detail_type and detail_id:
         LEFT JOIN album_streams ars ON ars.album_id = al.id
         LEFT JOIN ranked r ON r.album_id = al.id
         WHERE al.id = :id
-        GROUP BY al.id, al.title, ars.streams, ars.hours, r.global_rank
+        GROUP BY al.id, al.title, ars.streams, ars.hours, r.global_rank,
+                 al.release_date, al.primary_genre, al.label, al.is_explicit, al.total_tracks
     """, {"id": detail_id, **F})
+
         if not alb_info.empty:
             row = alb_info.iloc[0]
             artist_name = row["artist_name"] if pd.notnull(row["artist_name"]) else "Unknown Artist"
             rank_display = f"#{int(row['global_rank'])}" if pd.notnull(row.get('global_rank')) else "—"
+
+            # Φτιάχνουμε τον τίτλο με το [E] αν είναι explicit
+            display_title = str(row["title"]) if row["title"] else "Unknown Album"
+            if row.get("is_explicit"):
+                display_title += ' <span class="explicit-badge">E</span>'
+
             render_detail_header(
                 type_label="Album",
-                title=str(row["title"]) if row["title"] else "Unknown Album",
+                title=display_title,
                 subtitle=f"by {artist_name} • {int(row['track_count'] or 0)} tracks played", 
                 icon="💿",
                 stats=[
@@ -1288,7 +1299,62 @@ if detail_type and detail_id:
                 ],
                 image_url=row.get("image_url")
             )
-            
+
+            # --- RENDERING METADATA CHIPS ---
+            chips_html = '<div class="meta-chip-container">'
+
+            # 0. ΚΛΙΚΑΡΙΣΙΜΟ ARTIST CHIP
+            if pd.notnull(row.get("primary_artist_id")):
+                artist_href = build_filtered_href("artist", str(row["primary_artist_id"]))
+                artist_display_name = escape(str(row["artist_name"]).split(",")[0])
+                chips_html += (
+                    f'<a href="{artist_href}" class="meta-chip-link" target="_self"><div class="meta-chip">'
+                    f'<div class="meta-chip-icon">🎤</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Artist</div>'
+                    f'<div class="meta-chip-value">{artist_display_name}</div>'
+                    f'</div></div></a>'
+                )
+
+            # 1. Release Date
+            if pd.notnull(row.get("release_date")):
+                try:
+                    r_date = pd.to_datetime(row["release_date"]).strftime('%d %b %Y')
+                    chips_html += (
+                        f'<div class="meta-chip"><div class="meta-chip-icon">📅</div><div class="meta-chip-text">'
+                        f'<div class="meta-chip-label">Released</div>'
+                        f'<div class="meta-chip-value">{r_date}</div></div></div>'
+                    )
+                except: pass
+
+            # 2. Genre
+            if pd.notnull(row.get("primary_genre")):
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">🎸</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Genre</div>'
+                    f'<div class="meta-chip-value">{escape(str(row["primary_genre"]))}</div></div></div>'
+                )
+
+            # 3. Label
+            if pd.notnull(row.get("label")):
+                label_text = str(row["label"])
+                label_display = label_text[:20] + "…" if len(label_text) > 20 else label_text
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">🏢</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Label</div>'
+                    f'<div class="meta-chip-value">{escape(label_display)}</div></div></div>'
+                )
+
+            # 4. Track Count
+            if pd.notnull(row.get("total_tracks")) and row["total_tracks"] > 0:
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">⏱️</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Tracks</div>'
+                    f'<div class="meta-chip-value">{int(row["total_tracks"])}</div></div></div>'
+                )
+
+            chips_html += '</div>'
+            st.markdown(chips_html, unsafe_allow_html=True)
+
             c_left, c_right = st.columns([1.2, 1.0])
             
             with c_left:
@@ -1374,7 +1440,7 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
-
+                
     elif detail_type == "genre":
             genre_info = run_query("""
                 SELECT g.name, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
