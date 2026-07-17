@@ -205,33 +205,34 @@ public class TrackMetadataEnricher {
         return res;
     }
 
+    private static String cleanString(String s) {
+        if (s == null) return "";
+        // 1. Τα κάνουμε όλα μικρά
+        String cleaned = s.toLowerCase();
+        // 2. Αφαιρούμε ό,τι υπάρχει μέσα σε παρενθέσεις/αγκύλες (π.χ. "(feat. Drake)")
+        cleaned = cleaned.replaceAll("\\([^)]*\\)", "").replaceAll("\\[[^\\]]*\\]", "");
+        // 3. Αφαιρούμε λέξεις κλειδιά
+        cleaned = cleaned.replaceAll("\\b(feat\\.|ft\\.|featuring|with|remix|deluxe|edition)\\b.*", "");
+        // 4. Αφαιρούμε ΟΛΑ τα σύμβολα ΚΑΙ ΤΑ ΚΕΝΑ. Κρατάμε μόνο γράμματα και αριθμούς.
+        return cleaned.replaceAll("[^a-z0-9]", "");
+    }
+
     private static boolean isMatchValid(String targetArtist, String targetTitle, String itunesArtist, String itunesTitle) {
         if (itunesArtist == null || itunesTitle == null) return false;
 
-        String normTargetArtist = targetArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
-        String normItunesArtist = itunesArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
-        String normTargetTitle = targetTitle.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
-        String normItunesTitle = itunesTitle.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+        String tArtist = cleanString(targetArtist);
+        String tTitle = cleanString(targetTitle);
+        String iArtist = cleanString(itunesArtist);
+        String iTitle = cleanString(itunesTitle);
 
-        boolean artistOk = false;
-        String[] targetWords = normTargetArtist.split("\\s+");
-        for (String word : targetWords) {
-            if (word.length() > 2 && normItunesArtist.contains(word)) {
-                artistOk = true;
-                break;
-            }
-        }
+        if (tArtist.isEmpty() || tTitle.isEmpty()) return false;
 
-        if (!artistOk && normItunesArtist.contains(normTargetArtist.replace(" ", ""))) {
-            artistOk = true;
-        }
+        // Τώρα και τα δύο strings ΔΕΝ έχουν κενά. π.χ. "godsplan" vs "godsplan"
+        boolean titleOk = iTitle.contains(tTitle) || tTitle.contains(iTitle);
+        boolean artistOk = iArtist.contains(tArtist) || tArtist.contains(iArtist);
 
-        boolean titleOk = normItunesTitle.contains(normTargetTitle.replace(" ", "")) ||
-                normTargetTitle.replace(" ", "").contains(normItunesTitle);
-
-        return artistOk && titleOk;
+        return titleOk && artistOk;
     }
-
     private static void addMissingArtists(Connection conn, int songId, String artistString) {
         String[] artists = artistString.split(",\\s*|\\s*&\\s*|\\s+(?i)feat\\.?\\s+|\\s+(?i)ft\\.?\\s+|\\s+(?i)featuring\\s+");
         String insertArtistSQL = "INSERT INTO artists (name) VALUES (?) ON CONFLICT (name) DO NOTHING";

@@ -281,35 +281,33 @@ public class AlbumMetadataEnricher {
         return s.toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
-    /**
-     * Strips all non-alphanumeric characters from both target and iTunes artist/album
-     * (case-insensitive) and checks for mutual containment before accepting a match.
-     */
-    private static boolean isMatchValid(String targetArtist, String targetAlbum, String itunesArtist, String itunesAlbum) {
-        if (itunesArtist == null || itunesAlbum == null) return false;
+    private static String cleanString(String s) {
+        if (s == null) return "";
+        // 1. Τα κάνουμε όλα μικρά
+        String cleaned = s.toLowerCase();
+        // 2. Αφαιρούμε ό,τι υπάρχει μέσα σε παρενθέσεις/αγκύλες (π.χ. "(feat. Drake)")
+        cleaned = cleaned.replaceAll("\\([^)]*\\)", "").replaceAll("\\[[^\\]]*\\]", "");
+        // 3. Αφαιρούμε λέξεις κλειδιά
+        cleaned = cleaned.replaceAll("\\b(feat\\.|ft\\.|featuring|with|remix|deluxe|edition)\\b.*", "");
+        // 4. Αφαιρούμε ΟΛΑ τα σύμβολα ΚΑΙ ΤΑ ΚΕΝΑ. Κρατάμε μόνο γράμματα και αριθμούς.
+        return cleaned.replaceAll("[^a-z0-9]", "");
+    }
 
-        String normTargetArtist = targetArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
-        String normItunesArtist = itunesArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
-        String normTargetAlbum = targetAlbum.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
-        String normItunesAlbum = itunesAlbum.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+    private static boolean isMatchValid(String targetArtist, String targetTitle, String itunesArtist, String itunesTitle) {
+        if (itunesArtist == null || itunesTitle == null) return false;
 
-        boolean artistOk = false;
-        String[] targetWords = normTargetArtist.split("\\s+");
-        for (String word : targetWords) {
-            if (word.length() > 2 && normItunesArtist.contains(word)) {
-                artistOk = true;
-                break;
-            }
-        }
+        String tArtist = cleanString(targetArtist);
+        String tTitle = cleanString(targetTitle);
+        String iArtist = cleanString(itunesArtist);
+        String iTitle = cleanString(itunesTitle);
 
-        if (!artistOk && normItunesArtist.contains(normTargetArtist.replace(" ", ""))) {
-            artistOk = true;
-        }
+        if (tArtist.isEmpty() || tTitle.isEmpty()) return false;
 
-        boolean albumOk = normItunesAlbum.contains(normTargetAlbum.replace(" ", "")) ||
-                normTargetAlbum.replace(" ", "").contains(normItunesAlbum);
+        // Τώρα και τα δύο strings ΔΕΝ έχουν κενά. π.χ. "godsplan" vs "godsplan"
+        boolean titleOk = iTitle.contains(tTitle) || tTitle.contains(iTitle);
+        boolean artistOk = iArtist.contains(tArtist) || tArtist.contains(iArtist);
 
-        return artistOk && albumOk;
+        return titleOk && artistOk;
     }
 
     // ═══════════════════════════════════════════════════════════════
