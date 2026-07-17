@@ -23,12 +23,13 @@ import java.util.regex.Pattern;
 public class TrackMetadataEnricher {
 
     private static final int THREAD_POOL_SIZE = 8;
-    private static final int API_DELAY_MS = 250;
+    private static final int API_DELAY_MS = 300;
 
     static class EnrichmentResult {
         int songId; boolean success; String artist; String cleanTitle;
         Integer durationMs; String releaseDate; String genre;
         boolean isExplicit; String previewUrl; String artistsToParse;
+        boolean rateLimited = false; // Προστέθηκε για να σώσουμε τη βάση από τα 0
     }
 
     public static void main(String[] args) {
@@ -68,7 +69,6 @@ public class TrackMetadataEnricher {
             int totalNotFound = 0;
             int cycle = 1;
 
-            // Ο ΒΡΟΧΟΣ ΠΟΥ ΚΑΘΑΡΙΖΕΙ ΟΛΗ ΤΗ ΒΑΣΗ
             while (true) {
                 System.out.println("🔄 Starting Cycle #" + cycle + " (Fetching next 1000 tracks)...");
                 List<Future<EnrichmentResult>> futures = new ArrayList<>();
@@ -85,7 +85,6 @@ public class TrackMetadataEnricher {
                     }
                 }
 
-                // Αν δεν βρήκε κανένα τραγούδι, σημαίνει ότι τελειώσαμε!
                 if (batchSize == 0) {
                     System.out.println("🏁 NO MORE MISSING TRACKS! We are 100% caught up.");
                     break;
@@ -110,7 +109,8 @@ public class TrackMetadataEnricher {
                             addMissingArtists(conn, res.songId, res.artistsToParse);
                         }
                         successCount++;
-                    } else {
+                    } else if (!res.rateLimited) {
+                        // ΜΟΝΟ αν ΔΕΝ φάγαμε Rate Limit μαρκάρουμε το τραγούδι με 0!
                         notFoundStmt.setInt(1, res.songId);
                         notFoundStmt.addBatch();
                         notFoundCount++;
@@ -140,6 +140,7 @@ public class TrackMetadataEnricher {
         res.songId = songId;
         res.artist = targetArtist;
         res.success = false;
+        res.rateLimited = false;
 
         String cleanTitle = title;
         if (cleanTitle.contains(" - ")) {
@@ -151,12 +152,21 @@ public class TrackMetadataEnricher {
             String query = targetArtist + " " + cleanTitle;
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8).replace("+", "%20");
 
-            String apiUrl = "https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=5";
+            // ΑΛΛΑΓΗ: 25 αποτελέσματα αντί για 5
+            String apiUrl = "https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=25";
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(apiUrl)).GET().build();
+            // ΑΛΛΑΓΗ: Μάσκα Chrome Browser για να μην μας κόβει η Apple
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(apiUrl))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .GET()
+                    .build();
+
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() == 403) {
+            if (response.statusCode() == 403 || response.statusCode() == 429) {
+                System.out.println("🛑 BLOCKED BY APPLE (403): " + targetArtist + " - " + cleanTitle);
+                res.rateLimited = true; 
                 Thread.sleep(3000);
                 return res;
             }
@@ -164,7 +174,13 @@ public class TrackMetadataEnricher {
             if (response.statusCode() == 200) {
                 JsonNode root = mapper.readTree(response.body());
                 if (root.has("results")) {
-                    for (JsonNode track : root.get("results")) {
+                    JsonNode results = root.get("results");
+                    if (results.size() == 0) {
+                        System.out.println("⚠️ API ZERO RESULTS: " + targetArtist + " - " + cleanTitle);
+                        return res;
+                    }
+
+                    for (JsonNode track : results) {
                         String itunesArtist = track.has("artistName") ? track.get("artistName").asText() : "";
                         String itunesTrack = track.has("trackName") ? track.get("trackName").asText() : "";
 
@@ -186,34 +202,32 @@ public class TrackMetadataEnricher {
                                 res.artistsToParse = combinedArtists.toString();
                                 res.success = true;
 
-                                System.out.println("✅ MATCH VERIFIED: " + targetArtist + " - " + cleanTitle + " [" + res.genre + "]");
-                                break;
+                                System.out.println("✅ MATCH VERIFIED: " + targetArtist + " - " + cleanTitle);
+                                return res;
                             }
                         }
                     }
+                    
+                    // ΑΛΛΑΓΗ: Debugging αν βρήκε αποτελέσματα αλλά κανένα δεν πέρασε το isMatchValid!
+                    System.out.println("❌ VALIDATION REJECTED: " + targetArtist + " - " + cleanTitle);
+                    System.out.println("   ↳ Top API Result was: " + results.get(0).get("artistName").asText() + " - " + results.get(0).get("trackName").asText());
                 }
-            }
-
-            if (!res.success) {
-                System.out.println("❌ MISMATCH REJECTED: " + targetArtist + " - " + cleanTitle);
             }
 
             Thread.sleep(API_DELAY_MS);
 
         } catch (Exception e) {
+            System.out.println("❌ EXCEPTION for: " + cleanTitle + " -> " + e.getMessage());
         }
         return res;
     }
 
     private static String cleanString(String s) {
         if (s == null) return "";
-        // 1. Τα κάνουμε όλα μικρά
         String cleaned = s.toLowerCase();
-        // 2. Αφαιρούμε ό,τι υπάρχει μέσα σε παρενθέσεις/αγκύλες (π.χ. "(feat. Drake)")
         cleaned = cleaned.replaceAll("\\([^)]*\\)", "").replaceAll("\\[[^\\]]*\\]", "");
-        // 3. Αφαιρούμε λέξεις κλειδιά
-        cleaned = cleaned.replaceAll("\\b(feat\\.|ft\\.|featuring|with|remix|deluxe|edition)\\b.*", "");
-        // 4. Αφαιρούμε ΟΛΑ τα σύμβολα ΚΑΙ ΤΑ ΚΕΝΑ. Κρατάμε μόνο γράμματα και αριθμούς.
+        // Αφαίρεσα το 'with' γιατί δημιουργούσε πρόβλημα σε τίτλους όπως 'Without Me'
+        cleaned = cleaned.replaceAll("\\b(feat\\.|ft\\.|featuring|remix|deluxe|edition)\\b.*", "");
         return cleaned.replaceAll("[^a-z0-9]", "");
     }
 
@@ -227,13 +241,14 @@ public class TrackMetadataEnricher {
 
         if (tArtist.isEmpty() || tTitle.isEmpty()) return false;
 
-        // Τώρα και τα δύο strings ΔΕΝ έχουν κενά. π.χ. "godsplan" vs "godsplan"
         boolean titleOk = iTitle.contains(tTitle) || tTitle.contains(iTitle);
         boolean artistOk = iArtist.contains(tArtist) || tArtist.contains(iArtist);
 
         return titleOk && artistOk;
     }
+
     private static void addMissingArtists(Connection conn, int songId, String artistString) {
+        // [Παραμένει ίδια η μέθοδος addMissingArtists όπως την είχες]
         String[] artists = artistString.split(",\\s*|\\s*&\\s*|\\s+(?i)feat\\.?\\s+|\\s+(?i)ft\\.?\\s+|\\s+(?i)featuring\\s+");
         String insertArtistSQL = "INSERT INTO artists (name) VALUES (?) ON CONFLICT (name) DO NOTHING";
         String selectArtistSQL = "SELECT id FROM artists WHERE name = ?";
