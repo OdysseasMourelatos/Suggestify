@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,14 +23,15 @@ import java.util.regex.Pattern;
 
 public class TrackMetadataEnricher {
 
-    private static final int THREAD_POOL_SIZE = 8;
-    private static final int API_DELAY_MS = 300;
+    // Μειώσαμε τα Threads για να μην μας κάνει ban η Apple
+    private static final int THREAD_POOL_SIZE = 2;
+    private static final int API_DELAY_MS = 1000;
 
     static class EnrichmentResult {
         int songId; boolean success; String artist; String cleanTitle;
         Integer durationMs; String releaseDate; String genre;
         boolean isExplicit; String previewUrl; String artistsToParse;
-        boolean rateLimited = false; // Προστέθηκε για να σώσουμε τη βάση από τα 0
+        boolean rateLimited = false;
     }
 
     public static void main(String[] args) {
@@ -93,9 +95,17 @@ public class TrackMetadataEnricher {
                 int successCount = 0;
                 int notFoundCount = 0;
 
+                // 1. Μαζεύουμε όλα τα αποτελέσματα
+                List<EnrichmentResult> processedResults = new ArrayList<>();
                 for (Future<EnrichmentResult> future : futures) {
-                    EnrichmentResult res = future.get();
+                    processedResults.add(future.get());
+                }
 
+                // 2. ANTI-DEADLOCK FIX: Τα κάνουμε Sort με βάση το ID πριν τα στείλουμε στη βάση!
+                processedResults.sort(Comparator.comparingInt(a -> a.songId));
+
+                // 3. Εκτελούμε τα SQL Batches
+                for (EnrichmentResult res : processedResults) {
                     if (res.success) {
                         updateStmt.setInt(1, res.durationMs);
                         if (res.releaseDate != null) updateStmt.setString(2, res.releaseDate); else updateStmt.setNull(2, java.sql.Types.VARCHAR);
@@ -110,7 +120,6 @@ public class TrackMetadataEnricher {
                         }
                         successCount++;
                     } else if (!res.rateLimited) {
-                        // ΜΟΝΟ αν ΔΕΝ φάγαμε Rate Limit μαρκάρουμε το τραγούδι με 0!
                         notFoundStmt.setInt(1, res.songId);
                         notFoundStmt.addBatch();
                         notFoundCount++;
@@ -152,22 +161,21 @@ public class TrackMetadataEnricher {
             String query = targetArtist + " " + cleanTitle;
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8).replace("+", "%20");
 
-            // ΑΛΛΑΓΗ: 25 αποτελέσματα αντί για 5
-            String apiUrl = "https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=25";
+            String apiUrl = "https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=15";
 
-            // ΑΛΛΑΓΗ: Μάσκα Chrome Browser για να μην μας κόβει η Apple
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(apiUrl))
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                    .header("Accept-Language", "en-US,en;q=0.9")
                     .GET()
                     .build();
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 403 || response.statusCode() == 429) {
-                System.out.println("🛑 BLOCKED BY APPLE (403): " + targetArtist + " - " + cleanTitle);
+                System.out.println("🛑 BLOCKED BY APPLE (403/429): " + targetArtist + " - " + cleanTitle);
                 res.rateLimited = true; 
-                Thread.sleep(3000);
+                Thread.sleep(5000); // Περιμένουμε 5 δεύτερα αν μας μπλοκάρουν
                 return res;
             }
 
@@ -176,7 +184,6 @@ public class TrackMetadataEnricher {
                 if (root.has("results")) {
                     JsonNode results = root.get("results");
                     if (results.size() == 0) {
-                        System.out.println("⚠️ API ZERO RESULTS: " + targetArtist + " - " + cleanTitle);
                         return res;
                     }
 
@@ -207,17 +214,12 @@ public class TrackMetadataEnricher {
                             }
                         }
                     }
-                    
-                    // ΑΛΛΑΓΗ: Debugging αν βρήκε αποτελέσματα αλλά κανένα δεν πέρασε το isMatchValid!
-                    System.out.println("❌ VALIDATION REJECTED: " + targetArtist + " - " + cleanTitle);
-                    System.out.println("   ↳ Top API Result was: " + results.get(0).get("artistName").asText() + " - " + results.get(0).get("trackName").asText());
                 }
             }
 
             Thread.sleep(API_DELAY_MS);
 
         } catch (Exception e) {
-            System.out.println("❌ EXCEPTION for: " + cleanTitle + " -> " + e.getMessage());
         }
         return res;
     }
@@ -226,7 +228,6 @@ public class TrackMetadataEnricher {
         if (s == null) return "";
         String cleaned = s.toLowerCase();
         cleaned = cleaned.replaceAll("\\([^)]*\\)", "").replaceAll("\\[[^\\]]*\\]", "");
-        // Αφαίρεσα το 'with' γιατί δημιουργούσε πρόβλημα σε τίτλους όπως 'Without Me'
         cleaned = cleaned.replaceAll("\\b(feat\\.|ft\\.|featuring|remix|deluxe|edition)\\b.*", "");
         return cleaned.replaceAll("[^a-z0-9]", "");
     }
@@ -248,7 +249,6 @@ public class TrackMetadataEnricher {
     }
 
     private static void addMissingArtists(Connection conn, int songId, String artistString) {
-        // [Παραμένει ίδια η μέθοδος addMissingArtists όπως την είχες]
         String[] artists = artistString.split(",\\s*|\\s*&\\s*|\\s+(?i)feat\\.?\\s+|\\s+(?i)ft\\.?\\s+|\\s+(?i)featuring\\s+");
         String insertArtistSQL = "INSERT INTO artists (name) VALUES (?) ON CONFLICT (name) DO NOTHING";
         String selectArtistSQL = "SELECT id FROM artists WHERE name = ?";
@@ -278,8 +278,6 @@ public class TrackMetadataEnricher {
                     }
                 }
             }
-        } catch (Exception e) {
-            System.err.println("Failed to insert missing artist: " + e.getMessage());
-        }
+        } catch (Exception e) {}
     }
 }
