@@ -344,18 +344,18 @@ elif st.session_state.upload_state == "processing":
             flags = subprocess.CREATE_NO_WINDOW
 
         try:
-            # 1. Spotify Cover Art (Images)
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ImageUpdater"], creationflags=flags)
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ArtistImageUpdater"], creationflags=flags)
+            # Στέλνουμε το user_to_process ως παράμετρο (args[0]) στη Java
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ImageUpdater", user_to_process], creationflags=flags)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ArtistImageUpdater", user_to_process], creationflags=flags)
             
             # 2. Last.fm Album Genres
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.GenreEnricher"], creationflags=flags)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.GenreEnricher", user_to_process], creationflags=flags)
             
             # 3. iTunes Track Metadata & Feature Hunter
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.TrackMetadataEnricher"], creationflags=flags)
-
-            # 4. iTunes Album Metadata (NEW)
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.AlbumMetadataEnricher"], creationflags=flags)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.TrackMetadataEnricher", user_to_process], creationflags=flags)
+            
+            # 4. iTunes Album Metadata
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.AlbumMetadataEnricher", user_to_process], creationflags=flags)
             
         except Exception as e:
             print(f"Background tasks failed: {e}")

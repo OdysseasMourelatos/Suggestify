@@ -1,5 +1,8 @@
 package com.Suggestify;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -11,7 +14,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -20,19 +22,9 @@ import java.util.regex.Pattern;
 
 public class TrackMetadataEnricher {
 
-    private static final Pattern DURATION_PATTERN = Pattern.compile("\"trackTimeMillis\"\\s*:\\s*(\\d+)");
-    private static final Pattern DATE_PATTERN = Pattern.compile("\"releaseDate\"\\s*:\\s*\"([0-9]{4}-[0-9]{2}-[0-9]{2})");
-    private static final Pattern GENRE_PATTERN = Pattern.compile("\"primaryGenreName\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern EXPLICIT_PATTERN = Pattern.compile("\"trackExplicitness\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern PREVIEW_PATTERN = Pattern.compile("\"previewUrl\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern ARTIST_PATTERN = Pattern.compile("\"artistName\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern TRACK_NAME_PATTERN = Pattern.compile("\"trackName\"\\s*:\\s*\"([^\"]+)\"");
+    private static final int THREAD_POOL_SIZE = 8;
+    private static final int API_DELAY_MS = 250;
 
-    // Ρυθμίσεις Ταχύτητας (Max ~20-25 requests/sec για να μην φάμε block από την Apple)
-    private static final int THREAD_POOL_SIZE = 8; 
-    private static final int API_DELAY_MS = 300; 
-
-    // Βοηθητική Κλάση για να κρατάμε τα δεδομένα πριν τη Βάση
     static class EnrichmentResult {
         int songId; boolean success; String artist; String cleanTitle;
         Integer durationMs; String releaseDate; String genre;
@@ -40,7 +32,8 @@ public class TrackMetadataEnricher {
     }
 
     public static void main(String[] args) {
-        System.out.println("🚀 Starting FAST Multi-Threaded iTunes Metadata Enricher...");
+        String targetUser = args.length > 0 ? args[0] : "";
+        System.out.println("🚀 Starting Strict-Validation iTunes Metadata Enricher for user: " + targetUser);
 
         String selectOrphansSQL = """
             SELECT so.id, so.title, MAX(a.name) AS artist_name
@@ -50,7 +43,9 @@ public class TrackMetadataEnricher {
             JOIN streams s ON s.song_id = so.id
             WHERE so.duration_ms IS NULL
             GROUP BY so.id, so.title
-            ORDER BY COUNT(s.id) DESC
+            ORDER BY 
+                SUM(CASE WHEN s.user_id = COALESCE((SELECT id FROM users WHERE username = ?), -1) THEN 1 ELSE 0 END) DESC,
+                COUNT(s.id) DESC
             LIMIT 1000
         """;
 
@@ -60,78 +55,90 @@ public class TrackMetadataEnricher {
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement selectStmt = conn.prepareStatement(selectOrphansSQL);
              PreparedStatement updateStmt = conn.prepareStatement(updateSongSQL);
-             PreparedStatement notFoundStmt = conn.prepareStatement(markNotFoundSQL);
-             ResultSet rs = selectStmt.executeQuery()) {
+             PreparedStatement notFoundStmt = conn.prepareStatement(markNotFoundSQL)) {
 
-            // Γυρνάμε το AutoCommit σε false για απίστευτη ταχύτητα εγγραφής στη DB
             conn.setAutoCommit(false);
+            selectStmt.setString(1, targetUser);
 
             HttpClient client = HttpClient.newHttpClient();
+            ObjectMapper mapper = new ObjectMapper();
             ExecutorService executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
-            List<Future<EnrichmentResult>> futures = new ArrayList<>();
 
-            System.out.println("📦 Fetching up to 1000 tracks from database...");
+            int totalSuccess = 0;
+            int totalNotFound = 0;
+            int cycle = 1;
 
-            // 1. Διαβάζουμε ΟΛΑ τα tracks που θέλουν update και τα αναθέτουμε στα Threads
-            while (rs.next()) {
-                final int songId = rs.getInt("id");
-                final String title = rs.getString("title");
-                final String artist = rs.getString("artist_name");
+            // Ο ΒΡΟΧΟΣ ΠΟΥ ΚΑΘΑΡΙΖΕΙ ΟΛΗ ΤΗ ΒΑΣΗ
+            while (true) {
+                System.out.println("🔄 Starting Cycle #" + cycle + " (Fetching next 1000 tracks)...");
+                List<Future<EnrichmentResult>> futures = new ArrayList<>();
+                int batchSize = 0;
 
-                futures.add(executor.submit(() -> fetchFromItunes(client, songId, artist, title)));
-            }
+                try (ResultSet rs = selectStmt.executeQuery()) {
+                    while (rs.next()) {
+                        batchSize++;
+                        final int songId = rs.getInt("id");
+                        final String title = rs.getString("title");
+                        final String artist = rs.getString("artist_name");
 
-            System.out.println("⚡ Firing concurrent HTTP requests to Apple iTunes API...");
-
-            int successCount = 0;
-            int notFoundCount = 0;
-
-            // 2. Περιμένουμε τα αποτελέσματα από τα Threads και χτίζουμε τα SQL Batches
-            for (Future<EnrichmentResult> future : futures) {
-                EnrichmentResult res = future.get(); // Εδώ περιμένει αν το thread δεν έχει τελειώσει
-
-                if (res.success) {
-                    updateStmt.setInt(1, res.durationMs);
-                    if (res.releaseDate != null) updateStmt.setString(2, res.releaseDate); else updateStmt.setNull(2, java.sql.Types.VARCHAR);
-                    if (res.genre != null) updateStmt.setString(3, res.genre); else updateStmt.setNull(3, java.sql.Types.VARCHAR);
-                    updateStmt.setBoolean(4, res.isExplicit);
-                    if (res.previewUrl != null) updateStmt.setString(5, res.previewUrl); else updateStmt.setNull(5, java.sql.Types.VARCHAR);
-                    updateStmt.setInt(6, res.songId);
-                    updateStmt.addBatch(); // Αντί για execute, το βάζουμε στο πακέτο!
-
-                    // Το Feature Hunter τρέχει σειριακά για να μην κρασάρει τη βάση
-                    if (res.artistsToParse != null && (res.artistsToParse.contains("&") || res.artistsToParse.contains(",") || res.artistsToParse.toLowerCase().contains("feat"))) {
-                        addMissingArtists(conn, res.songId, res.artistsToParse);
+                        futures.add(executor.submit(() -> fetchFromItunesWithValidation(client, mapper, songId, artist, title)));
                     }
-                    successCount++;
-                } else {
-                    notFoundStmt.setInt(1, res.songId);
-                    notFoundStmt.addBatch();
-                    notFoundCount++;
                 }
+
+                // Αν δεν βρήκε κανένα τραγούδι, σημαίνει ότι τελειώσαμε!
+                if (batchSize == 0) {
+                    System.out.println("🏁 NO MORE MISSING TRACKS! We are 100% caught up.");
+                    break;
+                }
+
+                int successCount = 0;
+                int notFoundCount = 0;
+
+                for (Future<EnrichmentResult> future : futures) {
+                    EnrichmentResult res = future.get();
+
+                    if (res.success) {
+                        updateStmt.setInt(1, res.durationMs);
+                        if (res.releaseDate != null) updateStmt.setString(2, res.releaseDate); else updateStmt.setNull(2, java.sql.Types.VARCHAR);
+                        if (res.genre != null) updateStmt.setString(3, res.genre); else updateStmt.setNull(3, java.sql.Types.VARCHAR);
+                        updateStmt.setBoolean(4, res.isExplicit);
+                        if (res.previewUrl != null) updateStmt.setString(5, res.previewUrl); else updateStmt.setNull(5, java.sql.Types.VARCHAR);
+                        updateStmt.setInt(6, res.songId);
+                        updateStmt.addBatch();
+
+                        if (res.artistsToParse != null && (res.artistsToParse.contains("&") || res.artistsToParse.contains(",") || res.artistsToParse.toLowerCase().contains("feat"))) {
+                            addMissingArtists(conn, res.songId, res.artistsToParse);
+                        }
+                        successCount++;
+                    } else {
+                        notFoundStmt.setInt(1, res.songId);
+                        notFoundStmt.addBatch();
+                        notFoundCount++;
+                    }
+                }
+
+                updateStmt.executeBatch();
+                notFoundStmt.executeBatch();
+                conn.commit();
+
+                totalSuccess += successCount;
+                totalNotFound += notFoundCount;
+                System.out.println("✅ Cycle #" + cycle + " Complete! Validated: " + successCount + " | Rejected: " + notFoundCount);
+                cycle++;
             }
 
-            // Κλείνουμε το pool
             executor.shutdown();
-
-            System.out.println("💾 Writing batches to Database...");
-            // 3. Εκτελούμε όλα τα SQL Queries με τη μία!
-            updateStmt.executeBatch();
-            notFoundStmt.executeBatch();
-            conn.commit(); // Σώζουμε τις αλλαγές
-
-            System.out.println("🎉 Batch Complete! Updated: " + successCount + " | Not Found: " + notFoundCount);
+            System.out.println("🎉 FULL ENRICHMENT COMPLETE! Grand Total Updated: " + totalSuccess + " | Rejected/Not Found: " + totalNotFound);
 
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // Η συνάρτηση που εκτελείται από τα πολλαπλά Threads παράλληλα!
-    private static EnrichmentResult fetchFromItunes(HttpClient client, int songId, String artist, String title) {
+    private static EnrichmentResult fetchFromItunesWithValidation(HttpClient client, ObjectMapper mapper, int songId, String targetArtist, String title) {
         EnrichmentResult res = new EnrichmentResult();
         res.songId = songId;
-        res.artist = artist;
+        res.artist = targetArtist;
         res.success = false;
 
         String cleanTitle = title;
@@ -141,58 +148,76 @@ public class TrackMetadataEnricher {
         res.cleanTitle = cleanTitle;
 
         try {
-            String query = artist + " " + cleanTitle;
+            String query = targetArtist + " " + cleanTitle;
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8).replace("+", "%20");
-            String apiUrl = "https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=1";
+
+            String apiUrl = "https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=5";
 
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(apiUrl)).GET().build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 403) {
-                System.out.println("⚠️ APPLE RATE LIMIT HIT! Slowing down...");
-                Thread.sleep(5000); // Αν μας μπλοκάρουν, περιμένουμε 5 δευτερόλεπτα
+                Thread.sleep(3000);
                 return res;
             }
 
-            if (response.statusCode() == 200 && (response.body().contains("\"resultCount\":1") || response.body().contains("\"resultCount\": 1"))) {
-                String json = response.body();
+            if (response.statusCode() == 200) {
+                JsonNode root = mapper.readTree(response.body());
+                if (root.has("results")) {
+                    for (JsonNode track : root.get("results")) {
+                        String itunesArtist = track.has("artistName") ? track.get("artistName").asText() : "";
+                        String itunesTrack = track.has("trackName") ? track.get("trackName").asText() : "";
 
-                Integer durationMs = extractInt(DURATION_PATTERN, json);
-                if (durationMs != null && durationMs > 0) {
-                    res.durationMs = durationMs;
-                    res.releaseDate = extractString(DATE_PATTERN, json);
-                    res.genre = extractString(GENRE_PATTERN, json);
-                    String explicitness = extractString(EXPLICIT_PATTERN, json);
-                    res.isExplicit = "explicit".equalsIgnoreCase(explicitness);
-                    res.previewUrl = extractString(PREVIEW_PATTERN, json);
-                    
-                    String itunesArtistName = extractString(ARTIST_PATTERN, json);
-                    String itunesTrackName = extractString(TRACK_NAME_PATTERN, json);
+                        if (isMatchValid(targetArtist, cleanTitle, itunesArtist, itunesTrack)) {
+                            int durationMs = track.has("trackTimeMillis") ? track.get("trackTimeMillis").asInt() : 0;
+                            if (durationMs > 0) {
+                                res.durationMs = durationMs;
+                                res.releaseDate = track.has("releaseDate") ? track.get("releaseDate").asText().substring(0, 10) : null;
+                                res.genre = track.has("primaryGenreName") ? track.get("primaryGenreName").asText() : null;
+                                String explicitness = track.has("trackExplicitness") ? track.get("trackExplicitness").asText() : "";
+                                res.isExplicit = "explicit".equalsIgnoreCase(explicitness);
+                                res.previewUrl = track.has("previewUrl") ? track.get("previewUrl").asText() : null;
 
-                    StringBuilder combinedArtists = new StringBuilder();
-                    if (itunesArtistName != null) combinedArtists.append(itunesArtistName);
-                    
-                    if (itunesTrackName != null) {
-                        Matcher featMatcher = Pattern.compile("(?i)\\((?:feat\\.|ft\\.|with|featuring)\\s+([^)]+)\\)").matcher(itunesTrackName);
-                        while (featMatcher.find()) {
-                            combinedArtists.append(", ").append(featMatcher.group(1));
+                                StringBuilder combinedArtists = new StringBuilder(itunesArtist);
+                                Matcher featMatcher = Pattern.compile("(?i)\\((?:feat\\.|ft\\.|with|featuring)\\s+([^)]+)\\)").matcher(itunesTrack);
+                                while (featMatcher.find()) {
+                                    combinedArtists.append(", ").append(featMatcher.group(1));
+                                }
+                                res.artistsToParse = combinedArtists.toString();
+                                res.success = true;
+
+                                System.out.println("✅ MATCH VERIFIED: " + targetArtist + " - " + cleanTitle + " [" + res.genre + "]");
+                                break;
+                            }
                         }
                     }
-                    res.artistsToParse = combinedArtists.toString();
-                    res.success = true;
-                    System.out.println("✅ Found: " + artist + " - " + cleanTitle);
                 }
-            } else {
-                System.out.println("❌ Not found: " + artist + " - " + cleanTitle);
             }
 
-            // Προστασία από IP Block! Κάθε Thread κοιμάται για λίγο μετά από κάθε request
+            if (!res.success) {
+                System.out.println("❌ MISMATCH REJECTED: " + targetArtist + " - " + cleanTitle);
+            }
+
             Thread.sleep(API_DELAY_MS);
 
         } catch (Exception e) {
-            // Αν πέσει το δίκτυο
         }
         return res;
+    }
+
+    private static boolean isMatchValid(String targetArtist, String targetTitle, String itunesArtist, String itunesTitle) {
+        if (itunesArtist == null || itunesTitle == null) return false;
+
+        String normTargetArtist = targetArtist.toLowerCase().replaceAll("[^a-z0-9]", "");
+        String normItunesArtist = itunesArtist.toLowerCase().replaceAll("[^a-z0-9]", "");
+
+        String normTargetTitle = targetTitle.toLowerCase().replaceAll("[^a-z0-9]", "");
+        String normItunesTitle = itunesTitle.toLowerCase().replaceAll("[^a-z0-9]", "");
+
+        boolean artistOk = normItunesArtist.contains(normTargetArtist) || normTargetArtist.contains(normItunesArtist);
+        boolean titleOk = normItunesTitle.contains(normTargetTitle) || normTargetTitle.contains(normItunesTitle);
+
+        return artistOk && titleOk;
     }
 
     private static void addMissingArtists(Connection conn, int songId, String artistString) {
@@ -203,8 +228,7 @@ public class TrackMetadataEnricher {
 
         try {
             for (String artist : artists) {
-                artist = artist.trim();
-                artist = artist.replaceAll("[()\"]", "").trim();
+                artist = artist.trim().replaceAll("[()\"]", "");
                 if (artist.isEmpty()) continue;
 
                 try (PreparedStatement insertStmt = conn.prepareStatement(insertArtistSQL)) {
@@ -229,15 +253,5 @@ public class TrackMetadataEnricher {
         } catch (Exception e) {
             System.err.println("Failed to insert missing artist: " + e.getMessage());
         }
-    }
-
-    private static Integer extractInt(Pattern pattern, String text) {
-        Matcher m = pattern.matcher(text);
-        return m.find() ? Integer.parseInt(m.group(1)) : null;
-    }
-
-    private static String extractString(Pattern pattern, String text) {
-        Matcher m = pattern.matcher(text);
-        return m.find() ? m.group(1) : null;
     }
 }
