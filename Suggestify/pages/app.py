@@ -1,604 +1,36 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-from sqlalchemy import create_engine, text
 import datetime
 import warnings
 import os
-import streamlit.components.v1 as components
 import sys
 from html import escape
-from ratings import init_ratings_module
+import plotly.graph_objects as go  # <--- ΕΔΩ ΕΙΝΑΙ ΤΟ GO ΣΩΣΤΑ ΒΑΛΜΕΝΟ
 
 warnings.filterwarnings("ignore")
 
-# ─── HACK ΓΙΑ ΤΟ STREAMLIT CLOUD (Να βρίσκει το share_stats.py) ───
+# ─── HACK ΓΙΑ ΤΟ STREAMLIT CLOUD ───
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
+from config import *
+from db import get_engine, run_query, get_date_bounds, get_release_year_bounds
+from charts import themed, chart_trend, chart_multi_trend, chart_heatmap, chart_bar, chart_year_bar, chart_donut
+from ui import (counter_span, inject_counter_script, load_css, inject_custom_css, get_rank_class, 
+                get_item_icon, build_filtered_href, render_list_v2, render_kpi_grid, 
+                render_detail_header, render_season_cards, render_time_of_day_cards, render_track_spotlight_card)
 from share_stats import render_share_stats_button
+from ratings import init_ratings_module
 
-# ══════════════════════════════════════════════════════════════════
-# PAGE CONFIG
-# ══════════════════════════════════════════════════════════════════
-st.set_page_config(
-    page_title="Suggestify",
-    page_icon="🎧",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-# ══════════════════════════════════════════════════════════════════
-# DESIGN TOKENS — MODERN GLASSMORPHISM
-# ══════════════════════════════════════════════════════════════════
-BG        = "#050505"
-SURFACE   = "rgba(18, 18, 18, 0.85)"
-CARD      = "rgba(28, 28, 28, 0.75)"
-CARD_HOVER= "rgba(45, 45, 45, 0.85)"
-BORDER    = "rgba(255, 255, 255, 0.08)"
-BORDER_HL = "rgba(255, 255, 255, 0.15)"
-GREEN     = "#1DB954"
-GREEN_DIM = "#169C46"
-GREEN_GLOW= "rgba(29, 185, 84, 0.35)"
-GREEN_XLO = "rgba(29, 185, 84, 0.08)"
-TEXT      = "#FFFFFF"
-TEXT_MID  = "#B3B3B3"
-TEXT_DIM  = "#727272"
-
-# ══════════════════════════════════════════════════════════════════
-# ANIMATED COUNTERS
-# ══════════════════════════════════════════════════════════════════
-def counter_span(value: float, decimals: int = 0, prefix: str = "", suffix: str = "") -> str:
-    """HTML span that counts up from 0 to `value` when it appears on screen."""
-    return (
-        f'<span class="count-up" data-target="{value}" data-decimals="{decimals}" '
-        f'data-prefix="{escape(prefix)}" data-suffix="{escape(suffix)}">{prefix}0{suffix}</span>'
-    )
-
-def inject_counter_script():
-    components.html("""
-    <script>
-    (function() {
-        const doc = window.parent.document;
-        function animate(el) {
-            if (el.dataset.animated) return;
-            el.dataset.animated = "1";
-            const target = parseFloat(el.dataset.target || "0");
-            const decimals = parseInt(el.dataset.decimals || "0");
-            const prefix = el.dataset.prefix || "";
-            const suffix = el.dataset.suffix || "";
-            const duration = 900, start = performance.now();
-            function frame(now) {
-                const p = Math.min((now - start) / duration, 1);
-                const eased = 1 - Math.pow(1 - p, 3);
-                el.textContent = prefix + (target * eased).toLocaleString(undefined,
-                    {minimumFractionDigits: decimals, maximumFractionDigits: decimals}) + suffix;
-                if (p < 1) requestAnimationFrame(frame);
-            }
-            requestAnimationFrame(frame);
-        }
-        function scan() { doc.querySelectorAll('.count-up:not([data-animated])').forEach(animate); }
-        new MutationObserver(scan).observe(doc.body, {childList: true, subtree: true});
-        scan();
-    })();
-    </script>
-    """, height=0)
-
-# ══════════════════════════════════════════════════════════════════
-# LOAD EXTERNAL CSS
-# ══════════════════════════════════════════════════════════════════
-def load_css():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    css_path = os.path.join(os.path.dirname(current_dir), "static", "styles.css")
-    try:
-        with open(css_path, "r", encoding="utf-8") as f:
-            css = f.read()
-            
-        tokens = {
-            "VAR_CARD_HOVER": CARD_HOVER, "VAR_GREEN_GLOW": GREEN_GLOW,
-            "VAR_BORDER_HL": BORDER_HL, "VAR_GREEN_DIM": GREEN_DIM,
-            "VAR_GREEN_XLO": GREEN_XLO, "VAR_TEXT_MID": TEXT_MID,
-            "VAR_TEXT_DIM": TEXT_DIM, "VAR_SURFACE": SURFACE,
-            "VAR_BORDER": BORDER, "VAR_GREEN": GREEN,
-            "VAR_CARD": CARD, "VAR_TEXT": TEXT, "VAR_BG": BG,
-        }
-        for key, val in tokens.items():
-            css = css.replace(key, val)
-            
-        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        pass
+st.set_page_config(page_title="Suggestify", page_icon="🎧", layout="wide", initial_sidebar_state="collapsed")
 
 load_css()
 inject_counter_script()
+inject_custom_css()
 
-# ══════════════════════════════════════════════════════════════════
-# EXTRA UX TRANSITIONS & UI FIXES
-# ══════════════════════════════════════════════════════════════════
-st.markdown(f"""
-<style>
-/* ΔΙΟΡΘΩΣΗ ΤΕΡΑΣΤΙΟΥ ΚΕΝΟΥ & ΣΤΟΙΧΙΣΕΩΝ */
-.block-container {{ padding: 1rem 2rem 6rem !important; max-width: 100% !important; }}
-.main .block-container {{ padding-top: 1rem !important; margin-top: -4.5rem !important; }}
-div[data-testid="stVerticalBlock"] {{ gap: 0.2rem !important; }}
-div[data-testid="column"] {{ gap: 0.5rem !important; }}
-header {{ display: none !important; }}
-
-.brand-title {{ font-size: 2.2rem !important; font-weight: 800 !important; display: flex; align-items: center; gap: 0.5rem; }}
-.brand-title span {{ font-size: 2.8rem !important; }}
-
-@keyframes fadeSlideUp {{
-    from {{ opacity: 0; transform: translateY(14px); }}
-    to   {{ opacity: 1; transform: translateY(0); }}
-}}
-@keyframes fadeIn {{
-    from {{ opacity: 0; }}
-    to   {{ opacity: 1; }}
-}}
-
-.count-up {{ display: inline-block; font-variant-numeric: tabular-nums; }}
-
-.list-item {{ transition: transform 0.22s ease, background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease; }}
-.list-item:hover {{ transform: translateX(5px); background: rgba(255,255,255,0.045); border-color: rgba(29,185,84,0.35); box-shadow: 0 6px 22px rgba(0,0,0,0.28); }}
-.item-art {{ transition: transform 0.25s ease; }}
-.list-item:hover .item-art {{ transform: scale(1.07); }}
-.item-arrow {{ transition: transform 0.25s ease, color 0.25s ease; display: inline-block; }}
-.list-item:hover .item-arrow {{ transform: translateX(5px); color: {GREEN}; }}
-.stat-value {{ transition: color 0.2s ease; }}
-
-.kpi-card {{ transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; animation: fadeSlideUp 0.5s ease both; }}
-.kpi-card:hover {{ transform: translateY(-5px); box-shadow: 0 12px 30px rgba(29,185,84,0.14); border-color: rgba(29,185,84,0.3); }}
-.kpi-icon {{ transition: transform 0.3s ease; display: inline-block; }}
-.kpi-card:hover .kpi-icon {{ transform: scale(1.18) rotate(-4deg); }}
-
-.section-header {{ position: relative; animation: fadeIn 0.4s ease both; }}
-.chart-container {{ animation: fadeSlideUp 0.45s ease both; transition: border-color 0.25s ease, box-shadow 0.25s ease; }}
-.chart-container:hover {{ border-color: rgba(29,185,84,0.18); }}
-.detail-header {{ animation: fadeSlideUp 0.4s ease both; }}
-.detail-art {{ transition: transform 0.3s ease; }}
-.detail-header:hover .detail-art {{ transform: scale(1.03); }}
-.detail-stat {{ transition: transform 0.2s ease; }}
-.detail-stat:hover {{ transform: translateY(-2px); }}
-
-.wrapped-banner {{ animation: fadeSlideUp 0.5s ease both; }}
-.empty-state {{ animation: fadeIn 0.4s ease both; }}
-
-div[data-testid="stButton"] button {{ transition: all 0.2s ease !important; }}
-div[data-testid="stButton"] button[kind="secondary"]:hover {{ background: rgba(29,185,84,0.08) !important; color: {GREEN} !important; transform: translateY(-1px) !important; border-color: rgba(29,185,84,0.3) !important; }}
-div[data-testid="stButton"] button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px rgba(29,185,84,0.3) !important; }}
-
-div[data-testid="stTextInput"] input, div[data-baseweb="select"] > div, div[data-testid="stDateInput"] input {{ transition: border-color 0.2s ease, box-shadow 0.2s ease !important; }}
-div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input:focus {{ border-color: {GREEN} !important; box-shadow: 0 0 0 2px {GREEN_XLO} !important; }}
-
-.custom-link {{ text-decoration: none !important; display: block; }}
-
-.season-card {{ position: relative; overflow: visible !important; text-align: center; }}
-.season-badge {{
-    position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
-    background: linear-gradient(135deg, {GREEN}, {GREEN_DIM});
-    color: #000; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em;
-    padding: 3px 10px; border-radius: 999px; white-space: nowrap;
-    box-shadow: 0 4px 14px rgba(29,185,84,0.45);
-    animation: fadeSlideUp 0.5s ease both;
-}}
-.tod-card {{
-    background: {CARD}; border: 1px solid {BORDER}; border-radius: 14px;
-    padding: 16px 14px; text-align: center; animation: fadeSlideUp 0.5s ease both;
-    transition: transform 0.25s ease, border-color 0.25s ease;
-}}
-.tod-card:hover {{ transform: translateY(-4px); border-color: rgba(29,185,84,0.3); }}
-.tod-icon {{ font-size: 1.6rem; margin-bottom: 4px; }}
-.tod-icon-img {{ width: 44px; height: 44px; border-radius: 10px; object-fit: cover; margin: 0 auto 6px; display: block; }}
-.season-icon-img {{ width: 56px; height: 56px; border-radius: 12px; object-fit: cover; margin: 0 auto; display: block; }}
-.tod-label {{ font-size: 0.78rem; color: {TEXT_MID}; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }}
-.tod-value {{ font-size: 1.4rem; font-weight: 700; color: {TEXT}; }}
-.tod-sub {{ font-size: 0.75rem; color: {TEXT_DIM}; margin-top: 2px; }}
-
-/* --- METADATA CHIPS --- */
-.meta-chip-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 18px; margin-bottom: 28px; }}
-.meta-chip {{
-    background: linear-gradient(145deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
-    border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px 14px;
-    display: flex; align-items: center; gap: 12px; transition: all 0.25s ease;
-}}
-.meta-chip-icon {{
-    width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center;
-    justify-content: center; border-radius: 9px; background: rgba(29,185,84,0.1); font-size: 1rem;
-}}
-.meta-chip-text {{ display: flex; flex-direction: column; gap: 1px; min-width: 0; }}
-.meta-chip-label {{ font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: {TEXT_DIM}; }}
-.meta-chip-value {{ font-size: 0.88rem; font-weight: 600; color: {TEXT}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-a.meta-chip-link {{ text-decoration: none !important; }}
-a.meta-chip-link:hover .meta-chip {{ border-color: {GREEN}; background: rgba(29,185,84,0.08); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(29,185,84,0.15); }}
-a.meta-chip-link:hover .meta-chip-icon {{ background: rgba(29,185,84,0.25); }}
-a.meta-chip-link:hover .meta-chip-value {{ color: {GREEN}; }}
-.explicit-badge {{ 
-    background: rgba(255, 255, 255, 0.1); color: #fff; padding: 2px 6px; 
-    border-radius: 4px; font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; margin-left: 8px;
-}}
-</style>
-""", unsafe_allow_html=True)
-# ══════════════════════════════════════════════════════════════════
-# DATABASE
-# ══════════════════════════════════════════════════════════════════
-try:
-    CONNECTION_STRING = st.secrets["DATABASE_URL"]
-except KeyError:
-    CONNECTION_STRING = "postgresql://postgres.pxpplxyszvrzubdqykmw:dKPJjO2jZtkmwjYh@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require"
-
-@st.cache_resource
-def get_engine():
-    return create_engine(CONNECTION_STRING, pool_pre_ping=True, pool_size=5)
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
-    with get_engine().connect() as conn:
-        return pd.read_sql(text(sql), conn, params=params or {})
-    
-@st.cache_data(ttl=600, show_spinner=False)
-def get_date_bounds() -> tuple[datetime.date, datetime.date]:
-    df = run_query("SELECT MIN(played_at)::date AS mn, MAX(played_at)::date AS mx FROM streams;")
-    if df.empty or pd.isnull(df["mn"].iloc[0]):
-        return datetime.date(2023, 1, 1), datetime.date.today()
-    return df["mn"].iloc[0], df["mx"].iloc[0]
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_release_year_bounds() -> tuple[int, int]:
-    df = run_query("SELECT MIN(EXTRACT(YEAR FROM release_date))::int AS mn, MAX(EXTRACT(YEAR FROM release_date))::int AS mx FROM songs WHERE release_date IS NOT NULL;")
-    if df.empty or pd.isnull(df["mn"].iloc[0]):
-        return 1960, datetime.date.today().year
-    return int(df["mn"].iloc[0]), int(df["mx"].iloc[0])
-
-
-# ══════════════════════════════════════════════════════════════════
-# UI COMPONENTS
-# ══════════════════════════════════════════════════════════════════
-def get_rank_class(rank: int) -> str:
-    if rank == 1: return "gold"
-    if rank == 2: return "silver"
-    if rank == 3: return "bronze"
-    return ""
-
-def get_item_icon(link_type: str) -> str:
-    icons = {"song": "🎵", "artist": "🎤", "album": "💿", "genre": "🎸", "year": "📆"}
-    return icons.get(link_type, "🎵")
-
-def build_filtered_href(view_type: str, id_val: str) -> str:
-    current_tab = st.query_params.get("tab", "habits")
-    p_preset = st.query_params.get("preset")
-    p_start = st.query_params.get("start")
-    p_end = st.query_params.get("end")
-    p_user = st.query_params.get("user")
-    href = f"?tab={current_tab}&view={view_type}&id={id_val}"
-    if p_preset: href += f"&preset={p_preset}"
-    if p_start: href += f"&start={p_start}"
-    if p_end: href += f"&end={p_end}"
-    if p_user: href += f"&user={p_user}"
-    return href
-
-def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str,
-                   id_col: str = None, link_type: str = None, image_col: str = "image_url",
-                   rank_col: str = None, reveal_top_n: int = 0,
-                   reveal_delay_base: float = 0.5, reveal_delay_step: float = 0.2):
-    current_tab = st.query_params.get("tab", "overview")
-
-    for i, row in df.iterrows():
-        rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
-        rank_class = get_rank_class(rank)
-        title = escape(str(row[title_col]))[:60]
-        subtitle = escape(str(row[sub_col]))[:50]
-        streams = f"{int(row[streams_col]):,}"
-        hours = f"{float(row[hours_col]):.1f}"
-        can_navigate = link_type and id_col and id_col in row.index
-
-        image_url = row.get(image_col) if image_col in row else None
-        if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
-            radius = "50%" if link_type == "artist" else "8px"
-            art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover; border-radius:{radius};">'
-        else:
-            art_html = get_item_icon(link_type) if link_type else "🎵"
-
-        reveal_style = ""
-        if reveal_top_n > 0 and rank <= reveal_top_n:
-            delay = reveal_delay_base + (rank - 1) * reveal_delay_step
-            reveal_style = f'style="animation-delay: {delay:.1f}s;"'
-
-        reveal_class = "list-item-reveal" if reveal_style else ""
-
-        card_html = f'''
-        <div class="list-item {reveal_class}" {reveal_style}>
-            <div class="item-rank {rank_class}">{rank}</div>
-            <div class="item-art">{art_html}</div>
-            <div class="item-info">
-                <div class="item-title">{title}</div>
-                <div class="item-subtitle">{subtitle}</div>
-            </div>
-            <div class="item-stats">
-                <div class="stat">
-                    <div class="stat-value">{streams}</div>
-                    <div class="stat-label">Streams</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value green">{hours}h</div>
-                    <div class="stat-label">Time</div>
-                </div>
-            </div>
-            {"<div class='item-arrow'>→</div>" if can_navigate else ""}
-        </div>
-        '''
-
-        if can_navigate:
-            item_id = str(row[id_col])
-            p_view = st.query_params.get("view")
-            p_id = st.query_params.get("id")
-            p_preset = st.query_params.get("preset")
-            p_start = st.query_params.get("start")
-            p_end = st.query_params.get("end")
-            p_user = st.query_params.get("user")
-            
-            href = f"?tab={current_tab}&view={link_type}&id={item_id}"
-            if p_view and p_id:  href += f"&pview={p_view}&pid={p_id}"
-            if p_preset:  href += f"&preset={p_preset}"
-            if p_start:  href += f"&start={p_start}"
-            if p_end:  href += f"&end={p_end}"
-            if p_user: href += f"&user={p_user}"
-
-            st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-        else:
-            st.markdown(card_html, unsafe_allow_html=True)
-
-def render_kpi_grid(kpis: list[dict]):
-    cols = st.columns(len(kpis))
-    for col, kpi in zip(cols, kpis):
-        unit_html = f'<span class="kpi-unit">{kpi.get("unit", "")}</span>' if kpi.get("unit") else ""
-        if "raw" in kpi:
-            value_html = counter_span(kpi["raw"], kpi.get("decimals", 0), kpi.get("prefix", ""), kpi.get("suffix", ""))
-        else:
-            value_html = kpi.get("value", "")
-        col.markdown(f'''
-        <div class="kpi-card">
-            <div class="kpi-icon">{kpi["icon"]}</div>
-            <div class="kpi-title">{kpi["title"]}</div>
-            <div class="kpi-value">{value_html}{unit_html}</div>
-        </div>
-        ''', unsafe_allow_html=True)
-
-def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, stats: list[dict], image_url: str = None):
-    stats_html = ""
-    for s in stats:
-        if "raw" in s:
-            value_html = counter_span(s["raw"], s.get("decimals", 0), s.get("prefix", ""), s.get("suffix", ""))
-        else:
-            value_html = s.get("value", "")
-        stats_html += (
-            f'<div class="detail-stat"><div class="detail-stat-value">{value_html}</div>'
-            f'<div class="detail-stat-label">{s["label"]}</div></div>'
-        )
-
-    if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
-        art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover;">'
-    else:
-        art_html = icon
-
-    st.markdown(f'''
-    <div class="detail-header">
-        <div class="detail-art">{art_html}</div>
-        <div class="detail-info">
-            <div class="detail-type">{type_label}</div>
-            <div class="detail-title">{escape(title)}</div>
-            <div class="detail-subtitle">{escape(subtitle)}</div>
-        </div>
-        <div class="detail-stats">{stats_html}</div>
-    </div>
-    ''', unsafe_allow_html=True)
-
-# ── Plotly Helpers ──
-_LAYOUT_BASE = dict(
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Inter, sans-serif", color=TEXT_DIM, size=12),
-    xaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
-    yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
-    margin=dict(t=30, b=40, l=50, r=20),
-    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)"),
-    hoverlabel=dict(bgcolor="#1C1C1C", bordercolor="rgba(255,255,255,0.1)", font=dict(color=TEXT, size=13)),
-    dragmode=False,
-)
-
-def themed(fig: go.Figure, **extra) -> go.Figure:
-    fig.update_layout(**_LAYOUT_BASE)
-    fig.update_layout(**extra)
-    return fig
-
+# Initialization of Ratings Module
 R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG)
-
-def chart_trend(df: pd.DataFrame) -> go.Figure:
-    df = df.copy()
-    df["period"] = pd.to_datetime(df["period"])
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["period"], y=df["stream_count"], name="Streams", mode="lines+markers",
-        line=dict(color=GREEN, width=3, shape='spline'),
-        marker=dict(size=7, color=GREEN, line=dict(width=2, color=BG)), fill="tozeroy", fillcolor=GREEN_XLO
-    ))
-    fig.add_trace(go.Bar(x=df["period"], y=df["hours_played"], name="Hours", marker_color="rgba(29,185,84,0.2)", yaxis="y2"))
-    return themed(fig, yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))),
-        yaxis2=dict(title=dict(text="Hours", font=dict(color=TEXT_MID)), overlaying="y", side="right", showgrid=False, fixedrange=True),
-        hovermode="x unified", legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center")
-    )
-
-def chart_multi_trend(df: pd.DataFrame) -> go.Figure:
-    df = df.copy()
-    df["period"] = pd.to_datetime(df["period"])
-    fig = go.Figure()
-    colors = [GREEN, "#4FC3F7", "#F48FB1", "#FFD54F", "#B39DDB"]
-    for idx, track in enumerate(df["track_title"].unique()):
-        track_df = df[df["track_title"] == track]
-        fig.add_trace(go.Scatter(x=track_df["period"], y=track_df["stream_count"], name=track, mode="lines",
-            line=dict(width=2.5, shape='spline', color=colors[idx % len(colors)]),
-        ))
-    return themed(fig, yaxis=dict(title=dict(text="Streams", font=dict(color=TEXT_MID))), hovermode="x unified", legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center"))
-    
-def chart_heatmap(df: pd.DataFrame) -> go.Figure:
-    DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    pivot = df.pivot(index="dow", columns="hour", values="stream_count").reindex(index=range(1, 8), columns=range(24)).fillna(0)
-    fig = go.Figure(go.Heatmap(z=pivot.values, x=[f"{h:02d}" for h in range(24)], y=DOW,
-        colorscale=[[0, BG], [0.15, "rgba(29,185,84,0.1)"], [0.4, GREEN_DIM], [1, GREEN]],
-        hoverongaps=False, xgap=3, ygap=3, hovertemplate="<b>%{y}</b> at <b>%{x}:00</b><br>%{z} streams<extra></extra>"
-    ))
-    return themed(fig, xaxis_title="Hour", yaxis_title="", margin=dict(t=20, b=50, l=60, r=20),
-                  height=300, yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True, autorange="reversed"))
-
-def chart_bar(x, y, xlabel: str) -> go.Figure:
-    max_val = max(y) if y else 0
-    colors = [GREEN if v == max_val else "rgba(29,185,84,0.35)" for v in y]
-    fig = go.Figure(go.Bar(x=x, y=y, marker_color=colors, marker_line=dict(width=0), hovertemplate="<b>%{x}</b><br>%{y:,} streams<extra></extra>"))
-    return themed(fig, xaxis_title=xlabel, yaxis_title="Streams", bargap=0.25)
-
-def chart_year_bar(df: pd.DataFrame) -> go.Figure:
-    years = df["year"].astype(str).tolist()
-    streams = df["stream_count"].tolist()
-    hours = df["hours_played"].tolist()
-    max_val = max(streams) if streams else 0
-    colors = [GREEN if v == max_val else "rgba(29,185,84,0.35)" for v in streams]
-    fig = go.Figure(go.Bar(
-        x=years, y=streams, marker_color=colors, marker_line=dict(width=0), customdata=hours,
-        text=[f"{h:,.0f}h" for h in hours], textposition="outside", textfont=dict(color=TEXT_MID, size=11),
-        cliponaxis=False, hovertemplate="<b>%{x}</b><br>%{y:,} streams<br>%{customdata:,.1f}h listened<extra></extra>"
-    ))
-    return themed(fig, xaxis_title="", yaxis_title="Streams", bargap=0.4, margin=dict(t=40, b=40, l=50, r=20))
-
-def chart_donut(labels, values, colors) -> go.Figure:
-    fig = go.Figure(go.Pie(
-        labels=labels, values=values, hole=0.66, marker=dict(colors=colors, line=dict(color=BG, width=4)),
-        sort=False, textinfo="percent", textfont=dict(color=TEXT, size=13, family="Inter, sans-serif"),
-        hovertemplate="<b>%{label}</b><br>%{value:,} streams (%{percent})<extra></extra>"
-    ))
-    fig.update_layout(showlegend=False)
-    return themed(fig, margin=dict(t=10, b=10, l=10, r=10))
-
-MONTH_NAMES = {
-    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
-    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
-}
-
-# Options used by the Track Explorer's "fancy filters" and by the detail-page
-# "See Full List" redirects (season / time-of-day / year pages).
-MONTH_FILTER_OPTIONS = ["All Months"] + list(MONTH_NAMES.values())
-HOUR_FILTER_OPTIONS = ["All Hours"] + [f"{h:02d}:00" for h in range(24)]
-
-SEASON_META = {
-    "Winter": {"icon": "❄️", "color": "#4FC3F7", "months": (12, 1, 2),
-               "image": "https://images.unsplash.com/photo-1418985991508-e47386d96a71?w=400&q=80&auto=format&fit=crop"},
-    "Spring": {"icon": "🌸", "color": "#F48FB1", "months": (3, 4, 5),
-               "image": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&q=80&auto=format&fit=crop"},
-    "Summer": {"icon": "☀️", "color": "#FFD54F", "months": (6, 7, 8),
-               "image": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&q=80&auto=format&fit=crop"},
-    "Autumn": {"icon": "🍂", "color": "#FF8A65", "months": (9, 10, 11),
-               "image": "https://images.unsplash.com/photo-1477414348463-c0eb7f1359b6?w=400&q=80&auto=format&fit=crop"},
-}
-
-TOD_META = {
-    "Night":     {"icon": "🌙", "range": "9PM–5AM",  "color": "#5C6BC0", "hours": [21, 22, 23, 0, 1, 2, 3, 4],
-                  "image": "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=400&q=80&auto=format&fit=crop"},
-    "Morning":   {"icon": "🌅", "range": "5AM–12PM", "color": "#FFD54F", "hours": list(range(5, 12)),
-                  "image": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=80&auto=format&fit=crop"},
-    "Afternoon": {"icon": "🌤️", "range": "12PM–5PM",  "color": "#4FC3F7", "hours": list(range(12, 17)),
-                  "image": "https://images.unsplash.com/photo-1500964757637-c85e8a162699?w=400&q=80&auto=format&fit=crop"},
-    "Evening":   {"icon": "🌆", "range": "5PM–9PM",   "color": "#FF7043", "hours": list(range(17, 21)),
-                  "image": "https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=400&q=80&auto=format&fit=crop"},
-}
-
-def render_season_cards(df: pd.DataFrame):
-    data = {row["season"]: row for _, row in df.iterrows()} if not df.empty else {}
-    max_streams = int(df["stream_count"].max()) if not df.empty else 0
-    cols = st.columns(4)
-    for col, season in zip(cols, ["Winter", "Spring", "Summer", "Autumn"]):
-        meta = SEASON_META[season]
-        row = data.get(season)
-        streams = int(row["stream_count"]) if row is not None else 0
-        hours = float(row["hours_played"]) if row is not None else 0.0
-        is_top = streams > 0 and streams == max_streams
-        badge = '<div class="season-badge">👑 Favorite</div>' if is_top else ""
-        glow = f'box-shadow: 0 12px 30px {meta["color"]}33; border-color: {meta["color"]}66;' if is_top else ""
-        img = meta.get("image")
-        icon_html = (
-            f'<img class="season-icon-img" src="{img}" alt="{season}">'
-            if img else f'<div class="kpi-icon" style="font-size: 1.9rem;">{meta["icon"]}</div>'
-        )
-        card_html = (
-            f'<div class="kpi-card season-card" style="{glow}">'
-            f'{badge}'
-            f'{icon_html}'
-            f'<div class="kpi-title">{season}</div>'
-            f'<div class="kpi-value" style="color:{meta["color"]};">{streams:,}</div>'
-            f'<div class="stat-label" style="margin-top:2px;">{hours:.1f}h listened</div>'
-            f'</div>'
-        )
-        href = build_filtered_href("season", season)
-        col.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-
-
-def render_time_of_day_cards(df: pd.DataFrame):
-    data = {row["time_of_day"]: row for _, row in df.iterrows()} if not df.empty else {}
-    for label, meta in TOD_META.items():
-        row = data.get(label)
-        streams = int(row["stream_count"]) if row is not None else 0
-        hours = float(row["hours_played"]) if row is not None else 0.0
-        img = meta.get("image")
-        icon_html = (
-            f'<img class="tod-icon-img" src="{img}" alt="{label}">'
-            if img else f'<div class="tod-icon">{meta["icon"]}</div>'
-        )
-        card_html = (
-            f'<div class="tod-card" style="margin-bottom: 10px;">'
-            f'{icon_html}'
-            f'<div class="tod-label">{label} · {meta["range"]}</div>'
-            f'<div class="tod-value">{streams:,}</div>'
-            f'<div class="tod-sub">{hours:.1f}h listened</div>'
-            f'</div>'
-        )
-        href = build_filtered_href("tod", label)
-        st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-
-
-def render_track_spotlight_card(col, label: str, icon: str, row, value_field: str, value_fmt, song_id_field="song_id"):
-    """Small clickable card pointing at a single standout song (oldest/newest/longest/shortest played)."""
-    if row is None:
-        with col:
-            st.markdown(
-                f'<div class="tod-card"><div class="tod-icon">{icon}</div>'
-                f'<div class="tod-label">{label}</div>'
-                f'<div class="tod-sub">No data</div></div>',
-                unsafe_allow_html=True
-            )
-        return
-
-    title = escape(str(row.get("song_title", "Unknown")))[:40]
-    artist = escape(str(row.get("main_artist", "Unknown")))[:40]
-    value_display = value_fmt(row[value_field])
-    image_url = row.get("image_url")
-    art_html = (
-        f'<img class="tod-icon-img" src="{image_url}" alt="{title}">'
-        if image_url and pd.notnull(image_url) and str(image_url).startswith("http")
-        else f'<div class="tod-icon">{icon}</div>'
-    )
-    card_html = (
-        f'<div class="tod-card">'
-        f'{art_html}'
-        f'<div class="tod-label">{label}</div>'
-        f'<div class="tod-value" style="font-size:1.05rem;">{title}</div>'
-        f'<div class="tod-sub">{artist}</div>'
-        f'<div class="tod-sub" style="color:{GREEN}; font-weight:600; margin-top:4px;">{value_display}</div>'
-        f'</div>'
-    )
-    with col:
-        if pd.notnull(row.get(song_id_field)):
-            href = build_filtered_href("song", str(row[song_id_field]))
-            st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-        else:
-            st.markdown(card_html, unsafe_allow_html=True)
-
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
     header_df = run_query(f"""
@@ -644,11 +76,6 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         if not df_tracks.empty:
             render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
 
-            # Redirect filters are derived straight from whatever extra_params this
-            # detail page is already filtering on (month_val / hour_val), so the
-            # Tracks tab opens up pre-filtered to the exact same slice. A played
-            # "year" (from the Year detail page) narrows the global date range
-            # instead, since that's how the rest of the app already scopes by year.
             redirect_filters = {}
             if "month_val" in extra_params: redirect_filters["month"] = int(extra_params["month_val"])
             if "hour_val" in extra_params: redirect_filters["hour"] = int(extra_params["hour_val"])
@@ -727,9 +154,6 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════
-# NAVIGATION HANDLING
-# ══════════════════════════════════════════════════════════════════
 def get_current_view() -> dict:
     params = st.query_params
     return {
@@ -758,9 +182,6 @@ def go_back():
     if end: st.query_params["end"] = end
     if user: st.query_params["user"] = user
 
-# ══════════════════════════════════════════════════════════════════
-# MAIN APP & STATE MANAGEMENT (CALLBACKS)
-# ══════════════════════════════════════════════════════════════════
 min_date, max_date = get_date_bounds()
 
 def get_parsed_date(date_str, default_date):
@@ -770,7 +191,6 @@ def get_parsed_date(date_str, default_date):
 
 params = st.query_params
 
-# 1. ΥΠΟΛΟΓΙΣΜΟΣ ΧΡΗΣΤΗ ΠΡΩΤΑ
 try:
     users_df = run_query("SELECT id, username FROM users ORDER BY username")
     user_dict = dict(zip(users_df['username'], users_df['id']))
@@ -787,7 +207,6 @@ else:
 selected_user_id = user_dict.get(selected_username, 1)
 st.query_params["user"] = str(selected_user_id)
 
-# 2. ΥΠΟΛΟΓΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΩΝ
 if "start_date" not in st.session_state:
     st.session_state.start_date = get_parsed_date(params.get("start"), min_date)
     st.session_state.end_date = get_parsed_date(params.get("end"), max_date)
@@ -826,7 +245,6 @@ current_tab = view_state["tab"]
 detail_type = view_state["type"]
 detail_id = view_state["id"]
 
-# 3. NAVBAR & SHARE BUTTON ΠΑΝΩ ΔΕΞΙΑ
 col_brand, col_share = st.columns([4, 1])
 
 with col_brand:
@@ -850,12 +268,11 @@ with col_share:
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-# 4. TABS
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
     ("artists", "🎤 Artists"), ("albums", "💿 Albums"),
     ("genres", "🎸 Genres"), ("habits", "🕐 Habits"),
-    ("ratings", "⭐ Ratings")  # <--- ΠΡΟΣΘΕΣΕ ΑΥΤΗ ΤΗ ΓΡΑΜΜΗ
+    ("ratings", "⭐ Ratings")
 ]
 
 def navigate_to_tab(tab_id: str):
@@ -892,7 +309,6 @@ with st.container(key="tab_nav_mobile"):
             if st.button(tab_label, key=f"nav_mobile_{tab_id}", type="primary" if is_active else "secondary", use_container_width=True):
                 navigate_to_tab(tab_id)
 
-# 5. FILTER BAR (Χωρίς το User dropdown)
 with st.container(key="filter_bar_row"):
     f_preset, f_start, f_end = st.columns([1.5, 1, 1])
 
@@ -908,7 +324,6 @@ with st.container(key="filter_bar_row"):
         st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
         st.date_input("To", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="end_date", on_change=mark_manual)
 
-# 6. ΚΛΕΙΔΩΜΑ ΦΙΛΤΡΩΝ ΓΙΑ ΤΑ QUERIES
 F = {
     "start_date": st.session_state.start_date, 
     "end_date": st.session_state.end_date,
@@ -971,7 +386,6 @@ if detail_type and detail_id:
             row = song_info.iloc[0]
             rank_display = f"#{int(row['global_rank'])}" if pd.notnull(row.get('global_rank')) else "—"
             
-            # Φτιάχνουμε τον τίτλο με το [E] αν είναι explicit
             display_title = str(row["title"])
             if row.get("is_explicit"):
                 display_title += ' <span class="explicit-badge">E</span>'
@@ -988,10 +402,9 @@ if detail_type and detail_id:
             )
             
             R.render_star_rating("song", detail_id, selected_user_id)
-            # --- RENDERING METADATA CHIPS ---
+            
             chips_html = '<div class="meta-chip-container">'
             
-            # 1. Clickable Artist Chip
             if pd.notnull(row.get("primary_artist_id")):
                 artist_href = build_filtered_href("artist", str(row["primary_artist_id"]))
                 chips_html += (
@@ -1002,7 +415,6 @@ if detail_type and detail_id:
                     f'</div></div></a>'
                 )
             
-            # 2. Clickable Album Chip
             if pd.notnull(row.get("album_id")) and pd.notnull(row.get("album_title")):
                 album_href = build_filtered_href("album", str(row["album_id"]))
                 chips_html += (
@@ -1013,7 +425,6 @@ if detail_type and detail_id:
                     f'</div></div></a>'
                 )
 
-            # 3. Duration
             if pd.notnull(row.get("duration_ms")) and row["duration_ms"] > 0:
                 mins = int(row["duration_ms"]) // 60000
                 secs = (int(row["duration_ms"]) % 60000) // 1000
@@ -1023,9 +434,7 @@ if detail_type and detail_id:
                     f'<div class="meta-chip-value">{mins}:{secs:02d}</div></div></div>'
                 )
                 
-            # 4. Release Date
             if pd.notnull(row.get("release_date")):
-                # Metatropi tou date se fomat p.x. "14 Feb 2016"
                 try:
                     r_date = pd.to_datetime(row["release_date"]).strftime('%d %b %Y')
                     chips_html += (
@@ -1035,7 +444,6 @@ if detail_type and detail_id:
                     )
                 except: pass
                 
-            # 5. Genre
             if pd.notnull(row.get("primary_genre")):
                 chips_html += (
                     f'<div class="meta-chip"><div class="meta-chip-icon">🎸</div><div class="meta-chip-text">'
@@ -1046,7 +454,6 @@ if detail_type and detail_id:
             chips_html += '</div>'
             st.markdown(chips_html, unsafe_allow_html=True)
             
-            # Audio Preview Player
             if pd.notnull(row.get("preview_url")):
                 st.audio(row["preview_url"], format="audio/mp4")
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -1202,12 +609,13 @@ if detail_type and detail_id:
 
                 st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
                 df_h = run_query("""
-                    SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count
-                    FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id
-                    WHERE sa.artist_id = :aid 
+                    SELECT EXTRACT(HOUR FROM s.played_at)::INT AS hour, COUNT(*) AS stream_count
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    WHERE so.album_id = :aid 
                       AND s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY 1 ORDER BY 1
+                    GROUP BY 1 ORDER BY 1;
                 """, {"aid": detail_id, **F})
                 if not df_h.empty:
                     st.plotly_chart(
@@ -1288,7 +696,6 @@ if detail_type and detail_id:
             artist_name = row["artist_name"] if pd.notnull(row["artist_name"]) else "Unknown Artist"
             rank_display = f"#{int(row['global_rank'])}" if pd.notnull(row.get('global_rank')) else "—"
 
-            # Φτιάχνουμε τον τίτλο με το [E] αν είναι explicit
             display_title = str(row["title"]) if row["title"] else "Unknown Album"
             if row.get("is_explicit"):
                 display_title += ' <span class="explicit-badge">E</span>'
@@ -1306,10 +713,9 @@ if detail_type and detail_id:
                 image_url=row.get("image_url")
             )
             R.render_star_rating("album", detail_id, selected_user_id)
-            # --- RENDERING METADATA CHIPS ---
+            
             chips_html = '<div class="meta-chip-container">'
 
-            # 0. ΚΛΙΚΑΡΙΣΙΜΟ ARTIST CHIP
             if pd.notnull(row.get("primary_artist_id")):
                 artist_href = build_filtered_href("artist", str(row["primary_artist_id"]))
                 artist_display_name = escape(str(row["artist_name"]).split(",")[0])
@@ -1321,7 +727,6 @@ if detail_type and detail_id:
                     f'</div></div></a>'
                 )
 
-            # 1. Release Date
             if pd.notnull(row.get("release_date")):
                 try:
                     r_date = pd.to_datetime(row["release_date"]).strftime('%d %b %Y')
@@ -1332,7 +737,6 @@ if detail_type and detail_id:
                     )
                 except: pass
 
-            # 2. Genre
             if pd.notnull(row.get("primary_genre")):
                 chips_html += (
                     f'<div class="meta-chip"><div class="meta-chip-icon">🎸</div><div class="meta-chip-text">'
@@ -1340,7 +744,6 @@ if detail_type and detail_id:
                     f'<div class="meta-chip-value">{escape(str(row["primary_genre"]))}</div></div></div>'
                 )
 
-            # 3. Label
             if pd.notnull(row.get("label")):
                 label_text = str(row["label"])
                 label_display = label_text[:20] + "…" if len(label_text) > 20 else label_text
@@ -1350,7 +753,6 @@ if detail_type and detail_id:
                     f'<div class="meta-chip-value">{escape(label_display)}</div></div></div>'
                 )
 
-            # 4. Track Count
             if pd.notnull(row.get("total_tracks")) and row["total_tracks"] > 0:
                 chips_html += (
                     f'<div class="meta-chip"><div class="meta-chip-icon">⏱️</div><div class="meta-chip-text">'
@@ -1446,79 +848,79 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
-                
+
     elif detail_type == "genre":
-            genre_info = run_query("""
-                SELECT g.name, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
-                       COUNT(DISTINCT sa.artist_id) as unique_artists
-                FROM genres g
-                JOIN album_genres ag ON ag.genre_id = g.id
-                JOIN songs so ON so.album_id = ag.album_id
-                JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                JOIN streams s ON s.song_id = so.id 
-                     AND s.played_at::date BETWEEN :start_date AND :end_date
-                     AND s.user_id = :user_id
-                WHERE g.id = :id
-                GROUP BY g.name
-            """, {"id": detail_id, **F})
+        genre_info = run_query("""
+            SELECT g.name, COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours,
+                   COUNT(DISTINCT sa.artist_id) as unique_artists
+            FROM genres g
+            JOIN album_genres ag ON ag.album_id = g.id
+            JOIN songs so ON so.album_id = ag.album_id
+            JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            JOIN streams s ON s.song_id = so.id 
+                 AND s.played_at::date BETWEEN :start_date AND :end_date
+                 AND s.user_id = :user_id
+            WHERE g.id = :id
+            GROUP BY g.name
+        """, {"id": detail_id, **F})
 
-            if not genre_info.empty:
-                row = genre_info.iloc[0]
-                genre_name = str(row["name"]).title()
+        if not genre_info.empty:
+            row = genre_info.iloc[0]
+            genre_name = str(row["name"]).title()
 
-                render_detail_header(
-                    type_label="Genre", title=genre_name,
-                    subtitle=f"{int(row['unique_artists'] or 0)} artists in your library", icon="🎸",
-                    stats=[
-                        {"raw": int(row['streams'] or 0), "label": "Streams"},
-                        {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
-                    ]
-                )
+            render_detail_header(
+                type_label="Genre", title=genre_name,
+                subtitle=f"{int(row['unique_artists'] or 0)} artists in your library", icon="🎸",
+                stats=[
+                    {"raw": int(row['streams'] or 0), "label": "Streams"},
+                    {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
+                ]
+            )
 
-                c_left, c_right = st.columns(2)
+            c_left, c_right = st.columns(2)
 
-                with c_left:
-                    st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
-                    df_g_artists = run_query("""
-                        SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
-                               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
-                        FROM streams s
-                        JOIN songs so ON so.id = s.song_id
-                        JOIN album_genres ag ON ag.album_id = so.album_id
-                        JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                        JOIN artists a ON a.id = sa.artist_id
-                        WHERE ag.genre_id = :id 
-                          AND s.played_at::date BETWEEN :start_date AND :end_date
-                          AND s.user_id = :user_id
-                        GROUP BY a.id, a.name, a.image_url ORDER BY streams DESC LIMIT 10
-                    """, {"id": detail_id, **F})
+            with c_left:
+                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
+                df_g_artists = run_query("""
+                    SELECT a.id AS artist_id, a.name AS artist_name, a.image_url,
+                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    JOIN album_genres ag ON ag.album_id = so.album_id
+                    JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                    JOIN artists a ON a.id = sa.artist_id
+                    WHERE ag.genre_id = :id 
+                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                      AND s.user_id = :user_id
+                    GROUP BY a.id, a.name, a.image_url ORDER BY streams DESC LIMIT 10
+                """, {"id": detail_id, **F})
 
-                    if not df_g_artists.empty:
-                        df_g_artists["sub"] = "Artist"
-                        render_list_v2(df_g_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
-                    else:
-                        st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
+                if not df_g_artists.empty:
+                    df_g_artists["sub"] = "Artist"
+                    render_list_v2(df_g_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
+                else:
+                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
 
-                with c_right:
-                    st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
-                    df_g_tracks = run_query("""
-                        SELECT so.id AS song_id, so.title AS song_title, a.name AS main_artist, so.image_url,
-                               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
-                        FROM streams s
-                        JOIN songs so ON so.id = s.song_id
-                        JOIN album_genres ag ON ag.album_id = so.album_id
-                        JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                        JOIN artists a ON a.id = sa.artist_id
-                        WHERE ag.genre_id = :id 
-                          AND s.played_at::date BETWEEN :start_date AND :end_date
-                          AND s.user_id = :user_id
-                        GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 10
-                    """, {"id": detail_id, **F})
+            with c_right:
+                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+                df_g_tracks = run_query("""
+                    SELECT so.id AS song_id, so.title AS song_title, a.name AS main_artist, so.image_url,
+                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    JOIN album_genres ag ON ag.album_id = so.album_id
+                    JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                    JOIN artists a ON a.id = sa.artist_id
+                    WHERE ag.genre_id = :id 
+                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                      AND s.user_id = :user_id
+                    GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 10
+                """, {"id": detail_id, **F})
 
-                    if not df_g_tracks.empty:
-                        render_list_v2(df_g_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
-                    else:
-                        st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
+                if not df_g_tracks.empty:
+                    render_list_v2(df_g_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+                else:
+                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
 
     elif detail_type == "season":
         if detail_id in SEASON_META:
@@ -1613,9 +1015,7 @@ if detail_type and detail_id:
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Invalid year</div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════
-# TAB VIEWS
-# ══════════════════════════════════════════════════════════════════
+# ... (Υπόλοιπος κώδικας για Overview, Tracks, Artists κλπ)
 
 elif current_tab == "overview":
 
@@ -1706,7 +1106,6 @@ elif current_tab == "tracks":
     sort_by = col_sort.selectbox("Sort", ["Streams", "Hours"], index=0, label_visibility="collapsed", key="sort_tracks")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200, 500], index=0, label_visibility="collapsed")
 
-    # ── Fancy filters: narrow down by when it was played and/or when it was released ──
     ry_min, ry_max = get_release_year_bounds()
     release_year_options = ["All Release Years"] + [str(y) for y in range(ry_max, ry_min - 1, -1)]
 
@@ -1724,7 +1123,6 @@ elif current_tab == "tracks":
     query_params = {**F, "limit": display_limit}
     order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"
 
-    # Build the extra WHERE fragment for whichever fancy filters are active
     extra_conds = ""
     if filter_month != "All Months":
         month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
@@ -1748,7 +1146,6 @@ elif current_tab == "tracks":
             unsafe_allow_html=True
         )
 
-    # 🚀 CTE που ενώνει όλους τους καλλιτέχνες ενός τραγουδιού με κόμμα
     base_tracks_query = """
         WITH TrackArtists AS (
             SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
@@ -2240,46 +1637,13 @@ elif current_tab == "habits":
             render_track_spotlight_card(row1b, "Freshest Find", "✨", newest_row, "release_date", fmt_year)
             render_track_spotlight_card(st.container(), "Longest Track Played", "⏳", longest_row, "duration_ms", fmt_duration)
         st.markdown('<div class="empty-state"><div class="icon">📭</div>No track length / release-date data available for this period yet</div>', unsafe_allow_html=True)
-
-elif current_tab == "genres":
-    st.markdown('<div class="section-header"><span class="icon">🎸</span>Top Genres</div>', unsafe_allow_html=True)
-
-    col_search, col_limit = st.columns([3, 1])
-    search_term = col_search.text_input("🔍 Search genres...", placeholder="e.g. Rap, Pop...", label_visibility="collapsed", key="search_genres")
-    display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
-
-    query_params = {**F, "limit": display_limit}
-
-    base_genre_query = """
-        SELECT g.id AS genre_id, INITCAP(g.name) AS genre_name, 
-               COUNT(DISTINCT sa.artist_id) || ' Artists' AS subtitle,
-               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
-        FROM streams s
-        JOIN songs so ON so.id = s.song_id
-        JOIN album_genres ag ON ag.album_id = so.album_id
-        JOIN genres g ON g.id = ag.genre_id
-        JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date
-          AND s.user_id = :user_id
-    """
-
-    if search_term:
-        query_params["search"] = f"%{search_term}%"
-        df_genres = run_query(base_genre_query + """
-            AND g.name ILIKE :search
-            GROUP BY g.id, g.name
-            ORDER BY streams DESC LIMIT :limit;
-        """, query_params)
-    else:
-        df_genres = run_query(base_genre_query + """
-            GROUP BY g.id, g.name
-            ORDER BY streams DESC LIMIT :limit;
-        """, query_params)
-
-    if not df_genres.empty:
-        render_list_v2(df_genres, "genre_name", "subtitle", "streams", "hours_played",
-               "genre_id", "genre", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
-    else:
-        st.markdown('<div class="empty-state"><div class="icon">🎸</div>No genres found</div>', unsafe_allow_html=True)
 elif current_tab == "ratings":
     R.render_ratings_dashboard(selected_user_id, F)
+
+def get_current_view() -> dict:
+    params = st.query_params
+    return {
+        "type": params.get("view", None),
+        "id": params.get("id", None),
+        "tab": params.get("tab", "overview")
+    }
