@@ -46,7 +46,12 @@ public class DatabaseManager {
         String createAlbumsTable = """
             CREATE TABLE IF NOT EXISTS albums (
                 id SERIAL PRIMARY KEY, 
-                title VARCHAR(255) UNIQUE NOT NULL
+                title VARCHAR(255) UNIQUE NOT NULL,
+                release_date DATE,
+                primary_genre VARCHAR(100),
+                total_tracks INT,
+                label VARCHAR(255),
+                is_explicit BOOLEAN DEFAULT FALSE
             );
         """;
 
