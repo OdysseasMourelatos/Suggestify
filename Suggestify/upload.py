@@ -353,6 +353,9 @@ elif st.session_state.upload_state == "processing":
             
             # 3. iTunes Track Metadata & Feature Hunter
             subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.TrackMetadataEnricher"], creationflags=flags)
+
+            # 4. iTunes Album Metadata (NEW)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.AlbumMetadataEnricher"], creationflags=flags)
             
         except Exception as e:
             print(f"Background tasks failed: {e}")

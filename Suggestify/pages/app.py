@@ -242,6 +242,13 @@ def get_date_bounds() -> tuple[datetime.date, datetime.date]:
         return datetime.date(2023, 1, 1), datetime.date.today()
     return df["mn"].iloc[0], df["mx"].iloc[0]
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_release_year_bounds() -> tuple[int, int]:
+    df = run_query("SELECT MIN(EXTRACT(YEAR FROM release_date))::int AS mn, MAX(EXTRACT(YEAR FROM release_date))::int AS mx FROM songs WHERE release_date IS NOT NULL;")
+    if df.empty or pd.isnull(df["mn"].iloc[0]):
+        return 1960, datetime.date.today().year
+    return int(df["mn"].iloc[0]), int(df["mx"].iloc[0])
+
 # ══════════════════════════════════════════════════════════════════
 # UI COMPONENTS
 # ══════════════════════════════════════════════════════════════════
@@ -471,6 +478,11 @@ MONTH_NAMES = {
     7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
 }
 
+# Options used by the Track Explorer's "fancy filters" and by the detail-page
+# "See Full List" redirects (season / time-of-day / year pages).
+MONTH_FILTER_OPTIONS = ["All Months"] + list(MONTH_NAMES.values())
+HOUR_FILTER_OPTIONS = ["All Hours"] + [f"{h:02d}:00" for h in range(24)]
+
 SEASON_META = {
     "Winter": {"icon": "❄️", "color": "#4FC3F7", "months": (12, 1, 2),
                "image": "https://images.unsplash.com/photo-1418985991508-e47386d96a71?w=400&q=80&auto=format&fit=crop"},
@@ -546,6 +558,44 @@ def render_time_of_day_cards(df: pd.DataFrame):
         st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
 
 
+def render_track_spotlight_card(col, label: str, icon: str, row, value_field: str, value_fmt, song_id_field="song_id"):
+    """Small clickable card pointing at a single standout song (oldest/newest/longest/shortest played)."""
+    if row is None:
+        with col:
+            st.markdown(
+                f'<div class="tod-card"><div class="tod-icon">{icon}</div>'
+                f'<div class="tod-label">{label}</div>'
+                f'<div class="tod-sub">No data</div></div>',
+                unsafe_allow_html=True
+            )
+        return
+
+    title = escape(str(row.get("song_title", "Unknown")))[:40]
+    artist = escape(str(row.get("main_artist", "Unknown")))[:40]
+    value_display = value_fmt(row[value_field])
+    image_url = row.get("image_url")
+    art_html = (
+        f'<img class="tod-icon-img" src="{image_url}" alt="{title}">'
+        if image_url and pd.notnull(image_url) and str(image_url).startswith("http")
+        else f'<div class="tod-icon">{icon}</div>'
+    )
+    card_html = (
+        f'<div class="tod-card">'
+        f'{art_html}'
+        f'<div class="tod-label">{label}</div>'
+        f'<div class="tod-value" style="font-size:1.05rem;">{title}</div>'
+        f'<div class="tod-sub">{artist}</div>'
+        f'<div class="tod-sub" style="color:{GREEN}; font-weight:600; margin-top:4px;">{value_display}</div>'
+        f'</div>'
+    )
+    with col:
+        if pd.notnull(row.get(song_id_field)):
+            href = build_filtered_href("song", str(row[song_id_field]))
+            st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
+        else:
+            st.markdown(card_html, unsafe_allow_html=True)
+
+
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
     header_df = run_query(f"""
         SELECT COUNT(*) AS streams, ROUND(COALESCE(SUM(ms_played), 0) / 3600000.0, 2) AS hours,
@@ -589,6 +639,45 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         """, {**F, **extra_params})
         if not df_tracks.empty:
             render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+
+            # Redirect filters are derived straight from whatever extra_params this
+            # detail page is already filtering on (month_val / hour_val), so the
+            # Tracks tab opens up pre-filtered to the exact same slice. A played
+            # "year" (from the Year detail page) narrows the global date range
+            # instead, since that's how the rest of the app already scopes by year.
+            redirect_filters = {}
+            if "month_val" in extra_params: redirect_filters["month"] = int(extra_params["month_val"])
+            if "hour_val" in extra_params: redirect_filters["hour"] = int(extra_params["hour_val"])
+
+            redirect_date_range = None
+            if "year" in extra_params:
+                y = int(extra_params["year"])
+                if "month_val" in extra_params:
+                    m = int(extra_params["month_val"])
+                    month_start = datetime.date(y, m, 1)
+                    month_end = (pd.Timestamp(y, m, 1) + pd.offsets.MonthEnd(1)).date()
+                    redirect_date_range = (month_start, month_end)
+                else:
+                    redirect_date_range = (datetime.date(y, 1, 1), datetime.date(y, 12, 31))
+
+            if redirect_filters or redirect_date_range:
+                if st.button("See Full List →", key=f"seefull_tracks_{type_label}_{title}_{extra_params}", use_container_width=True):
+                    curr_user = st.query_params.get("user")
+                    st.query_params.clear()
+                    st.query_params["tab"] = "tracks"
+                    if curr_user: st.query_params["user"] = curr_user
+                    if "month" in redirect_filters:
+                        st.session_state["filter_month_tracks"] = MONTH_NAMES[redirect_filters["month"]]
+                    if "hour" in redirect_filters:
+                        st.session_state["filter_hour_tracks"] = f"{redirect_filters['hour']:02d}:00"
+                    if redirect_date_range:
+                        st.session_state.start_date = redirect_date_range[0]
+                        st.session_state.end_date = redirect_date_range[1]
+                        st.session_state.date_preset = None
+                        st.query_params["preset"] = "manual"
+                        st.query_params["start"] = redirect_date_range[0].isoformat()
+                        st.query_params["end"] = redirect_date_range[1].isoformat()
+                    st.rerun()
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
 
@@ -1545,8 +1634,47 @@ elif current_tab == "tracks":
     sort_by = col_sort.selectbox("Sort", ["Streams", "Hours"], index=0, label_visibility="collapsed", key="sort_tracks")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200, 500], index=0, label_visibility="collapsed")
 
+    # ── Fancy filters: narrow down by when it was played and/or when it was released ──
+    ry_min, ry_max = get_release_year_bounds()
+    release_year_options = ["All Release Years"] + [str(y) for y in range(ry_max, ry_min - 1, -1)]
+
+    col_month, col_hour, col_ryear = st.columns(3)
+    with col_month:
+        st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
+        filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_tracks")
+    with col_hour:
+        st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
+        filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_tracks")
+    with col_ryear:
+        st.markdown('<div class="filter-label">🗓️ Release Year</div>', unsafe_allow_html=True)
+        filter_ryear = st.selectbox("Release Year", release_year_options, label_visibility="collapsed", key="filter_release_year_tracks")
+
     query_params = {**F, "limit": display_limit}
     order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"
+
+    # Build the extra WHERE fragment for whichever fancy filters are active
+    extra_conds = ""
+    if filter_month != "All Months":
+        month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
+        extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
+        query_params["f_month"] = month_num
+    if filter_hour != "All Hours":
+        hour_num = int(filter_hour.split(":")[0])
+        extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
+        query_params["f_hour"] = hour_num
+    if filter_ryear != "All Release Years":
+        extra_conds += " AND EXTRACT(YEAR FROM so.release_date) = :f_ryear"
+        query_params["f_ryear"] = int(filter_ryear)
+
+    active_filter_chips = []
+    if filter_month != "All Months": active_filter_chips.append(f"📅 {filter_month}")
+    if filter_hour != "All Hours": active_filter_chips.append(f"🕐 {filter_hour}")
+    if filter_ryear != "All Release Years": active_filter_chips.append(f"🗓️ Released {filter_ryear}")
+    if active_filter_chips:
+        st.markdown(
+            f'<div style="color:{TEXT_MID}; font-size:0.85rem; margin: 4px 0 12px;">Filtering by: {" · ".join(active_filter_chips)}</div>',
+            unsafe_allow_html=True
+        )
 
     # 🚀 CTE που ενώνει όλους τους καλλιτέχνες ενός τραγουδιού με κόμμα
     base_tracks_query = """
@@ -1577,6 +1705,7 @@ elif current_tab == "tracks":
                       WHERE sa_search.song_id = so.id AND a_search.name ILIKE :search
                   )
               )
+              {extra_conds}
             GROUP BY so.id, so.title, ta.all_artists, so.image_url
             ORDER BY {order_col} DESC
             LIMIT :limit;
@@ -1599,6 +1728,7 @@ elif current_tab == "tracks":
             LEFT JOIN TrackArtists ta ON ta.song_id = so.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
+              {extra_conds}
             GROUP BY so.id, so.title, ta.all_artists, so.image_url
             ORDER BY {order_col} DESC LIMIT :limit;
         """, query_params)
@@ -1935,6 +2065,109 @@ elif current_tab == "habits":
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No data for this period</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
+    # ─── ⏱️ Song Length & Release Era ───
+    st.markdown('<div class="section-header" style="margin-top: 8px;"><span class="icon">⏱️</span>Song Length &amp; Release Era</div>', unsafe_allow_html=True)
+
+    df_len_kpi = run_query("""
+        SELECT
+            ROUND(AVG(so.duration_ms) / 60000.0, 2) AS avg_duration_min,
+            ROUND(AVG(EXTRACT(YEAR FROM s.played_at) - EXTRACT(YEAR FROM so.release_date))::numeric, 1) AS avg_song_age,
+            ROUND(SUM(so.duration_ms) FILTER (WHERE so.duration_ms IS NOT NULL) / 3600000.0, 1) AS total_hours_known
+        FROM streams s
+        JOIN songs so ON so.id = s.song_id
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date
+          AND s.user_id = :user_id
+          AND so.duration_ms IS NOT NULL;
+    """, F)
+
+    df_release_kpi = run_query("""
+        SELECT
+            COUNT(DISTINCT so.id) FILTER (WHERE so.release_date IS NOT NULL) AS tracks_with_release,
+            MIN(so.release_date) AS oldest_release,
+            MAX(so.release_date) AS newest_release
+        FROM streams s
+        JOIN songs so ON so.id = s.song_id
+        WHERE s.played_at::date BETWEEN :start_date AND :end_date
+          AND s.user_id = :user_id;
+    """, F)
+
+    if not df_len_kpi.empty and pd.notnull(df_len_kpi.iloc[0]["avg_duration_min"]):
+        rlen = df_len_kpi.iloc[0]
+        rrel = df_release_kpi.iloc[0] if not df_release_kpi.empty else None
+        oldest_year = pd.to_datetime(rrel["oldest_release"]).year if rrel is not None and pd.notnull(rrel.get("oldest_release")) else "—"
+        newest_year = pd.to_datetime(rrel["newest_release"]).year if rrel is not None and pd.notnull(rrel.get("newest_release")) else "—"
+
+        render_kpi_grid([
+            {"icon": "⏱️", "title": "Avg Track Length", "raw": float(rlen["avg_duration_min"] or 0), "decimals": 1, "unit": " min"},
+            {"icon": "🎂", "title": "Avg Song Age When Played", "raw": float(rlen["avg_song_age"] or 0), "decimals": 1, "unit": " yrs"},
+            {"icon": "📻", "title": "Oldest Release Played", "value": str(oldest_year)},
+            {"icon": "✨", "title": "Newest Release Played", "value": str(newest_year)},
+        ])
+
+        col_decade, col_spot = st.columns([1.4, 1])
+
+        with col_decade:
+            st.markdown('<div class="chart-container"><div class="chart-title">🗓️ Streams by Release Decade</div>', unsafe_allow_html=True)
+            df_decades = run_query("""
+                SELECT (FLOOR(EXTRACT(YEAR FROM so.release_date) / 10) * 10)::INT AS decade,
+                       COUNT(s.id) AS stream_count, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+                FROM streams s
+                JOIN songs so ON so.id = s.song_id
+                WHERE s.played_at::date BETWEEN :start_date AND :end_date
+                  AND s.user_id = :user_id
+                  AND so.release_date IS NOT NULL
+                GROUP BY 1 ORDER BY 1;
+            """, F)
+            if not df_decades.empty:
+                decade_labels = [f"{int(d)}s" for d in df_decades["decade"]]
+                streams = df_decades["stream_count"].tolist()
+                max_val = max(streams) if streams else 0
+                colors = [GREEN if v == max_val else "rgba(29,185,84,0.35)" for v in streams]
+                fig_decade = go.Figure(go.Bar(
+                    x=decade_labels, y=streams, marker_color=colors, marker_line=dict(width=0),
+                    customdata=df_decades["hours_played"].tolist(),
+                    hovertemplate="<b>%{x}</b><br>%{y:,} streams<br>%{customdata:,.1f}h listened<extra></extra>"
+                ))
+                st.plotly_chart(themed(fig_decade, xaxis_title="", yaxis_title="Streams", bargap=0.3),
+                                 use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+            else:
+                st.markdown('<div class="empty-state"><div class="icon">📭</div>No release-date data yet</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with col_spot:
+            df_spot = run_query("""
+                SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist,
+                       so.image_url, so.duration_ms, so.release_date
+                FROM streams s
+                JOIN songs so ON so.id = s.song_id
+                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                LEFT JOIN artists a ON a.id = sa.artist_id
+                WHERE s.played_at::date BETWEEN :start_date AND :end_date
+                  AND s.user_id = :user_id
+                GROUP BY so.id, so.title, a.name, so.image_url, so.duration_ms, so.release_date;
+            """, F)
+
+            oldest_row = None
+            newest_row = None
+            longest_row = None
+            if not df_spot.empty:
+                df_release_rows = df_spot.dropna(subset=["release_date"])
+                if not df_release_rows.empty:
+                    oldest_row = df_release_rows.loc[df_release_rows["release_date"].idxmin()]
+                    newest_row = df_release_rows.loc[df_release_rows["release_date"].idxmax()]
+                df_duration_rows = df_spot.dropna(subset=["duration_ms"])
+                if not df_duration_rows.empty:
+                    longest_row = df_duration_rows.loc[df_duration_rows["duration_ms"].idxmax()]
+
+            fmt_year = lambda v: pd.to_datetime(v).strftime("Released %b %Y")
+            fmt_duration = lambda v: f"{int(v)//60000}:{(int(v)%60000)//1000:02d} long"
+
+            row1a, row1b = st.columns(2)
+            render_track_spotlight_card(row1a, "Oldest Discovery", "📻", oldest_row, "release_date", fmt_year)
+            render_track_spotlight_card(row1b, "Freshest Find", "✨", newest_row, "release_date", fmt_year)
+            render_track_spotlight_card(st.container(), "Longest Track Played", "⏳", longest_row, "duration_ms", fmt_duration)
+        st.markdown('<div class="empty-state"><div class="icon">📭</div>No track length / release-date data available for this period yet</div>', unsafe_allow_html=True)
 
 elif current_tab == "genres":
     st.markdown('<div class="section-header"><span class="icon">🎸</span>Top Genres</div>', unsafe_allow_html=True)
