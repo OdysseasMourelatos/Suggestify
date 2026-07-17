@@ -8,6 +8,7 @@ import os
 import streamlit.components.v1 as components
 import sys
 from html import escape
+from ratings import init_ratings_module
 
 warnings.filterwarnings("ignore")
 
@@ -249,6 +250,7 @@ def get_release_year_bounds() -> tuple[int, int]:
         return 1960, datetime.date.today().year
     return int(df["mn"].iloc[0]), int(df["mx"].iloc[0])
 
+
 # ══════════════════════════════════════════════════════════════════
 # UI COMPONENTS
 # ══════════════════════════════════════════════════════════════════
@@ -407,6 +409,8 @@ def themed(fig: go.Figure, **extra) -> go.Figure:
     fig.update_layout(**_LAYOUT_BASE)
     fig.update_layout(**extra)
     return fig
+
+R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG)
 
 def chart_trend(df: pd.DataFrame) -> go.Figure:
     df = df.copy()
@@ -851,6 +855,7 @@ tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
     ("artists", "🎤 Artists"), ("albums", "💿 Albums"),
     ("genres", "🎸 Genres"), ("habits", "🕐 Habits"),
+    ("ratings", "⭐ Ratings")  # <--- ΠΡΟΣΘΕΣΕ ΑΥΤΗ ΤΗ ΓΡΑΜΜΗ
 ]
 
 def navigate_to_tab(tab_id: str):
@@ -982,6 +987,7 @@ if detail_type and detail_id:
                 image_url=row.get("image_url")
             )
             
+            R.render_star_rating("song", detail_id, selected_user_id)
             # --- RENDERING METADATA CHIPS ---
             chips_html = '<div class="meta-chip-container">'
             
@@ -1299,7 +1305,7 @@ if detail_type and detail_id:
                 ],
                 image_url=row.get("image_url")
             )
-
+            R.render_star_rating("album", detail_id, selected_user_id)
             # --- RENDERING METADATA CHIPS ---
             chips_html = '<div class="meta-chip-container">'
 
@@ -2275,3 +2281,5 @@ elif current_tab == "genres":
                "genre_id", "genre", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
     else:
         st.markdown('<div class="empty-state"><div class="icon">🎸</div>No genres found</div>', unsafe_allow_html=True)
+elif current_tab == "ratings":
+    R.render_ratings_dashboard(selected_user_id, F)

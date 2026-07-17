@@ -66,8 +66,7 @@ public class DatabaseManager {
                 release_date DATE,
                 primary_genre VARCHAR(100),
                 is_explicit BOOLEAN DEFAULT FALSE,
-                preview_url VARCHAR(500),
-                rating DECIMAL(2,1) DEFAULT NULL
+                preview_url VARCHAR(500)
             );
         """;
 
@@ -105,6 +104,56 @@ public class DatabaseManager {
             );
         """;
 
+        // ── ΝΕΟΙ ΠΙΝΑΚΕΣ ΓΙΑ ΤΑ RATINGS ──────────────────────────────────────
+
+        String createTriggerFunction = """
+            CREATE OR REPLACE FUNCTION set_updated_at()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.updated_at = now();
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """;
+
+        String createSongRatingsTable = """
+            CREATE TABLE IF NOT EXISTS song_ratings (
+                id          BIGSERIAL PRIMARY KEY,
+                user_id     INTEGER  NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
+                song_id     INTEGER  NOT NULL REFERENCES songs(id)  ON DELETE CASCADE,
+                rating      SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_song_rating UNIQUE (user_id, song_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_song_ratings_song   ON song_ratings(song_id);
+            CREATE INDEX IF NOT EXISTS idx_song_ratings_rating ON song_ratings(rating);
+            
+            DROP TRIGGER IF EXISTS trg_song_ratings_updated_at ON song_ratings;
+            CREATE TRIGGER trg_song_ratings_updated_at
+                BEFORE UPDATE ON song_ratings
+                FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+        """;
+
+        String createAlbumRatingsTable = """
+            CREATE TABLE IF NOT EXISTS album_ratings (
+                id          BIGSERIAL PRIMARY KEY,
+                user_id     INTEGER  NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+                album_id    INTEGER  NOT NULL REFERENCES albums(id)  ON DELETE CASCADE,
+                rating      SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_album_rating UNIQUE (user_id, album_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_album_ratings_album  ON album_ratings(album_id);
+            CREATE INDEX IF NOT EXISTS idx_album_ratings_rating ON album_ratings(rating);
+            
+            DROP TRIGGER IF EXISTS trg_album_ratings_updated_at ON album_ratings;
+            CREATE TRIGGER trg_album_ratings_updated_at
+                BEFORE UPDATE ON album_ratings
+                FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+        """;
+
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
 
@@ -116,6 +165,11 @@ public class DatabaseManager {
             stmt.execute(createGenresTable);
             stmt.execute(createAlbumGenresTable);
             stmt.execute(createStreamsTable);
+
+            // Εκτέλεση των νέωνινάκων για Ratings
+            stmt.execute(createTriggerFunction);
+            stmt.execute(createSongRatingsTable);
+            stmt.execute(createAlbumRatingsTable);
 
             try {
                 stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");
