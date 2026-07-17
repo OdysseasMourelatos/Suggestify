@@ -1,30 +1,33 @@
 """
-ratings.py — Song/Album rating system for Suggestify.
-
-Plug-and-play: bind it once to your existing engine/query/theme helpers,
-then use it anywhere in app.py.
+ratings.py — Song/Album rating system for Suggestify (v2).
 
     from ratings import init_ratings_module
-    R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG)
+    R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG,
+                             build_href_fn=build_filtered_href)   # optional, enables clickable rows
 
-    # On a song/album detail page:
-    R.render_star_rating("song", detail_id, selected_user_id)
+What changed from v1
+---------------------
+1. Songs/Albums scope selector is now a fancy pill-style segmented control
+   instead of a default st.radio.
+2. Rating scale is configurable at the top of this file (RATING_MAX /
+   RATING_STEP). Defaults to a 10-point scale in 0.5 steps (1, 1.5, ... 9.5,
+   10) -- your personal-ranking use case. Drop RATING_MAX to 5 and it becomes
+   a 5-star scale with a 4.5 option, no other code changes needed. Display
+   uses a proportional-fill star bar (handles halves cleanly) rather than
+   discrete star glyphs, since unicode has no reliable half-star character.
+2b. The DB column changed from SMALLINT to NUMERIC(3,1) to store the .5s --
+    see the updated ratings_schema.sql.
+3. render_quick_rate(): a compact number_input (step = RATING_STEP) meant
+   to sit directly beside a title in any list row, so you can rate without
+   opening the detail page.
+4. render_ratable_list(): a drop-in alternative to your existing
+   render_list_v2 that adds a render_quick_rate() control to every row --
+   use it for the Album Tracks list and the Track Explorer/Albums tab so
+   rating is available straight from the list.
 
-    # As its own tab:
-    R.render_ratings_dashboard(selected_user_id, F)
-
-Design notes
-------------
-- Tables are defined in ratings_schema.sql, FK'd to songs/albums, and are
-  never touched by your Java metadata enrichers — only the app writes here.
-- Writes use INSERT ... ON CONFLICT ... DO UPDATE (UPSERT), so re-running
-  enrichment or re-importing a Spotify export never wipes a rating.
-- render_star_rating is wrapped in @st.fragment. A star click reruns only
-  that fragment's element tree, not the whole page — this is what gives
-  the "instant, non-blocking" feel; the DB write itself is a single-row
-  UPSERT keyed on a unique (user_id, item_id) index, so it's sub-millisecond
-  on Postgres. Errors are caught and surfaced via st.toast instead of
-  raising, so a flaky connection never crashes the page.
+Everything still writes through a single-row UPSERT and is wrapped in
+@st.fragment, so a rating edit -- whether from the detail page or inline in
+a list -- reruns only that widget, not the page.
 """
 
 from __future__ import annotations
@@ -36,19 +39,23 @@ from sqlalchemy import text
 from html import escape
 from types import SimpleNamespace
 
-STAR_FULL = "★"
-STAR_EMPTY = "☆"
+# -- Rating scale -- change these two lines to reshape the whole system --
+RATING_MAX: float = 10.0    # e.g. 5.0 for a classic 5-star scale
+RATING_STEP: float = 0.5    # e.g. 0.5 gives the "4.5 / 9.5" half-point option
+
+STAR = "★"
 
 
-def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG):
+def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG,
+                         build_href_fn=None):
     """Factory binding this module to the host app's engine, cached query
-    runner (`run_query`, an @st.cache_data-wrapped fn), and Plotly theme
-    helper (`themed`), so behavior/caching/styling stay consistent with
-    the rest of the app. Returns a namespace of ready-to-call functions."""
+    runner, Plotly theme helper, and (optionally) a `build_href_fn(item_type,
+    item_id) -> href` used to make list-row titles clickable, matching your
+    existing build_filtered_href."""
 
-    # ══════════════════════════════════════════════════════════
+    # ==============================================================
     # SQL
-    # ══════════════════════════════════════════════════════════
+    # ==============================================================
     _UPSERT_SONG = """
         INSERT INTO song_ratings (user_id, song_id, rating, updated_at)
         VALUES (:user_id, :song_id, :rating, now())
@@ -66,9 +73,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     _GET_SONG = "SELECT rating FROM song_ratings WHERE user_id = :user_id AND song_id = :song_id;"
     _GET_ALBUM = "SELECT rating FROM album_ratings WHERE user_id = :user_id AND album_id = :album_id;"
 
-    # ══════════════════════════════════════════════════════════
-    # WRITE PATH — direct engine, bypasses the cached run_query
-    # ══════════════════════════════════════════════════════════
+    # ==============================================================
+    # WRITE PATH
+    # ==============================================================
     def _execute(sql: str, params: dict) -> bool:
         try:
             with get_engine().begin() as conn:
@@ -78,94 +85,228 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.toast(f"⚠️ Couldn't save rating ({e.__class__.__name__})", icon="⚠️")
             return False
 
-    def set_song_rating(user_id: int, song_id, rating: int) -> bool:
-        ok = _execute(_DELETE_SONG, {"user_id": user_id, "song_id": song_id}) if rating == 0 \
+    def set_song_rating(user_id: int, song_id, rating: float) -> bool:
+        ok = _execute(_DELETE_SONG, {"user_id": user_id, "song_id": song_id}) if rating <= 0 \
             else _execute(_UPSERT_SONG, {"user_id": user_id, "song_id": song_id, "rating": rating})
         if ok:
-            run_query.clear()  # dashboard/aggregate reads should see the new value
+            run_query.clear()
         return ok
 
-    def set_album_rating(user_id: int, album_id, rating: int) -> bool:
-        ok = _execute(_DELETE_ALBUM, {"user_id": user_id, "album_id": album_id}) if rating == 0 \
+    def set_album_rating(user_id: int, album_id, rating: float) -> bool:
+        ok = _execute(_DELETE_ALBUM, {"user_id": user_id, "album_id": album_id}) if rating <= 0 \
             else _execute(_UPSERT_ALBUM, {"user_id": user_id, "album_id": album_id, "rating": rating})
         if ok:
             run_query.clear()
         return ok
 
-    def get_song_rating(user_id: int, song_id) -> int:
+    def get_song_rating(user_id: int, song_id) -> float:
         df = run_query(_GET_SONG, {"user_id": user_id, "song_id": song_id})
-        return int(df.iloc[0]["rating"]) if not df.empty else 0
+        return float(df.iloc[0]["rating"]) if not df.empty else 0.0
 
-    def get_album_rating(user_id: int, album_id) -> int:
+    def get_album_rating(user_id: int, album_id) -> float:
         df = run_query(_GET_ALBUM, {"user_id": user_id, "album_id": album_id})
-        return int(df.iloc[0]["rating"]) if not df.empty else 0
+        return float(df.iloc[0]["rating"]) if not df.empty else 0.0
 
-    # ══════════════════════════════════════════════════════════
-    # STAR WIDGET (fragment-scoped, non-blocking)
-    # ══════════════════════════════════════════════════════════
-    @st.fragment
-    def render_star_rating(item_type: str, item_id, user_id: int, size: str = "1.35rem"):
-        """5 clickable stars. Runs in its own fragment so a click reruns
-        only this widget, not the whole page."""
-        assert item_type in ("song", "album"), "item_type must be 'song' or 'album'"
+    def _getter(item_type): return get_song_rating if item_type == "song" else get_album_rating
+    def _setter(item_type): return set_song_rating if item_type == "song" else set_album_rating
 
-        safe_id = str(item_id).replace(" ", "_")
-        container_key = f"star_{item_type}_{safe_id}"
-        state_key = f"rating_val_{item_type}_{safe_id}_{user_id}"
-
+    def _current(item_type: str, item_id, user_id: int) -> float:
+        state_key = f"rating_val_{item_type}_{item_id}_{user_id}"
         if state_key not in st.session_state:
-            getter = get_song_rating if item_type == "song" else get_album_rating
-            st.session_state[state_key] = getter(user_id, item_id)
+            st.session_state[state_key] = _getter(item_type)(user_id, item_id)
+        return st.session_state[state_key]
 
-        current = st.session_state[state_key]
+    # ==============================================================
+    # VISUAL -- proportional star bar (handles .5s cleanly)
+    # ==============================================================
+    def star_bar_html(rating: float, max_stars: int = None, size: str = "1.6rem", glow: bool = True) -> str:
+        n = max_stars or int(RATING_MAX)
+        pct = max(0.0, min(100.0, (rating / RATING_MAX) * 100)) if RATING_MAX else 0
+        glow_css = f"filter: drop-shadow(0 0 6px {GREEN}88);" if glow and rating > 0 else ""
+        stars = STAR * n
+        return f'''
+        <div style="position:relative; display:inline-block; font-size:{size}; letter-spacing:3px; line-height:1;">
+            <div style="color:rgba(255,255,255,0.14);">{stars}</div>
+            <div style="position:absolute; top:0; left:0; overflow:hidden; width:{pct:.2f}%;
+                        white-space:nowrap; color:{GREEN}; {glow_css}">{stars}</div>
+        </div>'''
 
-        def _on_click(n: int):
-            new_val = 0 if current == n else n  # clicking the current top star clears it
-            setter = set_song_rating if item_type == "song" else set_album_rating
-            if setter(user_id, item_id, new_val):
-                st.session_state[state_key] = new_val
+    def rating_chip_html(rating: float) -> str:
+        label = f"{rating:g} / {RATING_MAX:g}" if rating else "Not rated"
+        color_style = f'color:{GREEN};' if rating else f'color:{TEXT_DIM};'
+        return (f'<div class="meta-chip"><div class="meta-chip-icon">⭐</div>'
+                f'<div class="meta-chip-text"><div class="meta-chip-label">Your Rating</div>'
+                f'<div class="meta-chip-value" style="{color_style}">{escape(label)}</div></div></div>')
 
-        with st.container(key=container_key):
+    # ==============================================================
+    # FANCY SEGMENTED TOGGLE  (replaces st.radio)
+    # ==============================================================
+    def _segmented_toggle(key: str, options: list, default: str = None) -> str:
+        state_key = f"seg_{key}"
+        if state_key not in st.session_state:
+            st.session_state[state_key] = default or options[0]
+
+        with st.container(key=f"segwrap_{key}"):
             st.markdown(f"""
             <style>
-            .st-key-{container_key} div[data-testid="stHorizontalBlock"] {{ gap: 2px !important; }}
-            .st-key-{container_key} button {{
-                font-size: {size} !important; line-height: 1 !important;
-                padding: 0 !important; min-height: unset !important; height: auto !important;
-                width: auto !important; border: none !important; background: transparent !important;
-                color: {GREEN} !important; box-shadow: none !important;
+            .st-key-segwrap_{key} div[data-testid="stHorizontalBlock"] {{
+                background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 999px; padding: 4px; gap: 4px !important;
+                display: inline-flex !important; flex-wrap: nowrap !important;
+                width: fit-content !important;
             }}
-            .st-key-{container_key} button:hover {{ transform: scale(1.15); color: {GREEN} !important; }}
+            .st-key-segwrap_{key} div[data-testid="column"] {{
+                width: auto !important; min-width: 0 !important; flex: 0 0 auto !important;
+            }}
+            .st-key-segwrap_{key} div[data-testid="stButton"] {{ width: auto !important; }}
+            .st-key-segwrap_{key} button {{
+                border-radius: 999px !important; border: none !important;
+                padding: 0.35rem 1.4rem !important; font-weight: 700 !important;
+                white-space: nowrap !important; width: auto !important;
+                transition: all 0.2s ease !important;
+            }}
+            .st-key-segwrap_{key} button[kind="secondary"] {{
+                background: transparent !important; color: {TEXT_MID} !important; box-shadow: none !important;
+            }}
+            .st-key-segwrap_{key} button[kind="secondary"]:hover {{ color: {TEXT} !important; }}
+            .st-key-segwrap_{key} button[kind="primary"] {{
+                background: {GREEN} !important; color: #000 !important;
+                box-shadow: 0 4px 16px rgba(29,185,84,0.35) !important;
+            }}
             </style>
             """, unsafe_allow_html=True)
 
-            cols = st.columns(5, gap="small")
-            for i, col in enumerate(cols, start=1):
-                label = STAR_FULL if i <= current else STAR_EMPTY
-                col.button(label, key=f"{container_key}_{i}", on_click=_on_click, args=(i,))
+            cols = st.columns(len(options))
+            for col, opt in zip(cols, options):
+                is_active = st.session_state[state_key] == opt
+                with col:
+                    if st.button(opt, key=f"{state_key}_{opt}", type="primary" if is_active else "secondary"):
+                        st.session_state[state_key] = opt
+                        st.rerun()
+        return st.session_state[state_key]
 
-    def rating_chip_html(rating: int, count: int | None = None) -> str:
-        """Small read-only star chip, styled to match the app's meta-chip
-        cards — drop this into a detail page's chip row."""
-        stars = STAR_FULL * rating + STAR_EMPTY * (5 - rating)
-        sub = f'<div class="meta-chip-label">Your Rating</div>' if rating else '<div class="meta-chip-label">Rating</div>'
-        val = f'<div class="meta-chip-value" style="color:{GREEN};">{stars}</div>' if rating else \
-              f'<div class="meta-chip-value" style="color:{TEXT_DIM};">Not rated</div>'
-        return (f'<div class="meta-chip"><div class="meta-chip-icon">⭐</div>'
-                f'<div class="meta-chip-text">{sub}{val}</div></div>')
+    # ==============================================================
+    # QUICK-RATE -- compact inline control for list rows
+    # ==============================================================
+    @st.fragment
+    def render_quick_rate(item_type: str, item_id, user_id: int, key_suffix: str = ""):
+        """A small number_input (step = RATING_STEP) meant to sit next to a
+        title in any list row -- rate without opening the detail page."""
+        assert item_type in ("song", "album")
+        current = _current(item_type, item_id, user_id)
+        widget_key = f"qr_{item_type}_{item_id}_{user_id}_{key_suffix}"
 
-    # ══════════════════════════════════════════════════════════
+        def _on_change():
+            new_val = st.session_state[widget_key]
+            if _setter(item_type)(user_id, item_id, new_val):
+                st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
+
+        st.markdown("""
+        <style>
+        div[data-testid="stNumberInput"] input { text-align:center; font-weight:700; }
+        </style>
+        """, unsafe_allow_html=True)
+        st.number_input(
+            "Rate", min_value=0.0, max_value=RATING_MAX, step=RATING_STEP, value=current,
+            key=widget_key, on_change=_on_change, label_visibility="collapsed",
+        )
+
+    # ==============================================================
+    # FULL DETAIL-PAGE WIDGET -- big star bar + slider input
+    # ==============================================================
+    @st.fragment
+    def render_star_rating(item_type: str, item_id, user_id: int):
+        assert item_type in ("song", "album")
+        current = _current(item_type, item_id, user_id)
+        widget_key = f"slider_{item_type}_{item_id}_{user_id}"
+
+        options = [round(i * RATING_STEP, 1) for i in range(int(RATING_MAX / RATING_STEP) + 1)]
+
+        def _fmt(v):
+            return "Not rated" if v == 0 else f"{v:g} {STAR}"
+
+        def _on_change():
+            new_val = st.session_state[widget_key]
+            if _setter(item_type)(user_id, item_id, new_val):
+                st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
+
+        st.markdown(f'<div style="margin: 10px 0 4px;">{star_bar_html(current)}</div>', unsafe_allow_html=True)
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            st.select_slider("Your rating", options=options, value=current, format_func=_fmt,
+                              key=widget_key, on_change=_on_change, label_visibility="collapsed")
+        with c2:
+            st.markdown(f'<div style="color:{TEXT_MID}; font-size:0.85rem; padding-top:6px;">'
+                         f'{current:g} / {RATING_MAX:g}</div>', unsafe_allow_html=True)
+
+    # ==============================================================
+    # RATABLE LIST -- render_list_v2-equivalent with inline rating
+    # ==============================================================
+    def render_ratable_list(df: pd.DataFrame, item_type: str, user_id: int,
+                             title_col: str, sub_col: str, streams_col: str, hours_col: str,
+                             id_col: str, image_col: str = "image_url", rank_col: str = None):
+        """Drop-in alternative to render_list_v2 that adds a quick-rate
+        number_input to every row. Use for the Album Tracks list and the
+        Tracks/Albums explorer tabs."""
+        for i, row in df.iterrows():
+            rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
+            title = escape(str(row[title_col]))[:60]
+            subtitle = escape(str(row[sub_col]))[:50]
+            streams = f"{int(row[streams_col]):,}"
+            hours = f"{float(row[hours_col]):.1f}"
+            item_id = row[id_col]
+
+            image_url = row.get(image_col) if image_col in row else None
+            radius = "50%" if item_type == "artist" else "8px"
+            if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
+                art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover; border-radius:{radius};">'
+            else:
+                art_html = "🎵" if item_type == "song" else "💿"
+
+            href = build_href_fn(item_type, str(item_id)) if build_href_fn else None
+            title_html = f'<a href="{href}" target="_self" style="text-decoration:none; color:inherit;">{title}</a>' if href else title
+
+            row_key = f"ratable_row_{item_type}_{item_id}"
+            with st.container(key=row_key):
+                st.markdown(f"""
+                <style>
+                .st-key-{row_key} {{
+                    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+                    border-radius: 12px; padding: 8px 14px; margin-bottom: 8px;
+                    transition: border-color 0.2s ease, background 0.2s ease;
+                }}
+                .st-key-{row_key}:hover {{ border-color: rgba(29,185,84,0.3); background: rgba(255,255,255,0.035); }}
+                .st-key-{row_key} div[data-testid="stNumberInput"] {{ margin-top: -6px; }}
+                </style>
+                """, unsafe_allow_html=True)
+
+                c_art, c_info, c_stats, c_rate = st.columns([0.6, 3.4, 1.6, 1.1], vertical_alignment="center")
+                with c_art:
+                    st.markdown(f'<div style="width:44px;height:44px;border-radius:{radius};overflow:hidden;'
+                                f'display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);'
+                                f'font-size:1.2rem;">{art_html}</div>', unsafe_allow_html=True)
+                with c_info:
+                    st.markdown(f'<div style="font-weight:600; color:{TEXT};">#{rank} · {title_html}</div>'
+                                f'<div style="color:{TEXT_MID}; font-size:0.8rem;">{subtitle}</div>',
+                                unsafe_allow_html=True)
+                with c_stats:
+                    st.markdown(f'<div style="text-align:right; color:{TEXT};">{streams} streams</div>'
+                                f'<div style="text-align:right; color:{GREEN}; font-size:0.85rem;">{hours}h</div>',
+                                unsafe_allow_html=True)
+                with c_rate:
+                    render_quick_rate(item_type, item_id, user_id, key_suffix="list")
+
+    # ==============================================================
     # DASHBOARD QUERIES
-    # ══════════════════════════════════════════════════════════
+    # ==============================================================
     def _distribution(user_id: int, kind: str) -> pd.DataFrame:
         table = "song_ratings" if kind == "song" else "album_ratings"
         df = run_query(f"""
-            SELECT rating, COUNT(*) AS n
-            FROM {table}
-            WHERE user_id = :user_id
-            GROUP BY rating ORDER BY rating;
+            SELECT rating, COUNT(*) AS n FROM {table}
+            WHERE user_id = :user_id GROUP BY rating ORDER BY rating;
         """, {"user_id": user_id})
-        full = pd.DataFrame({"rating": [1, 2, 3, 4, 5]})
+        buckets = [round(i * RATING_STEP, 1) for i in range(1, int(RATING_MAX / RATING_STEP) + 1)]
+        full = pd.DataFrame({"rating": buckets})
         return full.merge(df, on="rating", how="left").fillna(0)
 
     def _hall_of_fame_songs(user_id: int, limit: int = 20) -> pd.DataFrame:
@@ -217,26 +358,28 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             ORDER BY so.id, sa.is_feature ASC NULLS LAST
         """, {**F, "user_id": user_id})
 
-    # ══════════════════════════════════════════════════════════
+    # ==============================================================
     # DASHBOARD CHARTS
-    # ══════════════════════════════════════════════════════════
+    # ==============================================================
     def _chart_distribution(df: pd.DataFrame) -> go.Figure:
         max_val = df["n"].max() if not df.empty else 0
         colors = [GREEN if v == max_val and v > 0 else "rgba(29,185,84,0.35)" for v in df["n"]]
         fig = go.Figure(go.Bar(
-            x=[STAR_FULL * int(r) for r in df["rating"]], y=df["n"],
+            x=[f"{r:g}" for r in df["rating"]], y=df["n"],
             marker_color=colors, marker_line=dict(width=0),
-            hovertemplate="<b>%{x}</b><br>%{y:,.0f} ratings<extra></extra>",
+            hovertemplate="<b>%{x} ★</b><br>%{y:,.0f} ratings<extra></extra>",
         ))
-        return themed(fig, xaxis_title="", yaxis_title="Ratings", bargap=0.35,
+        return themed(fig, xaxis_title="Rating", yaxis_title="Count", bargap=0.35,
                       margin=dict(t=20, b=40, l=50, r=20))
 
     def _chart_cross_analysis(df: pd.DataFrame) -> go.Figure:
         if df.empty:
             return themed(go.Figure())
         median_streams = df["streams"].median()
-        hidden_gems = df[(df["rating"] >= 4) & (df["streams"] <= median_streams)]
-        guilty_pleasures = df[(df["rating"] <= 2) & (df["streams"] > median_streams)]
+        gem_cut = RATING_MAX * 0.8
+        low_cut = RATING_MAX * 0.4
+        hidden_gems = df[(df["rating"] >= gem_cut) & (df["streams"] <= median_streams)]
+        guilty_pleasures = df[(df["rating"] <= low_cut) & (df["streams"] > median_streams)]
         rest_idx = df.index.difference(hidden_gems.index).difference(guilty_pleasures.index)
         rest = df.loc[rest_idx]
 
@@ -260,43 +403,55 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             hovertemplate="<b>%{text}</b><br>%{x:,} streams · %{y}★<extra></extra>",
         ))
         fig.add_vline(x=median_streams, line_dash="dot", line_color="rgba(255,255,255,0.2)")
-        fig.add_hline(y=3, line_dash="dot", line_color="rgba(255,255,255,0.2)")
+        fig.add_hline(y=RATING_MAX / 2, line_dash="dot", line_color="rgba(255,255,255,0.2)")
         return themed(fig, xaxis_title="Streams", yaxis_title="Your Rating",
-                      yaxis=dict(range=[0.5, 5.5], dtick=1, gridcolor="rgba(255,255,255,0.05)",
-                                 linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
+                      yaxis=dict(range=[0, RATING_MAX + 0.5], dtick=max(1, RATING_MAX // 5),
+                                 gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)",
+                                 zeroline=False, fixedrange=True),
                       legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center"),
                       margin=dict(t=40, b=40, l=50, r=20))
 
-    # ══════════════════════════════════════════════════════════
-    # DASHBOARD RENDER
-    # ══════════════════════════════════════════════════════════
-    def _render_hof_row(row: pd.Series, subtitle: str, id_col: str, link_type: str):
-        stars = STAR_FULL * int(row["rating"]) + STAR_EMPTY * (5 - int(row["rating"]))
+    # ==============================================================
+    # HALL OF FAME ROW (with inline quick-rate, per request #3)
+    # ==============================================================
+    def _render_hof_row(row: pd.Series, item_type: str, user_id: int, subtitle: str):
+        item_id = row["song_id"] if item_type == "song" else row["album_id"]
         title = escape(str(row.get("song_title") or row.get("album_title")))[:50]
         image_url = row.get("image_url")
-        radius = "50%" if link_type == "artist" else "8px"
-        art_html = (f'<img src="{image_url}" style="width:100%;height:100%;object-fit:cover;'
-                    f'border-radius:{radius};">') if image_url and pd.notnull(image_url) and str(image_url).startswith("http") else "🎵"
-        st.markdown(f'''
-        <div class="list-item">
-            <div class="item-art">{art_html}</div>
-            <div class="item-info">
-                <div class="item-title">{title}</div>
-                <div class="item-subtitle">{escape(subtitle)}</div>
-            </div>
-            <div class="item-stats">
-                <div class="stat"><div class="stat-value green" style="letter-spacing:1px;">{stars}</div></div>
-            </div>
-        </div>
-        ''', unsafe_allow_html=True)
+        radius = "50%" if item_type == "artist" else "8px"
+        art_html = (f'<img src="{image_url}" style="width:100%;height:100%;object-fit:cover;border-radius:{radius};">'
+                    if image_url and pd.notnull(image_url) and str(image_url).startswith("http") else "🎵")
 
+        row_key = f"hof_row_{item_type}_{item_id}"
+        with st.container(key=row_key):
+            st.markdown(f"""
+            <style>
+            .st-key-{row_key} {{ padding: 6px 10px; border-radius: 10px; transition: background 0.2s ease; }}
+            .st-key-{row_key}:hover {{ background: rgba(255,255,255,0.03); }}
+            </style>
+            """, unsafe_allow_html=True)
+            c_art, c_info, c_stars, c_rate = st.columns([0.5, 2.8, 2.2, 1.1], vertical_alignment="center")
+            with c_art:
+                st.markdown(f'<div style="width:40px;height:40px;border-radius:{radius};overflow:hidden;'
+                            f'display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);">{art_html}</div>',
+                            unsafe_allow_html=True)
+            with c_info:
+                st.markdown(f'<div style="font-weight:600;">{title}</div>'
+                            f'<div style="color:{TEXT_MID}; font-size:0.8rem;">{escape(subtitle)}</div>',
+                            unsafe_allow_html=True)
+            with c_stars:
+                st.markdown(star_bar_html(float(row["rating"]), size="1.1rem", glow=False), unsafe_allow_html=True)
+            with c_rate:
+                render_quick_rate(item_type, item_id, user_id, key_suffix="hof")
+
+    # ==============================================================
+    # DASHBOARD RENDER
+    # ==============================================================
     def render_ratings_dashboard(user_id: int, F: dict):
-        """Full 'Ratings' tab: distribution, Hall of Fame, cross-analysis."""
-        kind = st.radio("Scope", ["Songs", "Albums"], horizontal=True, label_visibility="collapsed", key="ratings_scope")
+        kind = _segmented_toggle("ratings_scope", ["Songs", "Albums"])
         kind_key = "song" if kind == "Songs" else "album"
 
-        # ── Distribution ──
-        st.markdown('<div class="section-header"><span class="icon">⭐</span>Rating Distribution</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header" style="margin-top:14px;"><span class="icon">⭐</span>Rating Distribution</div>', unsafe_allow_html=True)
         dist_df = _distribution(user_id, kind_key)
         total_rated = int(dist_df["n"].sum())
         if total_rated == 0:
@@ -314,37 +469,35 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.markdown(f'''
             <div class="kpi-card" style="text-align:center; padding: 2rem;">
                 <div class="kpi-title">Average Rating</div>
-                <div class="kpi-value" style="font-size:2.6rem;">{avg_rating:.2f} {STAR_FULL}</div>
+                <div class="kpi-value" style="font-size:2.4rem;">{avg_rating:.1f} / {RATING_MAX:g}</div>
+                {star_bar_html(avg_rating, size="1.3rem", glow=False)}
                 <div class="stat-label" style="margin-top:6px;">{total_rated} {kind.lower()} rated</div>
             </div>
             ''', unsafe_allow_html=True)
 
-        # ── Hall of Fame ──
-        st.markdown('<div class="section-header" style="margin-top:12px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
         hof_df = _hall_of_fame_songs(user_id) if kind_key == "song" else _hall_of_fame_albums(user_id)
         if hof_df.empty:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Nothing rated yet</div>', unsafe_allow_html=True)
         else:
             for _, row in hof_df.iterrows():
-                if kind_key == "song":
-                    _render_hof_row(row, row.get("main_artist") or "Unknown", "song_id", "song")
-                else:
-                    _render_hof_row(row, "Album", "album_id", "album")
+                subtitle = (row.get("main_artist") or "Unknown") if kind_key == "song" else "Album"
+                _render_hof_row(row, kind_key, user_id, subtitle)
 
-        # ── Cross-analysis (songs only — streams are song-level) ──
-        st.markdown('<div class="section-header" style="margin-top:12px;"><span class="icon">🔎</span>Hidden Gems vs Guilty Pleasures</div>', unsafe_allow_html=True)
-        st.markdown(f'<div style="color:{TEXT_MID}; font-size:0.85rem; margin-bottom:8px;">'
-                     f'Rating vs. streams in the selected date range. <b>Green</b> = high rating, low streams '
-                     f'(hidden gems). <b>Orange</b> = high streams, low rating (guilty pleasures).</div>',
-                     unsafe_allow_html=True)
-        cross_df = _cross_analysis_songs(user_id, F)
-        if cross_df.empty:
-            st.markdown('<div class="empty-state"><div class="icon">📭</div>Rate some songs to see this chart</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.plotly_chart(_chart_cross_analysis(cross_df), use_container_width=True,
-                             config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
-            st.markdown('</div>', unsafe_allow_html=True)
+        if kind_key == "song":
+            st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🔎</span>Hidden Gems vs Guilty Pleasures</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="color:{TEXT_MID}; font-size:0.85rem; margin-bottom:8px;">'
+                         f'Rating vs. streams in the selected date range. <b>Green</b> = high rating, low streams '
+                         f'(hidden gems). <b>Orange</b> = high streams, low rating (guilty pleasures).</div>',
+                         unsafe_allow_html=True)
+            cross_df = _cross_analysis_songs(user_id, F)
+            if cross_df.empty:
+                st.markdown('<div class="empty-state"><div class="icon">📭</div>Rate some songs to see this chart</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                st.plotly_chart(_chart_cross_analysis(cross_df), use_container_width=True,
+                                 config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                st.markdown('</div>', unsafe_allow_html=True)
 
     return SimpleNamespace(
         set_song_rating=set_song_rating,
@@ -352,6 +505,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         get_song_rating=get_song_rating,
         get_album_rating=get_album_rating,
         render_star_rating=render_star_rating,
+        render_quick_rate=render_quick_rate,
+        render_ratable_list=render_ratable_list,
         rating_chip_html=rating_chip_html,
+        star_bar_html=star_bar_html,
         render_ratings_dashboard=render_ratings_dashboard,
     )

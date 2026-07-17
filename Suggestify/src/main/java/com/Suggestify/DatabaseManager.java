@@ -121,7 +121,7 @@ public class DatabaseManager {
                 id          BIGSERIAL PRIMARY KEY,
                 user_id     INTEGER  NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
                 song_id     INTEGER  NOT NULL REFERENCES songs(id)  ON DELETE CASCADE,
-                rating      SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                rating      NUMERIC(3,1) NOT NULL CHECK (rating > 0 AND rating <= 10),
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                 CONSTRAINT uq_song_rating UNIQUE (user_id, song_id)
@@ -140,7 +140,7 @@ public class DatabaseManager {
                 id          BIGSERIAL PRIMARY KEY,
                 user_id     INTEGER  NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
                 album_id    INTEGER  NOT NULL REFERENCES albums(id)  ON DELETE CASCADE,
-                rating      SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                rating      NUMERIC(3,1) NOT NULL CHECK (rating > 0 AND rating <= 10),
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                 CONSTRAINT uq_album_rating UNIQUE (user_id, album_id)
