@@ -208,14 +208,26 @@ public class TrackMetadataEnricher {
     private static boolean isMatchValid(String targetArtist, String targetTitle, String itunesArtist, String itunesTitle) {
         if (itunesArtist == null || itunesTitle == null) return false;
 
-        String normTargetArtist = targetArtist.toLowerCase().replaceAll("[^a-z0-9]", "");
-        String normItunesArtist = itunesArtist.toLowerCase().replaceAll("[^a-z0-9]", "");
+        String normTargetArtist = targetArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+        String normItunesArtist = itunesArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+        String normTargetTitle = targetTitle.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+        String normItunesTitle = itunesTitle.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
 
-        String normTargetTitle = targetTitle.toLowerCase().replaceAll("[^a-z0-9]", "");
-        String normItunesTitle = itunesTitle.toLowerCase().replaceAll("[^a-z0-9]", "");
+        boolean artistOk = false;
+        String[] targetWords = normTargetArtist.split("\\s+");
+        for (String word : targetWords) {
+            if (word.length() > 2 && normItunesArtist.contains(word)) {
+                artistOk = true;
+                break;
+            }
+        }
 
-        boolean artistOk = normItunesArtist.contains(normTargetArtist) || normTargetArtist.contains(normItunesArtist);
-        boolean titleOk = normItunesTitle.contains(normTargetTitle) || normTargetTitle.contains(normItunesTitle);
+        if (!artistOk && normItunesArtist.contains(normTargetArtist.replace(" ", ""))) {
+            artistOk = true;
+        }
+
+        boolean titleOk = normItunesTitle.contains(normTargetTitle.replace(" ", "")) ||
+                normTargetTitle.replace(" ", "").contains(normItunesTitle);
 
         return artistOk && titleOk;
     }

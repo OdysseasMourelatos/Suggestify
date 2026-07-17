@@ -288,17 +288,28 @@ public class AlbumMetadataEnricher {
     private static boolean isMatchValid(String targetArtist, String targetAlbum, String itunesArtist, String itunesAlbum) {
         if (itunesArtist == null || itunesAlbum == null) return false;
 
-        String tArtist = sanitize(targetArtist);
-        String tAlbum = sanitize(targetAlbum);
-        String iArtist = sanitize(itunesArtist);
-        String iAlbum = sanitize(itunesAlbum);
+        String normTargetArtist = targetArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+        String normItunesArtist = itunesArtist.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+        String normTargetAlbum = targetAlbum.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
+        String normItunesAlbum = itunesAlbum.toLowerCase().replaceAll("[^a-z0-9\\s]", " ").trim();
 
-        if (tArtist.isEmpty() || tAlbum.isEmpty() || iArtist.isEmpty() || iAlbum.isEmpty()) return false;
+        boolean artistOk = false;
+        String[] targetWords = normTargetArtist.split("\\s+");
+        for (String word : targetWords) {
+            if (word.length() > 2 && normItunesArtist.contains(word)) {
+                artistOk = true;
+                break;
+            }
+        }
 
-        boolean artistMatch = tArtist.contains(iArtist) || iArtist.contains(tArtist);
-        boolean albumMatch = tAlbum.contains(iAlbum) || iAlbum.contains(tAlbum);
+        if (!artistOk && normItunesArtist.contains(normTargetArtist.replace(" ", ""))) {
+            artistOk = true;
+        }
 
-        return artistMatch && albumMatch;
+        boolean albumOk = normItunesAlbum.contains(normTargetAlbum.replace(" ", "")) ||
+                normTargetAlbum.replace(" ", "").contains(normItunesAlbum);
+
+        return artistOk && albumOk;
     }
 
     // ═══════════════════════════════════════════════════════════════
