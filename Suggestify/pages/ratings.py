@@ -1,33 +1,5 @@
 """
 ratings.py — Song/Album rating system for Suggestify (v2).
-
-    from ratings import init_ratings_module
-    R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG,
-                             build_href_fn=build_filtered_href)   # optional, enables clickable rows
-
-What changed from v1
----------------------
-1. Songs/Albums scope selector is now a fancy pill-style segmented control
-   instead of a default st.radio.
-2. Rating scale is configurable at the top of this file (RATING_MAX /
-   RATING_STEP). Defaults to a 10-point scale in 0.5 steps (1, 1.5, ... 9.5,
-   10) -- your personal-ranking use case. Drop RATING_MAX to 5 and it becomes
-   a 5-star scale with a 4.5 option, no other code changes needed. Display
-   uses a proportional-fill star bar (handles halves cleanly) rather than
-   discrete star glyphs, since unicode has no reliable half-star character.
-2b. The DB column changed from SMALLINT to NUMERIC(3,1) to store the .5s --
-    see the updated ratings_schema.sql.
-3. render_quick_rate(): a compact number_input (step = RATING_STEP) meant
-   to sit directly beside a title in any list row, so you can rate without
-   opening the detail page.
-4. render_ratable_list(): a drop-in alternative to your existing
-   render_list_v2 that adds a render_quick_rate() control to every row --
-   use it for the Album Tracks list and the Track Explorer/Albums tab so
-   rating is available straight from the list.
-
-Everything still writes through a single-row UPSERT and is wrapped in
-@st.fragment, so a rating edit -- whether from the detail page or inline in
-a list -- reruns only that widget, not the page.
 """
 
 from __future__ import annotations
@@ -39,19 +11,14 @@ from sqlalchemy import text
 from html import escape
 from types import SimpleNamespace
 
-# -- Rating scale -- change these two lines to reshape the whole system --
-RATING_MAX: float = 10.0    # e.g. 5.0 for a classic 5-star scale
-RATING_STEP: float = 0.5    # e.g. 0.5 gives the "4.5 / 9.5" half-point option
+# -- Rating scale --
+RATING_MAX: float = 10.0    # 10-star scale
+RATING_STEP: float = 0.5    # 0.5 steps (e.g., 9.5)
 
 STAR = "★"
 
-
 def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG,
                          build_href_fn=None):
-    """Factory binding this module to the host app's engine, cached query
-    runner, Plotly theme helper, and (optionally) a `build_href_fn(item_type,
-    item_id) -> href` used to make list-row titles clickable, matching your
-    existing build_filtered_href."""
 
     # ==============================================================
     # SQL
@@ -88,15 +55,13 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     def set_song_rating(user_id: int, song_id, rating: float) -> bool:
         ok = _execute(_DELETE_SONG, {"user_id": user_id, "song_id": song_id}) if rating <= 0 \
             else _execute(_UPSERT_SONG, {"user_id": user_id, "song_id": song_id, "rating": rating})
-        if ok:
-            run_query.clear()
+        if ok: run_query.clear()
         return ok
 
     def set_album_rating(user_id: int, album_id, rating: float) -> bool:
         ok = _execute(_DELETE_ALBUM, {"user_id": user_id, "album_id": album_id}) if rating <= 0 \
             else _execute(_UPSERT_ALBUM, {"user_id": user_id, "album_id": album_id, "rating": rating})
-        if ok:
-            run_query.clear()
+        if ok: run_query.clear()
         return ok
 
     def get_song_rating(user_id: int, song_id) -> float:
@@ -117,16 +82,16 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         return st.session_state[state_key]
 
     # ==============================================================
-    # VISUAL -- proportional star bar (handles .5s cleanly)
+    # STATIC STAR BAR (For Chips & Hall of Fame rows)
     # ==============================================================
     def star_bar_html(rating: float, max_stars: int = None, size: str = "1.6rem", glow: bool = True) -> str:
         n = max_stars or int(RATING_MAX)
         pct = max(0.0, min(100.0, (rating / RATING_MAX) * 100)) if RATING_MAX else 0
-        glow_css = f"filter: drop-shadow(0 0 6px {GREEN}88);" if glow and rating > 0 else ""
         stars = STAR * n
+        glow_css = f"text-shadow: 0 0 8px {GREEN}aa, 0 0 18px {GREEN}55;" if glow and rating > 0 else ""
         return f'''
         <div style="position:relative; display:inline-block; font-size:{size}; letter-spacing:3px; line-height:1;">
-            <div style="color:rgba(255,255,255,0.14);">{stars}</div>
+            <div style="color:rgba(255,255,255,0.12);">{stars}</div>
             <div style="position:absolute; top:0; left:0; overflow:hidden; width:{pct:.2f}%;
                         white-space:nowrap; color:{GREEN}; {glow_css}">{stars}</div>
         </div>'''
@@ -134,12 +99,142 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     def rating_chip_html(rating: float) -> str:
         label = f"{rating:g} / {RATING_MAX:g}" if rating else "Not rated"
         color_style = f'color:{GREEN};' if rating else f'color:{TEXT_DIM};'
-        return (f'<div class="meta-chip"><div class="meta-chip-icon">⭐</div>'
-                f'<div class="meta-chip-text"><div class="meta-chip-label">Your Rating</div>'
-                f'<div class="meta-chip-value" style="{color_style}">{escape(label)}</div></div></div>')
+        return (
+            f'<div class="meta-chip"><div class="meta-chip-icon">⭐</div>'
+            f'<div class="meta-chip-text"><div class="meta-chip-label">Your Rating</div>'
+            f'<div class="meta-chip-value" style="{color_style}">{escape(label)}</div>'
+            f'<div style="margin-top:5px; width:88px;">{star_bar_html(rating, size="0.6rem", glow=False)}</div>'
+            f'</div></div>'
+        )
 
     # ==============================================================
-    # FANCY SEGMENTED TOGGLE  (replaces st.radio)
+    # THE MAGIC: FULL DETAIL-PAGE WIDGET (CSS Mask Slider)
+    # ==============================================================
+    @st.fragment
+    def render_star_rating(item_type: str, item_id, user_id: int):
+        assert item_type in ("song", "album")
+        current = _current(item_type, item_id, user_id)
+        widget_key = f"slider_{item_type}_{item_id}_{user_id}"
+        wrap_key = f"ratewrap_{item_type}_{item_id}_{user_id}"
+
+        def _on_change():
+            new_val = st.session_state[widget_key]
+            if _setter(item_type)(user_id, item_id, new_val):
+                st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
+
+        with st.container(key=wrap_key):
+            
+            # Το SVG Αστέρι που χρησιμοποιείται ως Μάσκα (Mask)
+            star_svg = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%2017.27L18.18%2021l-1.64-7.03L22%209.24l-7.19-.61L12%202%209.19%208.63%202%209.24l5.46%204.73L5.82%2021z%22%2F%3E%3C%2Fsvg%3E'
+            
+            st.markdown(f"""
+            <style>
+            .st-key-{wrap_key} {{
+                background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 16px;
+                padding: 24px 30px 14px;
+                margin: 10px 0 6px;
+            }}
+            
+            /* -- MAGIC SLIDER TRICK -- */
+            /* 1. Περιορίζουμε το πλάτος ώστε τα 10 αστέρια να είναι τέλεια τετράγωνα */
+            .st-key-{wrap_key} div[data-testid="stSlider"] {{
+                max-width: 440px !important;
+                margin: 0 auto !important; 
+                padding-top: 5px !important;
+            }}
+            /* 2. Κρύβουμε τα ενοχλητικά default κείμενα του slider */
+            .st-key-{wrap_key} div[data-testid="stSlider"] label {{ display:none; }}
+            .st-key-{wrap_key} div[data-testid="stTickBar"] {{ display:none; }}
+
+            /* 3. Το Background του Slider (Τα άδεια αστέρια) */
+            .st-key-{wrap_key} div[data-baseweb="slider"] > div:first-child {{
+                height: 44px !important;
+                border-radius: 0 !important;
+                background: rgba(255,255,255,0.12) !important;
+                -webkit-mask-image: url('{star_svg}') !important;
+                -webkit-mask-size: {100/RATING_MAX}% 100% !important;
+                -webkit-mask-repeat: repeat-x !important;
+                mask-image: url('{star_svg}') !important;
+                mask-size: {100/RATING_MAX}% 100% !important;
+                mask-repeat: repeat-x !important;
+            }}
+
+            /* 4. Το Γεμάτο κομμάτι του Slider (Τα πράσινα αστέρια που γεμίζουν) */
+            .st-key-{wrap_key} div[data-baseweb="slider"] > div:first-child > div {{
+                height: 44px !important;
+                border-radius: 0 !important;
+                background: linear-gradient(90deg, {GREEN}cc, {GREEN}) !important;
+                -webkit-mask-image: url('{star_svg}') !important;
+                -webkit-mask-size: {100/RATING_MAX}% 100% !important;
+                -webkit-mask-repeat: repeat-x !important;
+                mask-image: url('{star_svg}') !important;
+                mask-size: {100/RATING_MAX}% 100% !important;
+                mask-repeat: repeat-x !important;
+                filter: drop-shadow(0 0 8px {GREEN}88);
+            }}
+
+            /* 5. Το κουμπί (Thumb) του slider γίνεται αόρατο, αλλά πιάνει το κλικ σου! */
+            .st-key-{wrap_key} div[role="slider"] {{
+                opacity: 0 !important; 
+                width: 44px !important;
+                height: 44px !important;
+                cursor: pointer !important;
+            }}
+
+            /* -- ΚΟΥΜΠΙ CLEAR -- */
+            .st-key-{wrap_key} button {{
+                background: transparent !important;
+                border: 1px solid rgba(255,255,255,0.15) !important;
+                color: {TEXT_MID} !important;
+                font-size: 0.75rem !important;
+                padding: 0.2rem 0 !important;
+                margin: 25px auto 0 !important;
+                max-width: 120px !important;
+                display: block !important;
+                transition: all 0.2s ease !important;
+                border-radius: 999px !important;
+            }}
+            .st-key-{wrap_key} button:hover {{
+                color: #FF7043 !important;
+                border-color: #FF704355 !important;
+                background: rgba(255,112,67,0.05) !important;
+            }}
+            </style>
+            """, unsafe_allow_html=True)
+
+            head_l, head_r = st.columns([3, 2])
+            with head_l:
+                st.markdown(
+                    f'<div style="font-size:0.75rem; letter-spacing:0.08em; text-transform:uppercase; '
+                    f'color:{TEXT_MID}; font-weight:700; margin-bottom:10px;">Drag to Rate</div>',
+                    unsafe_allow_html=True,
+                )
+            with head_r:
+                value_label = f"{current:g}" if current else "Not rated"
+                st.markdown(
+                    f'<div style="text-align:right; font-size:1.5rem; font-weight:800; '
+                    f'color:{GREEN if current else TEXT_DIM};">{value_label}'
+                    f'<span style="font-size:0.9rem; color:{TEXT_DIM}; font-weight:600;"> / {RATING_MAX:g}</span></div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.slider(
+                "Your rating", min_value=0.0, max_value=RATING_MAX, step=RATING_STEP, value=current,
+                key=widget_key, on_change=_on_change, label_visibility="collapsed",
+            )
+
+            # Clear button
+            if current > 0:
+                if st.button("Clear Rating", key=f"clear_{widget_key}"):
+                    if _setter(item_type)(user_id, item_id, 0.0):
+                        st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = 0.0
+                        st.session_state[widget_key] = 0.0
+                        st.rerun(scope="fragment")
+
+    # ==============================================================
+    # FANCY SEGMENTED TOGGLE  (For Dashboard)
     # ==============================================================
     def _segmented_toggle(key: str, options: list, default: str = None) -> str:
         state_key = f"seg_{key}"
@@ -185,119 +280,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                         st.rerun()
         return st.session_state[state_key]
 
-    # ==============================================================
-    # QUICK-RATE -- compact inline control for list rows
-    # ==============================================================
-    @st.fragment
-    def render_quick_rate(item_type: str, item_id, user_id: int, key_suffix: str = ""):
-        """A small number_input (step = RATING_STEP) meant to sit next to a
-        title in any list row -- rate without opening the detail page."""
-        assert item_type in ("song", "album")
-        current = _current(item_type, item_id, user_id)
-        widget_key = f"qr_{item_type}_{item_id}_{user_id}_{key_suffix}"
-
-        def _on_change():
-            new_val = st.session_state[widget_key]
-            if _setter(item_type)(user_id, item_id, new_val):
-                st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
-
-        st.markdown("""
-        <style>
-        div[data-testid="stNumberInput"] input { text-align:center; font-weight:700; }
-        </style>
-        """, unsafe_allow_html=True)
-        st.number_input(
-            "Rate", min_value=0.0, max_value=RATING_MAX, step=RATING_STEP, value=current,
-            key=widget_key, on_change=_on_change, label_visibility="collapsed",
-        )
 
     # ==============================================================
-    # FULL DETAIL-PAGE WIDGET -- big star bar + slider input
-    # ==============================================================
-    @st.fragment
-    def render_star_rating(item_type: str, item_id, user_id: int):
-        assert item_type in ("song", "album")
-        current = _current(item_type, item_id, user_id)
-        widget_key = f"slider_{item_type}_{item_id}_{user_id}"
-
-        options = [round(i * RATING_STEP, 1) for i in range(int(RATING_MAX / RATING_STEP) + 1)]
-
-        def _fmt(v):
-            return "Not rated" if v == 0 else f"{v:g} {STAR}"
-
-        def _on_change():
-            new_val = st.session_state[widget_key]
-            if _setter(item_type)(user_id, item_id, new_val):
-                st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
-
-        st.markdown(f'<div style="margin: 10px 0 4px;">{star_bar_html(current)}</div>', unsafe_allow_html=True)
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            st.select_slider("Your rating", options=options, value=current, format_func=_fmt,
-                              key=widget_key, on_change=_on_change, label_visibility="collapsed")
-        with c2:
-            st.markdown(f'<div style="color:{TEXT_MID}; font-size:0.85rem; padding-top:6px;">'
-                         f'{current:g} / {RATING_MAX:g}</div>', unsafe_allow_html=True)
-
-    # ==============================================================
-    # RATABLE LIST -- render_list_v2-equivalent with inline rating
-    # ==============================================================
-    def render_ratable_list(df: pd.DataFrame, item_type: str, user_id: int,
-                             title_col: str, sub_col: str, streams_col: str, hours_col: str,
-                             id_col: str, image_col: str = "image_url", rank_col: str = None):
-        """Drop-in alternative to render_list_v2 that adds a quick-rate
-        number_input to every row. Use for the Album Tracks list and the
-        Tracks/Albums explorer tabs."""
-        for i, row in df.iterrows():
-            rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
-            title = escape(str(row[title_col]))[:60]
-            subtitle = escape(str(row[sub_col]))[:50]
-            streams = f"{int(row[streams_col]):,}"
-            hours = f"{float(row[hours_col]):.1f}"
-            item_id = row[id_col]
-
-            image_url = row.get(image_col) if image_col in row else None
-            radius = "50%" if item_type == "artist" else "8px"
-            if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
-                art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover; border-radius:{radius};">'
-            else:
-                art_html = "🎵" if item_type == "song" else "💿"
-
-            href = build_href_fn(item_type, str(item_id)) if build_href_fn else None
-            title_html = f'<a href="{href}" target="_self" style="text-decoration:none; color:inherit;">{title}</a>' if href else title
-
-            row_key = f"ratable_row_{item_type}_{item_id}"
-            with st.container(key=row_key):
-                st.markdown(f"""
-                <style>
-                .st-key-{row_key} {{
-                    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
-                    border-radius: 12px; padding: 8px 14px; margin-bottom: 8px;
-                    transition: border-color 0.2s ease, background 0.2s ease;
-                }}
-                .st-key-{row_key}:hover {{ border-color: rgba(29,185,84,0.3); background: rgba(255,255,255,0.035); }}
-                .st-key-{row_key} div[data-testid="stNumberInput"] {{ margin-top: -6px; }}
-                </style>
-                """, unsafe_allow_html=True)
-
-                c_art, c_info, c_stats, c_rate = st.columns([0.6, 3.4, 1.6, 1.1], vertical_alignment="center")
-                with c_art:
-                    st.markdown(f'<div style="width:44px;height:44px;border-radius:{radius};overflow:hidden;'
-                                f'display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);'
-                                f'font-size:1.2rem;">{art_html}</div>', unsafe_allow_html=True)
-                with c_info:
-                    st.markdown(f'<div style="font-weight:600; color:{TEXT};">#{rank} · {title_html}</div>'
-                                f'<div style="color:{TEXT_MID}; font-size:0.8rem;">{subtitle}</div>',
-                                unsafe_allow_html=True)
-                with c_stats:
-                    st.markdown(f'<div style="text-align:right; color:{TEXT};">{streams} streams</div>'
-                                f'<div style="text-align:right; color:{GREEN}; font-size:0.85rem;">{hours}h</div>',
-                                unsafe_allow_html=True)
-                with c_rate:
-                    render_quick_rate(item_type, item_id, user_id, key_suffix="list")
-
-    # ==============================================================
-    # DASHBOARD QUERIES
+    # DASHBOARD QUERIES & RENDER
     # ==============================================================
     def _distribution(user_id: int, kind: str) -> pd.DataFrame:
         table = "song_ratings" if kind == "song" else "album_ratings"
@@ -358,9 +343,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             ORDER BY so.id, sa.is_feature ASC NULLS LAST
         """, {**F, "user_id": user_id})
 
-    # ==============================================================
-    # DASHBOARD CHARTS
-    # ==============================================================
     def _chart_distribution(df: pd.DataFrame) -> go.Figure:
         max_val = df["n"].max() if not df.empty else 0
         colors = [GREEN if v == max_val and v > 0 else "rgba(29,185,84,0.35)" for v in df["n"]]
@@ -411,9 +393,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                       legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center"),
                       margin=dict(t=40, b=40, l=50, r=20))
 
-    # ==============================================================
-    # HALL OF FAME ROW (with inline quick-rate, per request #3)
-    # ==============================================================
     def _render_hof_row(row: pd.Series, item_type: str, user_id: int, subtitle: str):
         item_id = row["song_id"] if item_type == "song" else row["album_id"]
         title = escape(str(row.get("song_title") or row.get("album_title")))[:50]
@@ -430,7 +409,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             .st-key-{row_key}:hover {{ background: rgba(255,255,255,0.03); }}
             </style>
             """, unsafe_allow_html=True)
-            c_art, c_info, c_stars, c_rate = st.columns([0.5, 2.8, 2.2, 1.1], vertical_alignment="center")
+            c_art, c_info, c_stars = st.columns([0.5, 3.5, 2.0], vertical_alignment="center")
             with c_art:
                 st.markdown(f'<div style="width:40px;height:40px;border-radius:{radius};overflow:hidden;'
                             f'display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);">{art_html}</div>',
@@ -440,13 +419,8 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                             f'<div style="color:{TEXT_MID}; font-size:0.8rem;">{escape(subtitle)}</div>',
                             unsafe_allow_html=True)
             with c_stars:
-                st.markdown(star_bar_html(float(row["rating"]), size="1.1rem", glow=False), unsafe_allow_html=True)
-            with c_rate:
-                render_quick_rate(item_type, item_id, user_id, key_suffix="hof")
+                st.markdown(f'<div style="text-align:right;">{star_bar_html(float(row["rating"]), size="1.2rem", glow=False)}</div>', unsafe_allow_html=True)
 
-    # ==============================================================
-    # DASHBOARD RENDER
-    # ==============================================================
     def render_ratings_dashboard(user_id: int, F: dict):
         kind = _segmented_toggle("ratings_scope", ["Songs", "Albums"])
         kind_key = "song" if kind == "Songs" else "album"
@@ -505,8 +479,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         get_song_rating=get_song_rating,
         get_album_rating=get_album_rating,
         render_star_rating=render_star_rating,
-        render_quick_rate=render_quick_rate,
-        render_ratable_list=render_ratable_list,
         rating_chip_html=rating_chip_html,
         star_bar_html=star_bar_html,
         render_ratings_dashboard=render_ratings_dashboard,

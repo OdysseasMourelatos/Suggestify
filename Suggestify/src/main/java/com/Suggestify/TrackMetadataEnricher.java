@@ -23,9 +23,13 @@ import java.util.regex.Pattern;
 
 public class TrackMetadataEnricher {
 
-    // Μειώσαμε τα Threads για να μην μας κάνει ban η Apple
     private static final int THREAD_POOL_SIZE = 2;
-    private static final int API_DELAY_MS = 1000;
+    // 2500ms global delay = strictly 24 requests per minute (Apple limit is ~30)
+    private static final int API_DELAY_MS = 2500; 
+    
+    // Global rate limiting variables
+    private static long lastRequestTime = 0;
+    private static volatile long penaltyEndTime = 0;
 
     static class EnrichmentResult {
         int songId; boolean success; String artist; String cleanTitle;
@@ -95,16 +99,13 @@ public class TrackMetadataEnricher {
                 int successCount = 0;
                 int notFoundCount = 0;
 
-                // 1. Μαζεύουμε όλα τα αποτελέσματα
                 List<EnrichmentResult> processedResults = new ArrayList<>();
                 for (Future<EnrichmentResult> future : futures) {
                     processedResults.add(future.get());
                 }
 
-                // 2. ANTI-DEADLOCK FIX: Τα κάνουμε Sort με βάση το ID πριν τα στείλουμε στη βάση!
                 processedResults.sort(Comparator.comparingInt(a -> a.songId));
 
-                // 3. Εκτελούμε τα SQL Batches
                 for (EnrichmentResult res : processedResults) {
                     if (res.success) {
                         updateStmt.setInt(1, res.durationMs);
@@ -132,7 +133,14 @@ public class TrackMetadataEnricher {
 
                 totalSuccess += successCount;
                 totalNotFound += notFoundCount;
-                System.out.println("✅ Cycle #" + cycle + " Complete! Validated: " + successCount + " | Rejected: " + notFoundCount);
+                
+                // If the entire batch was rate-limited, wait before querying the DB again to avoid spinning the CPU
+                if (successCount == 0 && notFoundCount == 0 && batchSize > 0) {
+                    System.out.println("⚠️ Entire cycle was rate-limited. Idling before next DB fetch...");
+                    Thread.sleep(10000); 
+                } else {
+                    System.out.println("✅ Cycle #" + cycle + " Complete! Validated: " + successCount + " | Rejected: " + notFoundCount);
+                }
                 cycle++;
             }
 
@@ -141,6 +149,39 @@ public class TrackMetadataEnricher {
 
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * Ensures all threads respect a single, global delay between HTTP requests.
+     */
+    private static synchronized void enforceGlobalRateLimit() throws InterruptedException {
+        long now = System.currentTimeMillis();
+        
+        // If we are currently serving a ban penalty, wait it out
+        if (now < penaltyEndTime) {
+            Thread.sleep(penaltyEndTime - now);
+            now = System.currentTimeMillis();
+        }
+        
+        // Ensure at least API_DELAY_MS has passed since the LAST thread made a request
+        long elapsed = now - lastRequestTime;
+        if (elapsed < API_DELAY_MS) {
+            Thread.sleep(API_DELAY_MS - elapsed);
+        }
+        
+        lastRequestTime = System.currentTimeMillis();
+    }
+
+    /**
+     * Halts all threads globally for 60 seconds when a 403/429 is hit.
+     */
+    private static synchronized void triggerPenaltyBackoff() {
+        long now = System.currentTimeMillis();
+        // Only set the penalty if another thread hasn't already done it recently
+        if (penaltyEndTime < now) {
+            System.out.println("🛑 BAN DETECTED: Pausing all requests globally for 60 seconds...");
+            penaltyEndTime = now + 60000;
         }
     }
 
@@ -165,17 +206,20 @@ public class TrackMetadataEnricher {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(apiUrl))
-                    .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .header("Accept", "application/json")
                     .GET()
                     .build();
+
+            // WAIT for clearance before firing
+            enforceGlobalRateLimit();
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 403 || response.statusCode() == 429) {
                 System.out.println("🛑 BLOCKED BY APPLE (403/429): " + targetArtist + " - " + cleanTitle);
                 res.rateLimited = true; 
-                Thread.sleep(5000); // Περιμένουμε 5 δεύτερα αν μας μπλοκάρουν
+                triggerPenaltyBackoff();
                 return res;
             }
 
@@ -217,9 +261,8 @@ public class TrackMetadataEnricher {
                 }
             }
 
-            Thread.sleep(API_DELAY_MS);
-
         } catch (Exception e) {
+            // Ignored silently per original code
         }
         return res;
     }
