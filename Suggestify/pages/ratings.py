@@ -1,5 +1,5 @@
 """
-ratings.py — Song/Album rating system for Suggestify (v2).
+ratings.py — Song/Album rating system for Suggestify (v3).
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 # -- Rating scale --
 RATING_MAX: float = 10.0    # 10-star scale
-RATING_STEP: float = 0.5    # 0.5 steps (e.g., 9.5)
+RATING_STEP: float = 0.5    # 0.5 steps (e.g., 9.5) — used on the full detail-page slider only
 
 STAR = "★"
 
@@ -81,6 +81,8 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.session_state[state_key] = _getter(item_type)(user_id, item_id)
         return st.session_state[state_key]
 
+    STAR_SVG = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%2017.27L18.18%2021l-1.64-7.03L22%209.24l-7.19-.61L12%202%209.19%208.63%202%209.24l5.46%204.73L5.82%2021z%22%2F%3E%3C%2Fsvg%3E'
+
     # ==============================================================
     # STATIC STAR BAR (For Chips & Hall of Fame rows)
     # ==============================================================
@@ -108,7 +110,89 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         )
 
     # ==============================================================
-    # THE MAGIC: FULL DETAIL-PAGE WIDGET (CSS Mask Slider)
+    # COMPACT QUICK-RATE (10 clickable star buttons — fully responsive)
+    # ==============================================================
+    @st.fragment
+    def render_compact_star_rating(item_type: str, item_id, user_id: int, scale: int = 10):
+        """
+        Renders 10 clickable star buttons fused to the bottom of a list card.
+        Clicking star N sets the rating to N; clicking the currently-set star
+        again clears the rating. Fill color is recomputed from session state
+        on every click (fragment rerun), so it never needs a page refresh.
+        """
+        assert item_type in ("song", "album")
+        current = int(round(_current(item_type, item_id, user_id)))  # whole stars for quick-rate
+        wrap_key = f"crate_{item_type}_{item_id}_{user_id}"
+
+        def _make_cb(star_n):
+            def _cb():
+                new_val = 0.0 if star_n == current else float(star_n)
+                if _setter(item_type)(user_id, item_id, new_val):
+                    st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
+            return _cb
+
+        with st.container(key=wrap_key):
+            fill_rule = ""
+            if current > 0:
+                fill_rule = f"""
+                .st-key-{wrap_key} div[data-testid="column"]:nth-child(-n+{current}) button {{
+                    color: {GREEN} !important;
+                    text-shadow: 0 0 6px {GREEN}88;
+                }}
+                """
+            st.markdown(f"""
+            <style>
+            .st-key-{wrap_key} {{
+                background: rgba(255,255,255,0.025) !important;
+                border: 1px solid rgba(255,255,255,0.07) !important;
+                border-top: none !important;
+                border-radius: 0 0 14px 14px !important;
+                margin-top: -0.62rem !important;
+                margin-bottom: 0.6rem !important;
+                padding: 3px 16px 6px 118px !important;
+            }}
+            .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] {{
+                gap: 0px !important;
+            }}
+            .st-key-{wrap_key} div[data-testid="column"] {{
+                width: auto !important;
+                min-width: 0 !important;
+                flex: 0 0 auto !important;
+                padding: 0 !important;
+            }}
+            .st-key-{wrap_key} div[data-testid="stButton"] {{
+                width: auto !important;
+            }}
+            .st-key-{wrap_key} button {{
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+                padding: 0 3px !important;
+                margin: 0 !important;
+                min-height: 0 !important;
+                height: 22px !important;
+                width: 22px !important;
+                font-size: 1rem !important;
+                line-height: 1 !important;
+                color: rgba(255,255,255,0.16) !important;
+                transition: transform 0.12s ease, color 0.12s ease !important;
+            }}
+            .st-key-{wrap_key} button:hover {{
+                transform: scale(1.3) !important;
+                color: {GREEN}bb !important;
+            }}
+            {fill_rule}
+            </style>
+            """, unsafe_allow_html=True)
+
+            cols = st.columns(10)
+            for i, col in enumerate(cols, start=1):
+                with col:
+                    st.button("★", key=f"{wrap_key}_star_{i}", on_click=_make_cb(i),
+                              help=f"{i}/10")
+
+    # ==============================================================
+    # FULL DETAIL-PAGE WIDGET (CSS Mask Slider, unchanged — half-star precision)
     # ==============================================================
     @st.fragment
     def render_star_rating(item_type: str, item_id, user_id: int):
@@ -123,10 +207,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
 
         with st.container(key=wrap_key):
-            
-            # Το SVG Αστέρι που χρησιμοποιείται ως Μάσκα (Mask)
-            star_svg = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%2017.27L18.18%2021l-1.64-7.03L22%209.24l-7.19-.61L12%202%209.19%208.63%202%209.24l5.46%204.73L5.82%2021z%22%2F%3E%3C%2Fsvg%3E'
-            
             st.markdown(f"""
             <style>
             .st-key-{wrap_key} {{
@@ -136,54 +216,43 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 padding: 24px 30px 14px;
                 margin: 10px 0 6px;
             }}
-            
-            /* -- MAGIC SLIDER TRICK -- */
-            /* 1. Περιορίζουμε το πλάτος ώστε τα 10 αστέρια να είναι τέλεια τετράγωνα */
             .st-key-{wrap_key} div[data-testid="stSlider"] {{
                 max-width: 440px !important;
                 margin: 0 auto !important; 
                 padding-top: 5px !important;
             }}
-            /* 2. Κρύβουμε τα ενοχλητικά default κείμενα του slider */
             .st-key-{wrap_key} div[data-testid="stSlider"] label {{ display:none; }}
             .st-key-{wrap_key} div[data-testid="stTickBar"] {{ display:none; }}
 
-            /* 3. Το Background του Slider (Τα άδεια αστέρια) */
             .st-key-{wrap_key} div[data-baseweb="slider"] > div:first-child {{
                 height: 44px !important;
                 border-radius: 0 !important;
                 background: rgba(255,255,255,0.12) !important;
-                -webkit-mask-image: url('{star_svg}') !important;
+                -webkit-mask-image: url('{STAR_SVG}') !important;
                 -webkit-mask-size: {100/RATING_MAX}% 100% !important;
                 -webkit-mask-repeat: repeat-x !important;
-                mask-image: url('{star_svg}') !important;
+                mask-image: url('{STAR_SVG}') !important;
                 mask-size: {100/RATING_MAX}% 100% !important;
                 mask-repeat: repeat-x !important;
             }}
-
-            /* 4. Το Γεμάτο κομμάτι του Slider (Τα πράσινα αστέρια που γεμίζουν) */
             .st-key-{wrap_key} div[data-baseweb="slider"] > div:first-child > div {{
                 height: 44px !important;
                 border-radius: 0 !important;
                 background: linear-gradient(90deg, {GREEN}cc, {GREEN}) !important;
-                -webkit-mask-image: url('{star_svg}') !important;
+                -webkit-mask-image: url('{STAR_SVG}') !important;
                 -webkit-mask-size: {100/RATING_MAX}% 100% !important;
                 -webkit-mask-repeat: repeat-x !important;
-                mask-image: url('{star_svg}') !important;
+                mask-image: url('{STAR_SVG}') !important;
                 mask-size: {100/RATING_MAX}% 100% !important;
                 mask-repeat: repeat-x !important;
                 filter: drop-shadow(0 0 8px {GREEN}88);
             }}
-
-            /* 5. Το κουμπί (Thumb) του slider γίνεται αόρατο, αλλά πιάνει το κλικ σου! */
             .st-key-{wrap_key} div[role="slider"] {{
                 opacity: 0 !important; 
                 width: 44px !important;
                 height: 44px !important;
                 cursor: pointer !important;
             }}
-
-            /* -- ΚΟΥΜΠΙ CLEAR -- */
             .st-key-{wrap_key} button {{
                 background: transparent !important;
                 border: 1px solid rgba(255,255,255,0.15) !important;
@@ -212,10 +281,10 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                     unsafe_allow_html=True,
                 )
             with head_r:
-                value_label = f"{current:g}" if current else "Not rated"
+                value_label = f"{current:g}" if current > 0 else "Not rated"
                 st.markdown(
                     f'<div style="text-align:right; font-size:1.5rem; font-weight:800; '
-                    f'color:{GREEN if current else TEXT_DIM};">{value_label}'
+                    f'color:{GREEN if current > 0 else TEXT_DIM};">{value_label}'
                     f'<span style="font-size:0.9rem; color:{TEXT_DIM}; font-weight:600;"> / {RATING_MAX:g}</span></div>',
                     unsafe_allow_html=True,
                 )
@@ -225,7 +294,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 key=widget_key, on_change=_on_change, label_visibility="collapsed",
             )
 
-            # Clear button
             if current > 0:
                 if st.button("Clear Rating", key=f"clear_{widget_key}"):
                     if _setter(item_type)(user_id, item_id, 0.0):
@@ -479,6 +547,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         get_song_rating=get_song_rating,
         get_album_rating=get_album_rating,
         render_star_rating=render_star_rating,
+        render_compact_star_rating=render_compact_star_rating,
         rating_chip_html=rating_chip_html,
         star_bar_html=star_bar_html,
         render_ratings_dashboard=render_ratings_dashboard,

@@ -191,9 +191,9 @@ def build_filtered_href(view_type: str, id_val: str) -> str:
 def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str,
                    id_col: str = None, link_type: str = None, image_col: str = "image_url",
                    rank_col: str = None, reveal_top_n: int = 0,
-                   reveal_delay_base: float = 0.5, reveal_delay_step: float = 0.2):
+                   reveal_delay_base: float = 0.5, reveal_delay_step: float = 0.2,
+                   quick_rate: bool = False, R=None, user_id: int = None, rating_scale: int = 10):
     current_tab = st.query_params.get("tab", "overview")
-
     for i, row in df.iterrows():
         rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
         rank_class = get_rank_class(rank)
@@ -256,6 +256,19 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             if p_user: href += f"&user={p_user}"
 
             st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
+            if quick_rate and link_type in ("song", "album") and R is not None and user_id is not None:
+                qr_key = f"qr_{link_type}_{item_id}"
+                with st.container(key=qr_key):
+                    st.markdown(f"""
+                    <style>
+                    .st-key-{qr_key} {{
+                        margin-top: -0.5rem !important;
+                        margin-bottom: 0.6rem !important;
+                        padding-left: 118px !important;
+                    }}
+                    </style>
+                    """, unsafe_allow_html=True)
+                    R.render_compact_star_rating(link_type, item_id, user_id, rating_scale)        
         else:
             st.markdown(card_html, unsafe_allow_html=True)
 

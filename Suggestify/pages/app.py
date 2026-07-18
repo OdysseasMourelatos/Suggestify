@@ -5,7 +5,7 @@ import warnings
 import os
 import sys
 from html import escape
-import plotly.graph_objects as go  # <--- ΠΡΟΣΘΕΣΕ ΑΥΤΗ ΤΗ ΓΡΑΜΜΗ
+import plotly.graph_objects as go
 
 warnings.filterwarnings("ignore")
 
@@ -28,6 +28,9 @@ st.set_page_config(page_title="Suggestify", page_icon="🎧", layout="wide", ini
 load_css()
 inject_counter_script()
 inject_custom_css()
+
+if "quick_rate_mode" not in st.session_state:
+    st.session_state.quick_rate_mode = False
 
 # Initialization of Ratings Module
 R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG)
@@ -74,7 +77,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             ORDER BY streams DESC LIMIT 10
         """, {**F, **extra_params})
         if not df_tracks.empty:
-            render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+            render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
 
             redirect_filters = {}
             if "month_val" in extra_params: redirect_filters["month"] = int(extra_params["month_val"])
@@ -150,10 +153,10 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         """, {**F, **extra_params})
         if not df_albums.empty:
             df_albums["sub"] = "Album"
-            render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album")
+            render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album", **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
-    3
+
 def get_current_view() -> dict:
     params = st.query_params
     return {
@@ -257,16 +260,62 @@ with col_brand:
     ''', unsafe_allow_html=True)
 
 with col_share:
-    st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
-    render_share_stats_button(
-        run_query=run_query,
-        user_id=selected_user_id,
-        username=selected_username,
-        min_date=min_date,
-        max_date=max_date,
-        label="📸 Share Stats"
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('''
+    <style>
+    .st-key-quick_rate_toggle button {
+        border-radius: 999px !important;
+        font-weight: 700 !important;
+        font-size: 0.8rem !important;
+        padding: 0.5rem 1.2rem !important;
+        min-height: 0 !important;
+        transition: all 0.2s ease !important;
+        box-shadow: none !important;
+    }
+    .st-key-quick_rate_toggle button[kind="secondary"] {
+        background: rgba(255,255,255,0.04) !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        color: ''' + TEXT_MID + ''' !important;
+    }
+    .st-key-quick_rate_toggle button[kind="secondary"]:hover {
+        border-color: rgba(29,185,84,0.35) !important;
+        color: ''' + TEXT + ''' !important;
+        background: rgba(29,185,84,0.06) !important;
+    }
+    .st-key-quick_rate_toggle button[kind="primary"] {
+        background: ''' + GREEN + ''' !important;
+        border: 1px solid ''' + GREEN + ''' !important;
+        color: #000 !important;
+        box-shadow: 0 4px 14px rgba(29,185,84,0.35) !important;
+    }
+    .st-key-quick_rate_toggle button[kind="primary"]:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 6px 18px rgba(29,185,84,0.4) !important;
+    }
+    </style>
+    ''', unsafe_allow_html=True)
+
+    b1, b2 = st.columns(2)
+    with b1:
+        with st.container(key="quick_rate_toggle"):
+            label = "⭐ Quick Rate ON" if st.session_state.quick_rate_mode else "⭐ Quick Rate"
+            if st.button(label, key="quick_rate_btn",
+                         type="primary" if st.session_state.quick_rate_mode else "secondary",
+                         use_container_width=True):
+                st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
+                st.rerun()
+    with b2:
+        render_share_stats_button(
+            run_query=run_query,
+            user_id=selected_user_id,
+            username=selected_username,
+            min_date=min_date,
+            max_date=max_date,
+            label="📸 Share Stats"
+        )
+
+# Quick-rate is fixed at a 10-star scale.
+qr_kwargs = dict(quick_rate=st.session_state.quick_rate_mode, R=R,
+                  user_id=selected_user_id, rating_scale=10)
 
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
@@ -550,7 +599,7 @@ if detail_type and detail_id:
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
-                    render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song")
+                    render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                     
                     if st.button("See Full List →", key=f"btn_full_tracks_{detail_id}", use_container_width=True):
                         curr_user = st.query_params.get("user")
@@ -578,7 +627,7 @@ if detail_type and detail_id:
                 
                 if not df_albums.empty:
                     df_albums["subtitle"] = "Album"
-                    render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album")
+                    render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album", **qr_kwargs)
                     
                     if st.button("See Full List →", key=f"btn_full_albums_{detail_id}", use_container_width=True):
                         curr_user = st.query_params.get("user")
@@ -778,7 +827,7 @@ if detail_type and detail_id:
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
-                    render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song")
+                    render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                 else:
                     st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
                     
@@ -893,7 +942,7 @@ elif current_tab == "overview":
         """, F)
         if not df_top_tracks.empty:
             render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played",
-                           "song_id", "song", reveal_top_n=5)
+                           "song_id", "song", reveal_top_n=5, **qr_kwargs)
 
     with c2:
         st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
@@ -1010,7 +1059,7 @@ elif current_tab == "tracks":
         
         if not df_songs.empty:
             render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
-               "song_id", "song", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
+               "song_id", "song", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
 
@@ -1033,7 +1082,7 @@ elif current_tab == "tracks":
         if not df_songs.empty:
            render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
                "song_id", "song", rank_col="global_rank",
-               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🔍</div>No tracks found</div>', unsafe_allow_html=True)
 
@@ -1146,7 +1195,7 @@ elif current_tab == "albums":
         
         if not df_albums.empty:
             render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
-               "album_id", "album", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
+               "album_id", "album", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
 
         else:
             st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
@@ -1171,7 +1220,7 @@ elif current_tab == "albums":
         if not df_albums.empty:
             render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
                "album_id", "album", rank_col="global_rank",
-               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
             
