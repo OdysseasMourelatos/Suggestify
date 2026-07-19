@@ -1,9 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
 /* ─── BASE RESET ─── */
-html, body, [class*="css"] {
+html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-    background: VAR_BG !important;
+    background-color: #000000 !important; /* Ή #121212 αν προτιμάς το σκούρο γκρι του Spotify */
+    background: #000000 !important;
     color: VAR_TEXT !important;
 }
 #MainMenu, footer { visibility: hidden; }
@@ -13,6 +14,7 @@ html, body, [class*="css"] {
 header[data-testid="stHeader"] {
     display: none !important;
     height: 0 !important;
+    background: #000000 !important; /* Έξτρα σιγουριά για το header */
 }
 div[data-testid="stDecoration"] { display: none !important; }
 div[data-testid="stToolbar"] { display: none !important; }
