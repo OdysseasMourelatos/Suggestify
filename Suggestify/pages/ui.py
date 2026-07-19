@@ -1,5 +1,3 @@
-# ui.py
-
 import streamlit as st
 import pandas as pd
 import os
@@ -92,6 +90,15 @@ def inject_custom_css():
     .item-arrow {{ transition: transform 0.25s ease, color 0.25s ease; display: inline-block; }}
     .list-item:hover .item-arrow {{ transform: translateX(5px); color: {GREEN}; }}
     .stat-value {{ transition: color 0.2s ease; }}
+    
+    /* ΤΕΛΕΙΑ ΣΥΡΡΑΦΗ ΚΑΡΤΑΣ-ΑΣΤΕΡΙΩΝ */
+    a.custom-link:has(.list-item-has-rating) {{
+        margin-bottom: 0 !important;
+    }}
+    .list-item-has-rating {{
+        border-radius: 14px 14px 0 0 !important;
+        border-bottom: none !important;
+    }}
 
     .kpi-card {{ transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; animation: fadeSlideUp 0.5s ease both; }}
     .kpi-card:hover {{ transform: translateY(-5px); box-shadow: 0 12px 30px rgba(29,185,84,0.14); border-color: rgba(29,185,84,0.3); }}
@@ -216,9 +223,12 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             reveal_style = f'style="animation-delay: {delay:.1f}s;"'
 
         reveal_class = "list-item-reveal" if reveal_style else ""
+        
+        has_rating = quick_rate and link_type in ("song", "album") and R is not None and user_id is not None
+        item_class = "list-item-has-rating" if has_rating else ""
 
         card_html = f'''
-        <div class="list-item {reveal_class}" {reveal_style}>
+        <div class="list-item {reveal_class} {item_class}" {reveal_style}>
             <div class="item-rank {rank_class}">{rank}</div>
             <div class="item-art">{art_html}</div>
             <div class="item-info">
@@ -256,18 +266,9 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             if p_user: href += f"&user={p_user}"
 
             st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-            if quick_rate and link_type in ("song", "album") and R is not None and user_id is not None:
-                qr_key = f"qr_{link_type}_{item_id}"
-                with st.container(key=qr_key):
-                    st.markdown(f"""
-                    <style>
-                    .st-key-{qr_key} {{
-                        margin-top: -0.55rem !important;
-                        margin-bottom: 0.6rem !important;
-                    }}
-                    </style>
-                    """, unsafe_allow_html=True)
-                    R.render_compact_star_rating(link_type, item_id, user_id, rating_scale)        
+            
+            if has_rating:
+                R.render_compact_star_rating(link_type, item_id, user_id, rating_scale)        
         else:
             st.markdown(card_html, unsafe_allow_html=True)
 

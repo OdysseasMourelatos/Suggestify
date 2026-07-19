@@ -164,28 +164,20 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     # ==============================================================
     @st.fragment
     def render_compact_star_rating(item_type: str, item_id, user_id: int, scale: int = 10):
-        """
-        Renders 10 clickable star buttons fused to the bottom of a list card.
-        Clicking star N sets the rating to N; clicking the currently-set star
-        again clears the rating. Fill color is recomputed from session state
-        on every click (fragment rerun), so it never needs a page refresh.
-
-        Rebuilt: the stars are painted with a CSS mask (see _STAR_SVG_DATAURI)
-        instead of the "★" text glyph, so they render as real star shapes
-        everywhere instead of tofu-boxes/blocks when a font is missing the
-        glyph. The row is also pinned to a fixed, compact width instead of
-        stretching across the full card (which is what produced the huge
-        gaps between stars).
-        """
         assert item_type in ("song", "album")
-        current = int(round(_current(item_type, item_id, user_id)))  # whole stars for quick-rate
+        current = int(round(_current(item_type, item_id, user_id)))
         wrap_key = f"crate_{item_type}_{item_id}_{user_id}"
+        state_key = f"rating_val_{item_type}_{item_id}_{user_id}"
 
         def _make_cb(star_n):
             def _cb():
                 new_val = 0.0 if star_n == current else float(star_n)
+                previous = st.session_state.get(state_key, current)
+                st.session_state[state_key] = new_val
                 if _setter(item_type)(user_id, item_id, new_val):
-                    st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
+                    st.toast(f"Rated {new_val:g}/10 ✓" if new_val > 0 else "Rating cleared", icon="⭐")
+                else:
+                    st.session_state[state_key] = previous
             return _cb
 
         with st.container(key=wrap_key):
@@ -202,20 +194,21 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.markdown(f"""
             <style>
             .st-key-{wrap_key} {{
-                display: inline-flex !important;
-                background: rgba(255,255,255,0.03) !important;
-                border: 1px solid rgba(255,255,255,0.07) !important;
-                border-radius: 999px !important;
-                margin: -0.35rem 0 0.55rem 118px !important;
-                padding: 4px 10px !important;
-                width: fit-content !important;
+                display: flex !important;
+                align-items: center !important;
+                background: {CARD} !important;
+                border: 1px solid {BORDER} !important;
+                border-top: 1px solid rgba(255,255,255,0.06) !important;
+                border-radius: 0 0 14px 14px !important;
+                padding: 8px 1.5rem 10px !important;
+                margin: 0 0 0.6rem 0 !important;
+                width: 100% !important;
             }}
-            .st-key-{wrap_key} > div {{ width: fit-content !important; }}
             .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] {{
                 display: flex !important;
-                width: fit-content !important;
                 gap: 2px !important;
                 flex-wrap: nowrap !important;
+                width: auto !important;
             }}
             .st-key-{wrap_key} div[data-testid="column"] {{
                 width: 22px !important;
@@ -224,9 +217,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 flex: 0 0 22px !important;
                 padding: 0 !important;
             }}
-            .st-key-{wrap_key} div[data-testid="stButton"] {{
-                width: 100% !important;
-            }}
+            .st-key-{wrap_key} div[data-testid="stButton"] {{ width: 100% !important; }}
             .st-key-{wrap_key} button {{
                 background: transparent !important;
                 border: none !important;
@@ -263,8 +254,21 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             .st-key-{wrap_key} button:hover {{ transform: scale(1.22) !important; }}
             .st-key-{wrap_key} button:hover::before {{ background-color: {GREEN}cc !important; }}
             {fill_rule}
+
             @media (max-width: 768px) {{
-                .st-key-{wrap_key} {{ margin-left: 56px !important; }}
+                .st-key-{wrap_key} {{
+                    padding: 6px 0.8rem 8px !important;
+                }}
+                .st-key-{wrap_key} div[data-testid="column"] {{
+                    width: 16px !important;
+                    min-width: 16px !important;
+                    max-width: 16px !important;
+                    flex: 0 0 16px !important;
+                }}
+                .st-key-{wrap_key} button {{
+                    height: 14px !important;
+                    width: 14px !important;
+                }}
             }}
             </style>
             """, unsafe_allow_html=True)
@@ -272,9 +276,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             cols = st.columns(10)
             for i, col in enumerate(cols, start=1):
                 with col:
-                    st.button("★", key=f"{wrap_key}_star_{i}", on_click=_make_cb(i),
-                              help=f"{i}/10")
-
+                    st.button("★", key=f"{wrap_key}_star_{i}", on_click=_make_cb(i), help=f"{i}/10")
     # ==============================================================
     # FULL DETAIL-PAGE WIDGET
     # Gradient-fill star preview (star_bar_html) + a plain, unmodified

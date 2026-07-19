@@ -1485,38 +1485,42 @@ def render_share_stats_button(run_query, user_id, username, min_date, max_date,
         st.error("Your Streamlit version doesn't support st.dialog — please upgrade streamlit (>=1.31.0).")
         return
 
+    import uuid
+    marker_id = f"share_marker_{uuid.uuid4().hex[:8]}"
+
+    # Χρησιμοποιούμε CSS Adjacent Sibling (+ div) για να στοχεύσουμε το κουμπί
+    # ΧΩΡΙΣ να το τυλίξουμε σε st.container(), λύνοντας το bug του διπλού rendering!
     st.markdown(f"""
+    <div id="{marker_id}" style="display:none;"></div>
     <style>
-        .st-key-share_stats_btn_wrap {{ width: 100% !important; }}
-        .st-key-share_stats_btn_wrap div[data-testid="stButton"] {{
+        #{marker_id} + div[data-testid="stButton"] {{
             display: flex !important; justify-content: flex-end !important;
             width: 100% !important; margin: -0.25rem 0 0.75rem 0 !important;
         }}
-        .st-key-share_stats_btn_wrap div[data-testid="stButton"] button {{
+        #{marker_id} + div[data-testid="stButton"] button {{
             width: auto !important; background: linear-gradient(135deg, {accent} 0%, {accent_dim} 100%) !important;
             color: #000 !important; font-weight: 800 !important; font-size: 0.85rem !important;
             border: none !important; border-radius: 999px !important; padding: 0.6rem 1.4rem !important;
             box-shadow: 0 8px 24px {accent}55, 0 2px 10px rgba(0,0,0,0.45) !important;
             transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important; letter-spacing: 0.01em !important;
         }}
-        .st-key-share_stats_btn_wrap div[data-testid="stButton"] button:hover {{
+        #{marker_id} + div[data-testid="stButton"] button:hover {{
             transform: translateY(-2px) scale(1.03) !important;
             box-shadow: 0 12px 34px {accent}77, 0 4px 14px rgba(0,0,0,0.55) !important;
         }}
         @media (max-width: 768px) {{
-            .st-key-share_stats_btn_wrap div[data-testid="stButton"] button {{
+            #{marker_id} + div[data-testid="stButton"] button {{
                 padding: 0.5rem 1rem !important; font-size: 0.72rem !important;
             }}
         }}
     </style>
     """, unsafe_allow_html=True)
 
-    with st.container(key="share_stats_btn_wrap"):
-        if st.button(label, key="share_stats_trigger"):
-            st.session_state.pop("_share_png_bytes", None)
-            st.session_state.pop("_share_file_stub", None)
-            _open_dialog(run_query, user_id, username, min_date, max_date, avatar_url)
-
+    if st.button(label, key="share_stats_trigger"):
+        st.session_state.pop("_share_png_bytes", None)
+        st.session_state.pop("_share_file_stub", None)
+        _open_dialog(run_query, user_id, username, min_date, max_date, avatar_url)
+        
 @_dialog_decorator("🎉 Share Your Stats") if _dialog_decorator else (lambda f: f)
 def _open_dialog(run_query, user_id, username, min_date, max_date, avatar_url=None):
     _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_url=avatar_url)

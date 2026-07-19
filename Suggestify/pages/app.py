@@ -6,6 +6,7 @@ import os
 import sys
 from html import escape
 import plotly.graph_objects as go
+from friends_match import render_friends_match_tab
 
 warnings.filterwarnings("ignore")
 
@@ -64,16 +65,21 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
     with c1:
         st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
         df_tracks = run_query(f"""
-            SELECT so.id AS song_id, so.title AS song_title, COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+            WITH TrackArtists AS (
+                SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
+                FROM song_artists sa
+                JOIN artists a ON a.id = sa.artist_id
+                GROUP BY sa.song_id
+            )
+            SELECT so.id AS song_id, so.title AS song_title, COALESCE(ta.all_artists, 'Unknown') AS main_artist, so.image_url,
                    COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
             FROM streams s
             JOIN songs so ON so.id = s.song_id
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            LEFT JOIN artists a ON a.id = sa.artist_id
+            LEFT JOIN TrackArtists ta ON ta.song_id = so.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
               AND {extra_where}
-            GROUP BY so.id, so.title, a.name, so.image_url
+            GROUP BY so.id, so.title, ta.all_artists, so.image_url
             ORDER BY streams DESC LIMIT 10
         """, {**F, **extra_params})
         if not df_tracks.empty:
@@ -157,7 +163,6 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
 
-    # ΠΡΟΣΘΗΚΗ: Γραφήματα μέσα στη σελίδα της Εποχής/Ώρας/Χρονιάς!
     st.markdown("<br>", unsafe_allow_html=True)
     ch1, ch2, ch3 = st.columns(3)
     
@@ -317,13 +322,8 @@ with col_brand:
     ''', unsafe_allow_html=True)
 
 with col_share:
-    # ─── Rating Mode / Share Stats — swap positions with a pop-in
-    # animation whenever Rating Mode is toggled. Both controls live
-    # inside one real container (not the old raw-HTML div hack) so the
-    # CSS `order` property can actually reorder them, and each side
-    # replays a short "swapPop" entrance animation on every rerun so the
-    # transition reads as a deliberate swap instead of a static jump. ───
     rating_mode_on = st.session_state.quick_rate_mode
+
     with st.container(key="share_row"):
         st.markdown(f"""
         <style>
@@ -332,20 +332,11 @@ with col_share:
             justify-content: flex-end !important;
             align-items: center !important;
             gap: 10px !important;
-        }}
-        .st-key-share_row div[data-testid="column"]:nth-of-type(1) {{
-            order: {2 if rating_mode_on else 1} !important;
-        }}
-        .st-key-share_row div[data-testid="column"]:nth-of-type(2) {{
-            order: {1 if rating_mode_on else 2} !important;
+            flex-wrap: nowrap !important;
         }}
         .st-key-share_row div[data-testid="column"] {{
-            width: auto !important; flex: 0 0 auto !important;
-            animation: swapPop 0.45s cubic-bezier(0.16,1,0.3,1) both;
-        }}
-        @keyframes swapPop {{
-            from {{ opacity: 0; transform: translateX(22px) scale(0.85); }}
-            to   {{ opacity: 1; transform: translateX(0) scale(1); }}
+            width: auto !important;
+            flex: 0 0 auto !important;
         }}
         .st-key-quick_rate_toggle button {{
             border-radius: 999px !important;
@@ -360,23 +351,29 @@ with col_share:
             color: {TEXT_MID} !important;
         }}
         .st-key-quick_rate_toggle button[kind="primary"] {{
-            background: {GREEN} !important;
-            border: 1px solid {GREEN} !important;
-            color: #000 !important;
-            box-shadow: 0 4px 14px rgba(29,185,84,0.35) !important;
+            background: #E53935 !important;
+            border: 1px solid #E53935 !important;
+            color: #fff !important;
+            box-shadow: 0 4px 14px rgba(229,57,53,0.35) !important;
         }}
         </style>
         """, unsafe_allow_html=True)
 
-        col_toggle, col_share_btn = st.columns(2)
-        with col_toggle:
+        col_a, col_b = st.columns(2)
+        toggle_slot = col_b if rating_mode_on else col_a
+        share_slot = col_a if rating_mode_on else col_b
+
+        with toggle_slot:
             with st.container(key="quick_rate_toggle"):
                 rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
                 if st.button(rating_label, key="quick_rate_btn",
                              type="primary" if rating_mode_on else "secondary"):
                     st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
                     st.rerun()
-        with col_share_btn:
+
+        # Called directly in its column — no extra wrapper — same as
+        # the original working version, just in a swappable slot.
+        with share_slot:
             render_share_stats_button(
                 run_query=run_query,
                 user_id=selected_user_id,
@@ -385,12 +382,12 @@ with col_share:
                 max_date=max_date,
                 label="📸 Share Stats"
             )
-
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
     ("artists", "🎤 Artists"), ("albums", "💿 Albums"),
     ("genres", "🎸 Genres"), ("habits", "🕐 Habits"),
-    ("ratings", "⭐ Ratings")
+    ("ratings", "⭐ Ratings"),
+    ("friends", "🎉 Friends")
 ]
 
 def navigate_to_tab(tab_id: str):
@@ -545,9 +542,6 @@ if detail_type and detail_id:
                 image_url=row.get("image_url")
             )
             
-            # Full drag-to-rate widget only while Rating Mode is on (it's
-            # the heavier of the two, space-wise). With Rating Mode off we
-            # still show the current rating, just as a compact one-line chip.
             if st.session_state.quick_rate_mode:
                 R.render_star_rating("song", detail_id, selected_user_id, compact=True)
             else:
@@ -692,15 +686,22 @@ if detail_type and detail_id:
             with c1:
                 st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
                 df_tracks = run_query("""
-                    SELECT so.id AS song_id, so.title as song_title, 'Track' as sub, so.image_url,
+                    WITH TrackArtists AS (
+                        SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
+                        FROM song_artists sa
+                        JOIN artists a ON a.id = sa.artist_id
+                        GROUP BY sa.song_id
+                    )
+                    SELECT so.id AS song_id, so.title as song_title, COALESCE(ta.all_artists, 'Unknown') as sub, so.image_url,
                            COUNT(s.id) as streams, ROUND(SUM(s.ms_played)/3600000.0, 3) as hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
-                    JOIN song_artists sa ON sa.song_id = s.song_id
-                    WHERE sa.artist_id = :aid 
+                    JOIN song_artists sa_filter ON sa_filter.song_id = s.song_id
+                    LEFT JOIN TrackArtists ta ON ta.song_id = so.id
+                    WHERE sa_filter.artist_id = :aid 
                       AND s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 10
+                    GROUP BY so.id, so.title, ta.all_artists, so.image_url ORDER BY streams DESC LIMIT 10
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
@@ -791,6 +792,7 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
+
     elif detail_type == "album":
         alb_info = run_query("""
         WITH AlbumPrimaryArtists AS (
@@ -801,11 +803,16 @@ if detail_type and detail_id:
             WHERE so.album_id = :id
             GROUP BY a.id, a.name
         ),
-        TopAlbumArtists AS (
-            SELECT STRING_AGG(name, ', ') as artist_names,
-                   MIN(artist_id) as primary_artist_id
+        RankedArtists AS (
+            SELECT artist_id, name, track_cnt,
+                   ROW_NUMBER() OVER (ORDER BY track_cnt DESC) as rn
             FROM AlbumPrimaryArtists
-            WHERE track_cnt = (SELECT MAX(track_cnt) FROM AlbumPrimaryArtists)
+        ),
+        TopAlbumArtists AS (
+            SELECT STRING_AGG(name, ', ' ORDER BY rn ASC) as artist_names,
+                   MAX(CASE WHEN rn = 1 THEN artist_id END) as primary_artist_id
+            FROM RankedArtists
+            WHERE rn <= 3
         ),
         album_streams AS (
             SELECT so.album_id, COUNT(*) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours
@@ -917,17 +924,22 @@ if detail_type and detail_id:
             with c_left:
                 st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
                 df_tracks = run_query("""
+                    WITH TrackArtists AS (
+                        SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
+                        FROM song_artists sa
+                        JOIN artists a ON a.id = sa.artist_id
+                        GROUP BY sa.song_id
+                    )
                     SELECT so.id AS song_id, so.title AS song_title,
-                           COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                           COALESCE(ta.all_artists, 'Unknown') AS main_artist, so.image_url,
                            COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
-                    LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                    LEFT JOIN artists a ON a.id = sa.artist_id
+                    LEFT JOIN TrackArtists ta ON ta.song_id = so.id
                     WHERE so.album_id = :aid 
                       AND s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
+                    GROUP BY so.id, so.title, ta.all_artists, so.image_url ORDER BY streams DESC
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
@@ -997,7 +1009,7 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
-                
+
     elif detail_type == "genre":
         genre_match_sql = """
             (so.primary_genre ILIKE :genre OR al.primary_genre ILIKE :genre OR EXISTS (
@@ -1040,18 +1052,23 @@ if detail_type and detail_id:
             with c1:
                 st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
                 df_tracks = run_query(f"""
+                    WITH TrackArtists AS (
+                        SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
+                        FROM song_artists sa
+                        JOIN artists a ON a.id = sa.artist_id
+                        GROUP BY sa.song_id
+                    )
                     SELECT so.id AS song_id, so.title AS song_title,
-                           COALESCE(MAX(a.name), 'Unknown') AS main_artist, MAX(so.image_url) AS image_url,
+                           COALESCE(ta.all_artists, 'Unknown') AS main_artist, MAX(so.image_url) AS image_url,
                            COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
                     LEFT JOIN albums al ON al.id = so.album_id
-                    LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                    LEFT JOIN artists a ON a.id = sa.artist_id
+                    LEFT JOIN TrackArtists ta ON ta.song_id = so.id
                     WHERE s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
                       AND {genre_match_sql}
-                    GROUP BY so.id, so.title
+                    GROUP BY so.id, so.title, ta.all_artists
                     ORDER BY streams DESC LIMIT 10
                 """, {"genre": detail_id, **F})
                 if not df_tracks.empty:
@@ -1233,16 +1250,21 @@ elif current_tab == "overview":
     with c1:
         st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
         df_top_tracks = run_query("""
+            WITH TrackArtists AS (
+                SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
+                FROM song_artists sa
+                JOIN artists a ON a.id = sa.artist_id
+                GROUP BY sa.song_id
+            )
             SELECT so.id AS song_id, so.title AS song_title,
-                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                   COALESCE(ta.all_artists, 'Unknown') AS main_artist, so.image_url,
                    COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
             FROM streams s
             JOIN songs so ON so.id = s.song_id
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            LEFT JOIN artists a ON a.id = sa.artist_id
+            LEFT JOIN TrackArtists ta ON ta.song_id = so.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
-            GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC LIMIT 5;
+            GROUP BY so.id, so.title, ta.all_artists, so.image_url ORDER BY streams DESC LIMIT 5;
         """, F)
         if not df_top_tracks.empty:
             render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played",
@@ -1447,6 +1469,7 @@ elif current_tab == "artists":
                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
+
 
 elif current_tab == "albums":
     st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
@@ -1837,6 +1860,14 @@ elif current_tab == "habits":
             render_track_spotlight_card(row1b, "Freshest Find", "✨", newest_row, "release_date", fmt_year)
             render_track_spotlight_card(st.container(), "Longest Track Played", "⏳", longest_row, "duration_ms", fmt_duration)
         st.markdown('<div class="empty-state"><div class="icon">📭</div>No track length / release-date data available for this period yet</div>', unsafe_allow_html=True)
-
 elif current_tab == "ratings":
     R.render_ratings_dashboard(selected_user_id, F)
+elif current_tab == "friends":
+    render_friends_match_tab(
+        run_query=run_query,
+        user_dict=user_dict,
+        min_date=min_date,
+        max_date=max_date,
+        default_user_id=selected_user_id,
+        colors=dict(GREEN=GREEN, TEXT=TEXT, TEXT_MID=TEXT_MID, TEXT_DIM=TEXT_DIM, BG=BG),
+    )
