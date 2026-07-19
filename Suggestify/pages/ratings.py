@@ -21,9 +21,10 @@ RATING_STEP: float = RATING_STEP_SONG  # kept for distribution-chart bucketing
 
 STAR = "★"
 
-def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG,
-                         build_href_fn=None):
-
+# Replace your current definition of init_ratings_module (lines 14-15) with this:
+def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER, build_href_fn=None):
+    CARD = CARD or "rgba(255,255,255,0.04)"
+    BORDER = BORDER or "rgba(255,255,255,0.08)"
     # ==============================================================
     # SQL
     # ==============================================================
@@ -196,12 +197,21 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             .st-key-{wrap_key} {{
                 display: flex !important;
                 align-items: center !important;
-                background: {CARD} !important;
+                
+                /* THE FIX: Hardcoded hex that mimics the exact 75% alpha mix over pure black */
+                background: #151515 !important; 
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+                
+                /* MATCHES BORDERS & CORNERS */
                 border: 1px solid {BORDER} !important;
-                border-top: 1px solid rgba(255,255,255,0.06) !important;
-                border-radius: 0 0 14px 14px !important;
-                padding: 8px 1.5rem 10px !important;
-                margin: 0 0 0.6rem 0 !important;
+                border-top: none !important; 
+                border-radius: 0 0 14px 14px !important; 
+                
+                padding: 4px 1.5rem 10px !important;
+                
+                /* PERFECTLY NEGATES STREAMLIT'S 0.2REM GAP WITH ZERO OVERLAP */
+                margin: -0.2rem 0 0.6rem 0 !important;
                 width: 100% !important;
             }}
             .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] {{

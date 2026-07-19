@@ -32,9 +32,9 @@ inject_custom_css()
 
 if "quick_rate_mode" not in st.session_state:
     st.session_state.quick_rate_mode = False
-
-# Initialization of Ratings Module
-R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG)
+    
+# Go to line 37 in app.py and update it to this:
+R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
     header_df = run_query(f"""
