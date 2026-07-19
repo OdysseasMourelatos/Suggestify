@@ -757,6 +757,212 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
+    elif detail_type == "album":
+        alb_info = run_query("""
+        WITH AlbumPrimaryArtists AS (
+            SELECT a.id AS artist_id, a.name, COUNT(DISTINCT so.id) as track_cnt
+            FROM songs so
+            JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            JOIN artists a ON a.id = sa.artist_id
+            WHERE so.album_id = :id
+            GROUP BY a.id, a.name
+        ),
+        TopAlbumArtists AS (
+            SELECT STRING_AGG(name, ', ') as artist_names,
+                   MIN(artist_id) as primary_artist_id
+            FROM AlbumPrimaryArtists
+            WHERE track_cnt = (SELECT MAX(track_cnt) FROM AlbumPrimaryArtists)
+        ),
+        album_streams AS (
+            SELECT so.album_id, COUNT(*) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+              AND so.album_id IS NOT NULL
+            GROUP BY so.album_id
+        ),
+        ranked AS (
+            SELECT album_id, RANK() OVER (ORDER BY streams DESC) as global_rank
+            FROM album_streams
+        )
+        SELECT al.title, MAX(so.image_url) as image_url,
+            COALESCE(ars.streams, 0) as streams,
+            COALESCE(ars.hours, 0) as hours,
+            COUNT(DISTINCT s.song_id) as track_count,
+            (SELECT artist_names FROM TopAlbumArtists) as artist_name,
+            (SELECT primary_artist_id FROM TopAlbumArtists) as primary_artist_id,
+            r.global_rank,
+            al.release_date, al.primary_genre, al.label, al.is_explicit, al.total_tracks
+        FROM albums al
+        LEFT JOIN songs so ON so.album_id = al.id
+        LEFT JOIN streams s ON s.song_id = so.id 
+             AND s.played_at::date BETWEEN :start_date AND :end_date
+             AND s.user_id = :user_id
+        LEFT JOIN album_streams ars ON ars.album_id = al.id
+        LEFT JOIN ranked r ON r.album_id = al.id
+        WHERE al.id = :id
+        GROUP BY al.id, al.title, ars.streams, ars.hours, r.global_rank,
+                 al.release_date, al.primary_genre, al.label, al.is_explicit, al.total_tracks
+    """, {"id": detail_id, **F})
+
+        if not alb_info.empty:
+            row = alb_info.iloc[0]
+            artist_name = row["artist_name"] if pd.notnull(row["artist_name"]) else "Unknown Artist"
+            rank_display = f"#{int(row['global_rank'])}" if pd.notnull(row.get('global_rank')) else "—"
+
+            display_title = str(row["title"]) if row["title"] else "Unknown Album"
+            if row.get("is_explicit"):
+                display_title += ' <span class="explicit-badge">E</span>'
+
+            render_detail_header(
+                type_label="Album",
+                title=display_title,
+                subtitle=f"by {artist_name} • {int(row['track_count'] or 0)} tracks played", 
+                icon="💿",
+                stats=[
+                    {"value": rank_display, "label": "Album Rank"},
+                    {"raw": int(row['streams'] or 0), "label": "Streams"},
+                    {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
+                ],
+                image_url=row.get("image_url")
+            )
+            R.render_star_rating("album", detail_id, selected_user_id)
+            
+            chips_html = '<div class="meta-chip-container">'
+
+            if pd.notnull(row.get("primary_artist_id")):
+                artist_href = build_filtered_href("artist", str(row["primary_artist_id"]))
+                artist_display_name = escape(str(row["artist_name"]).split(",")[0])
+                chips_html += (
+                    f'<a href="{artist_href}" class="meta-chip-link" target="_self"><div class="meta-chip">'
+                    f'<div class="meta-chip-icon">🎤</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Artist</div>'
+                    f'<div class="meta-chip-value">{artist_display_name}</div>'
+                    f'</div></div></a>'
+                )
+
+            if pd.notnull(row.get("release_date")):
+                try:
+                    r_date = pd.to_datetime(row["release_date"]).strftime('%d %b %Y')
+                    chips_html += (
+                        f'<div class="meta-chip"><div class="meta-chip-icon">📅</div><div class="meta-chip-text">'
+                        f'<div class="meta-chip-label">Released</div>'
+                        f'<div class="meta-chip-value">{r_date}</div></div></div>'
+                    )
+                except: pass
+
+            if pd.notnull(row.get("primary_genre")):
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">🎸</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Genre</div>'
+                    f'<div class="meta-chip-value">{escape(str(row["primary_genre"]))}</div></div></div>'
+                )
+
+            if pd.notnull(row.get("label")):
+                label_text = str(row["label"])
+                label_display = label_text[:20] + "…" if len(label_text) > 20 else label_text
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">🏢</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Label</div>'
+                    f'<div class="meta-chip-value">{escape(label_display)}</div></div></div>'
+                )
+
+            if pd.notnull(row.get("total_tracks")) and row["total_tracks"] > 0:
+                chips_html += (
+                    f'<div class="meta-chip"><div class="meta-chip-icon">⏱️</div><div class="meta-chip-text">'
+                    f'<div class="meta-chip-label">Tracks</div>'
+                    f'<div class="meta-chip-value">{int(row["total_tracks"])}</div></div></div>'
+                )
+
+            chips_html += '</div>'
+            st.markdown(chips_html, unsafe_allow_html=True)
+
+            c_left, c_right = st.columns([1.2, 1.0])
+            
+            with c_left:
+                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
+                df_tracks = run_query("""
+                    SELECT so.id AS song_id, so.title AS song_title,
+                           COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                    LEFT JOIN artists a ON a.id = sa.artist_id
+                    WHERE so.album_id = :aid 
+                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                      AND s.user_id = :user_id
+                    GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
+                """, {"aid": detail_id, **F})
+                
+                if not df_tracks.empty:
+                    render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
+                else:
+                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
+                    
+            with c_right:
+                st.markdown('<div class="chart-container" style="margin-top: 0;"><div class="chart-title">📈 Top 5 Tracks Evolution</div>', unsafe_allow_html=True)
+                df_album_trend = run_query("""
+                    WITH top_tracks AS (
+                        SELECT so.id, so.title
+                        FROM streams s
+                        JOIN songs so ON so.id = s.song_id
+                        WHERE so.album_id = :aid 
+                          AND s.played_at::date BETWEEN :start_date AND :end_date
+                          AND s.user_id = :user_id
+                        GROUP BY so.id, so.title
+                        ORDER BY COUNT(*) DESC
+                        LIMIT 5
+                    )
+                    SELECT DATE_TRUNC('month', s.played_at) AS period, t.title AS track_title, COUNT(*) AS stream_count
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    JOIN top_tracks t ON t.id = so.id
+                    WHERE s.played_at::date BETWEEN :start_date AND :end_date
+                      AND s.user_id = :user_id
+                    GROUP BY 1, 2
+                    ORDER BY 1, 2
+                """, {"aid": detail_id, **F})
+                
+                if not df_album_trend.empty:
+                    st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                st.markdown('<div class="chart-container"><div class="chart-title">⏰ Peak Hours</div>', unsafe_allow_html=True)
+                df_hours = run_query("""
+                    SELECT EXTRACT(HOUR FROM s.played_at)::INT AS hour, COUNT(*) AS stream_count
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    WHERE so.album_id = :aid 
+                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                      AND s.user_id = :user_id
+                    GROUP BY 1 ORDER BY 1;
+                """, {"aid": detail_id, **F})
+                if not df_hours.empty:
+                    st.plotly_chart(
+                        chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
+                df_days = run_query("""
+                    SELECT EXTRACT(ISODOW FROM s.played_at)::INT AS dow, COUNT(*) AS stream_count
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    WHERE so.album_id = :aid 
+                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                      AND s.user_id = :user_id
+                    GROUP BY 1 ORDER BY 1;
+                """, {"aid": detail_id, **F})
+                if not df_days.empty:
+                    dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+                    st.plotly_chart(
+                        chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                    )
+                st.markdown('</div>', unsafe_allow_html=True)
 
     elif detail_type == "genre":
         genre_match_sql = """
