@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from sqlalchemy import text
 from html import escape
 from types import SimpleNamespace
+from urllib.parse import quote
 import uuid
 
 # -- Rating scale --
@@ -101,6 +102,21 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     # ==============================================================
     _STAR_PATH = "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
 
+    # Same star shape, packaged as a URL-encoded SVG data-URI so it can be
+    # used as a CSS mask on real <button> elements (the compact quick-rate
+    # stars below). Buttons need a *clickable* star, not just a painted
+    # one, so we can't reuse the gradient-<svg> trick from star_bar_html
+    # (that one is inert, decorative markup). Masking a plain background
+    # color onto this shape gives a crisp star that is 100% font-independent
+    # (fixing the "broken glyph" look) while still letting a real <button>
+    # sit underneath for the click handling.
+    _STAR_SVG_DATAURI = (
+        "data:image/svg+xml," + quote(
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            f'<path d="{_STAR_PATH}"/></svg>'
+        )
+    )
+
     def _px(size: str) -> float:
         try:
             return float(str(size).replace("rem", "").replace("px", "").strip()) * (16 if "rem" in str(size) else 1)
@@ -153,6 +169,13 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         Clicking star N sets the rating to N; clicking the currently-set star
         again clears the rating. Fill color is recomputed from session state
         on every click (fragment rerun), so it never needs a page refresh.
+
+        Rebuilt: the stars are painted with a CSS mask (see _STAR_SVG_DATAURI)
+        instead of the "★" text glyph, so they render as real star shapes
+        everywhere instead of tofu-boxes/blocks when a font is missing the
+        glyph. The row is also pinned to a fixed, compact width instead of
+        stretching across the full card (which is what produced the huge
+        gaps between stars).
         """
         assert item_type in ("song", "album")
         current = int(round(_current(item_type, item_id, user_id)))  # whole stars for quick-rate
@@ -169,53 +192,80 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             fill_rule = ""
             if current > 0:
                 fill_rule = f"""
+                .st-key-{wrap_key} div[data-testid="column"]:nth-child(-n+{current}) button::before {{
+                    background-color: {GREEN} !important;
+                }}
                 .st-key-{wrap_key} div[data-testid="column"]:nth-child(-n+{current}) button {{
-                    color: {GREEN} !important;
-                    text-shadow: 0 0 6px {GREEN}88;
+                    transform: scale(1) !important;
                 }}
                 """
             st.markdown(f"""
             <style>
             .st-key-{wrap_key} {{
-                background: rgba(255,255,255,0.025) !important;
+                display: inline-flex !important;
+                background: rgba(255,255,255,0.03) !important;
                 border: 1px solid rgba(255,255,255,0.07) !important;
-                border-top: none !important;
-                border-radius: 0 0 14px 14px !important;
-                margin-top: -0.62rem !important;
-                margin-bottom: 0.6rem !important;
-                padding: 3px 16px 6px 118px !important;
+                border-radius: 999px !important;
+                margin: -0.35rem 0 0.55rem 118px !important;
+                padding: 4px 10px !important;
+                width: fit-content !important;
             }}
+            .st-key-{wrap_key} > div {{ width: fit-content !important; }}
             .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] {{
-                gap: 0px !important;
+                display: flex !important;
+                width: fit-content !important;
+                gap: 2px !important;
+                flex-wrap: nowrap !important;
             }}
             .st-key-{wrap_key} div[data-testid="column"] {{
-                width: auto !important;
-                min-width: 0 !important;
-                flex: 0 0 auto !important;
+                width: 22px !important;
+                min-width: 22px !important;
+                max-width: 22px !important;
+                flex: 0 0 22px !important;
                 padding: 0 !important;
             }}
             .st-key-{wrap_key} div[data-testid="stButton"] {{
-                width: auto !important;
+                width: 100% !important;
             }}
             .st-key-{wrap_key} button {{
                 background: transparent !important;
                 border: none !important;
                 box-shadow: none !important;
-                padding: 0 3px !important;
-                margin: 0 !important;
+                outline: none !important;
+                padding: 0 !important;
+                margin: 0 auto !important;
                 min-height: 0 !important;
-                height: 22px !important;
-                width: 22px !important;
-                font-size: 1rem !important;
-                line-height: 1 !important;
-                color: rgba(255,255,255,0.16) !important;
-                transition: transform 0.12s ease, color 0.12s ease !important;
+                height: 18px !important;
+                width: 18px !important;
+                display: block !important;
+                position: relative !important;
+                color: transparent !important;
+                font-size: 0 !important;
+                line-height: 0 !important;
+                transition: transform 0.12s ease !important;
             }}
-            .st-key-{wrap_key} button:hover {{
-                transform: scale(1.3) !important;
-                color: {GREEN}bb !important;
+            .st-key-{wrap_key} button p {{ display: none !important; }}
+            .st-key-{wrap_key} button::before {{
+                content: "";
+                position: absolute;
+                inset: 0;
+                background-color: rgba(255,255,255,0.22);
+                -webkit-mask-image: url("{_STAR_SVG_DATAURI}");
+                mask-image: url("{_STAR_SVG_DATAURI}");
+                -webkit-mask-size: contain;
+                mask-size: contain;
+                -webkit-mask-repeat: no-repeat;
+                mask-repeat: no-repeat;
+                -webkit-mask-position: center;
+                mask-position: center;
+                transition: background-color 0.12s ease;
             }}
+            .st-key-{wrap_key} button:hover {{ transform: scale(1.22) !important; }}
+            .st-key-{wrap_key} button:hover::before {{ background-color: {GREEN}cc !important; }}
             {fill_rule}
+            @media (max-width: 768px) {{
+                .st-key-{wrap_key} {{ margin-left: 56px !important; }}
+            }}
             </style>
             """, unsafe_allow_html=True)
 
@@ -236,9 +286,13 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     # instead, and it never changes with the value). The star preview is
     # the only visual driven by `current`, so it always reflects the
     # real rating.
+    #
+    # Compact by default: only used at full size while "Rating Mode" is
+    # switched on (see app.py). When rating mode is off, callers should
+    # show `rating_chip_html(...)` instead, which is a one-line summary.
     # ==============================================================
     @st.fragment
-    def render_star_rating(item_type: str, item_id, user_id: int):
+    def render_star_rating(item_type: str, item_id, user_id: int, compact: bool = False):
         assert item_type in ("song", "album")
         current = _current(item_type, item_id, user_id)
         step = _step(item_type)
@@ -252,6 +306,10 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             if _setter(item_type)(user_id, item_id, new_val):
                 st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
 
+        pad = "12px 20px 8px" if compact else "24px 30px 16px"
+        star_size = "1.5rem" if compact else "2.3rem"
+        margin = "6px 0 4px" if compact else "10px 0 6px"
+
         with st.container(key=wrap_key):
             st.markdown(f"""
             <style>
@@ -259,12 +317,12 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
                 border: 1px solid rgba(255,255,255,0.08);
                 border-radius: 16px;
-                padding: 24px 30px 16px;
+                padding: {pad};
                 margin: 10px 0 6px;
             }}
             .st-key-{wrap_key} div[data-testid="stSlider"] {{
                 max-width: 460px !important;
-                margin: 10px auto 0 !important;
+                margin: 4px auto 0 !important;
             }}
             .st-key-{wrap_key} div[data-testid="stSlider"] label {{ display:none; }}
             /* Native per-step tick row: this is *static* (it just marks
@@ -279,7 +337,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 color: {TEXT_MID} !important;
                 font-size: 0.75rem !important;
                 padding: 0.2rem 0 !important;
-                margin: 18px auto 0 !important;
+                margin: {"10px" if compact else "18px"} auto 0 !important;
                 max-width: 120px !important;
                 display: block !important;
                 transition: all 0.2s ease !important;
@@ -297,7 +355,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             with head_l:
                 st.markdown(
                     f'<div style="font-size:0.75rem; letter-spacing:0.08em; text-transform:uppercase; '
-                    f'color:{TEXT_MID}; font-weight:700; margin-bottom:8px;">Drag to Rate '
+                    f'color:{TEXT_MID}; font-weight:700; margin-bottom:{"4px" if compact else "8px"};">Drag to Rate '
                     f'<span style="opacity:0.6; text-transform:none; letter-spacing:0;">'
                     f'(steps of {step:g})</span></div>',
                     unsafe_allow_html=True,
@@ -305,15 +363,15 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             with head_r:
                 value_label = f"{current:g}" if current > 0 else "Not rated"
                 st.markdown(
-                    f'<div style="text-align:right; font-size:1.5rem; font-weight:800; '
+                    f'<div style="text-align:right; font-size:{"1.15rem" if compact else "1.5rem"}; font-weight:800; '
                     f'color:{GREEN if current > 0 else TEXT_DIM};">{value_label}'
                     f'<span style="font-size:0.9rem; color:{TEXT_DIM}; font-weight:600;"> / {RATING_MAX:g}</span></div>',
                     unsafe_allow_html=True,
                 )
 
             st.markdown(
-                f'<div style="margin: 2px 0 10px; text-align:center;">'
-                f'{star_bar_html(current, size="2.3rem", glow=True)}</div>',
+                f'<div style="margin: {margin}; text-align:center;">'
+                f'{star_bar_html(current, size=star_size, glow=True)}</div>',
                 unsafe_allow_html=True,
             )
 

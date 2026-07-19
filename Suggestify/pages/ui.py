@@ -262,9 +262,8 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                     st.markdown(f"""
                     <style>
                     .st-key-{qr_key} {{
-                        margin-top: -0.5rem !important;
+                        margin-top: -0.55rem !important;
                         margin-bottom: 0.6rem !important;
-                        padding-left: 118px !important;
                     }}
                     </style>
                     """, unsafe_allow_html=True)

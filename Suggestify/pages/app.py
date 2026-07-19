@@ -317,46 +317,74 @@ with col_brand:
     ''', unsafe_allow_html=True)
 
 with col_share:
-    st.markdown("<div style='margin-top: 15px; display:flex; gap:10px; justify-content:flex-end;'>", unsafe_allow_html=True)
-    with st.container(key="quick_rate_toggle"):
-        if st.button("⭐ Quick Rate: " + ("ON" if st.session_state.quick_rate_mode else "OFF"),
-                     key="quick_rate_btn",
-                     type="primary" if st.session_state.quick_rate_mode else "secondary"):
-            st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
-            st.rerun()
-    render_share_stats_button(
-        run_query=run_query,
-        user_id=selected_user_id,
-        username=selected_username,
-        min_date=min_date,
-        max_date=max_date,
-        label="📸 Share Stats"
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    # ─── Rating Mode / Share Stats — swap positions with a pop-in
+    # animation whenever Rating Mode is toggled. Both controls live
+    # inside one real container (not the old raw-HTML div hack) so the
+    # CSS `order` property can actually reorder them, and each side
+    # replays a short "swapPop" entrance animation on every rerun so the
+    # transition reads as a deliberate swap instead of a static jump. ───
+    rating_mode_on = st.session_state.quick_rate_mode
+    with st.container(key="share_row"):
+        st.markdown(f"""
+        <style>
+        .st-key-share_row {{ margin-top: 15px; }}
+        .st-key-share_row div[data-testid="stHorizontalBlock"] {{
+            justify-content: flex-end !important;
+            align-items: center !important;
+            gap: 10px !important;
+        }}
+        .st-key-share_row div[data-testid="column"]:nth-of-type(1) {{
+            order: {2 if rating_mode_on else 1} !important;
+        }}
+        .st-key-share_row div[data-testid="column"]:nth-of-type(2) {{
+            order: {1 if rating_mode_on else 2} !important;
+        }}
+        .st-key-share_row div[data-testid="column"] {{
+            width: auto !important; flex: 0 0 auto !important;
+            animation: swapPop 0.45s cubic-bezier(0.16,1,0.3,1) both;
+        }}
+        @keyframes swapPop {{
+            from {{ opacity: 0; transform: translateX(22px) scale(0.85); }}
+            to   {{ opacity: 1; transform: translateX(0) scale(1); }}
+        }}
+        .st-key-quick_rate_toggle button {{
+            border-radius: 999px !important;
+            font-weight: 700 !important;
+            font-size: 0.8rem !important;
+            padding: 0.45rem 1.1rem !important;
+            transition: all 0.2s ease !important;
+        }}
+        .st-key-quick_rate_toggle button[kind="secondary"] {{
+            background: rgba(255,255,255,0.04) !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
+            color: {TEXT_MID} !important;
+        }}
+        .st-key-quick_rate_toggle button[kind="primary"] {{
+            background: {GREEN} !important;
+            border: 1px solid {GREEN} !important;
+            color: #000 !important;
+            box-shadow: 0 4px 14px rgba(29,185,84,0.35) !important;
+        }}
+        </style>
+        """, unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <style>
-    div[data-testid="stButton"] button[kind="primary"]:has(+ div) {{}}
-    .st-key-quick_rate_toggle button {{
-        border-radius: 999px !important;
-        font-weight: 700 !important;
-        font-size: 0.8rem !important;
-        padding: 0.45rem 1.1rem !important;
-        transition: all 0.2s ease !important;
-    }}
-    .st-key-quick_rate_toggle button[kind="secondary"] {{
-        background: rgba(255,255,255,0.04) !important;
-        border: 1px solid rgba(255,255,255,0.1) !important;
-        color: {TEXT_MID} !important;
-    }}
-    .st-key-quick_rate_toggle button[kind="primary"] {{
-        background: {GREEN} !important;
-        border: 1px solid {GREEN} !important;
-        color: #000 !important;
-        box-shadow: 0 4px 14px rgba(29,185,84,0.35) !important;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
+        col_toggle, col_share_btn = st.columns(2)
+        with col_toggle:
+            with st.container(key="quick_rate_toggle"):
+                rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
+                if st.button(rating_label, key="quick_rate_btn",
+                             type="primary" if rating_mode_on else "secondary"):
+                    st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
+                    st.rerun()
+        with col_share_btn:
+            render_share_stats_button(
+                run_query=run_query,
+                user_id=selected_user_id,
+                username=selected_username,
+                min_date=min_date,
+                max_date=max_date,
+                label="📸 Share Stats"
+            )
 
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
@@ -517,7 +545,13 @@ if detail_type and detail_id:
                 image_url=row.get("image_url")
             )
             
-            R.render_star_rating("song", detail_id, selected_user_id)
+            # Full drag-to-rate widget only while Rating Mode is on (it's
+            # the heavier of the two, space-wise). With Rating Mode off we
+            # still show the current rating, just as a compact one-line chip.
+            if st.session_state.quick_rate_mode:
+                R.render_star_rating("song", detail_id, selected_user_id, compact=True)
+            else:
+                st.markdown(R.rating_chip_html(R.get_song_rating(selected_user_id, detail_id)), unsafe_allow_html=True)
             
             chips_html = '<div class="meta-chip-container">'
             
@@ -963,7 +997,7 @@ if detail_type and detail_id:
                         use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
-
+                
     elif detail_type == "genre":
         genre_match_sql = """
             (so.primary_genre ILIKE :genre OR al.primary_genre ILIKE :genre OR EXISTS (
@@ -1413,7 +1447,6 @@ elif current_tab == "artists":
                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
-
 
 elif current_tab == "albums":
     st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)

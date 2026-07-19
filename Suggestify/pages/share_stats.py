@@ -7,6 +7,7 @@ import zipfile
 import datetime
 import requests
 import streamlit as st
+import pandas as pd
 import streamlit.components.v1 as components
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -42,9 +43,6 @@ THEMES = {
                        "accent": (212, 175, 55), "accent2": (245, 222, 140)},
 }
 
-# Special sentinel entry shown alongside the named themes above. Selecting it
-# triggers `_get_dynamic_theme(...)`, which builds a bespoke gradient out of
-# the top artist's actual artwork colors instead of a fixed palette.
 DYNAMIC_THEME_LABEL = "🎨 Auto (Top Artist Colors)"
 
 PERIODS = {
@@ -56,13 +54,29 @@ PERIODS = {
 }
 
 STAT_TYPES = {
-    "Top 5 Artists":         ("artists", 5),
-    "Top 10 Artists":        ("artists", 10),
-    "Top 5 Tracks":          ("tracks", 5),
-    "Top 10 Tracks":         ("tracks", 10),
-    "Top Albums":            ("albums", 10),
-    "Overview":              ("overview", 1),
-    "Listening Personality": ("personality", 1),
+    "Top 5 Artists":             ("artists", 5),
+    "Top 10 Artists":            ("artists", 10),
+    "Top 5 Tracks":              ("tracks", 5),
+    "Top 10 Tracks":             ("tracks", 10),
+    "Top Albums":                ("albums", 10),
+    "Top Genres":                ("genres", 7),
+    "Top Seasons":               ("seasons", 4),
+    "Top Times of Day":          ("tod", 4),
+    "Specific Album Top Tracks": ("specific_album", 5),
+    "Specific Artist Insights":  ("specific_artist", 6),
+    "Overview":                  ("overview", 1),
+    "Listening Personality":     ("personality", 1),
+}
+
+CUSTOM_IMAGES = {
+    "Winter": "https://images.unsplash.com/photo-1418985991508-e47386d96a71?w=400&q=80&auto=format&fit=crop",
+    "Spring": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&q=80&auto=format&fit=crop",
+    "Summer": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&q=80&auto=format&fit=crop",
+    "Autumn": "https://images.unsplash.com/photo-1477414348463-c0eb7f1359b6?w=400&q=80&auto=format&fit=crop",
+    "Night": "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=400&q=80&auto=format&fit=crop",
+    "Morning": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=80&auto=format&fit=crop",
+    "Afternoon": "https://images.unsplash.com/photo-1500964757637-c85e8a162699?w=400&q=80&auto=format&fit=crop",
+    "Evening": "https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=400&q=80&auto=format&fit=crop",
 }
 
 RANK_COLORS = {
@@ -71,9 +85,6 @@ RANK_COLORS = {
     3: (205, 127, 50),
 }
 
-# Both export sizes. Layout math below scales against the height of
-# whichever of these is being rendered, so a single set of drawing
-# routines produces both a tall Story card and a boxy Square card.
 FORMATS = {
     "Story (1080×1920)":  (1080, 1920),
     "Square (1080×1080)": (1080, 1080),
@@ -92,7 +103,6 @@ PERSONALITIES = {
     "newcomer":        {"label": "Fresh Start",       "emoji": "🌱", "desc": "Just getting started — the story is unfolding."},
     "default":         {"label": "Music Lover",       "emoji": "🎧", "desc": "A well-rounded, ever-curious listener."},
 }
-
 
 # ══════════════════════════════════════════════════════════════════
 # FONT LOADING
@@ -120,15 +130,13 @@ def _font(size, bold=True):
         except Exception:
             continue
     try:
-        return ImageFont.load_default(size)  # Pillow >= 10.1, scalable
+        return ImageFont.load_default(size)
     except TypeError:
         return ImageFont.load_default()
-
 
 def _text_w(draw, text, font):
     b = draw.textbbox((0, 0), text, font=font)
     return b[2] - b[0]
-
 
 def _truncate(draw, text, font, max_w):
     if _text_w(draw, text, font) <= max_w:
@@ -136,7 +144,6 @@ def _truncate(draw, text, font, max_w):
     while text and _text_w(draw, text + "…", font) > max_w:
         text = text[:-1]
     return (text + "…") if text else "…"
-
 
 def _wrap_text(draw, text, font, max_w, max_lines=3):
     words = text.split()
@@ -157,7 +164,6 @@ def _wrap_text(draw, text, font, max_w, max_lines=3):
         lines[-1] = _truncate(draw, lines[-1] + "…", font, max_w)
     return lines[:max_lines]
 
-
 # ══════════════════════════════════════════════════════════════════
 # IMAGE HELPERS
 # ══════════════════════════════════════════════════════════════════
@@ -171,16 +177,12 @@ def _download_image(url: str):
     except Exception:
         return None
 
-
 def _load_cached_image(url):
-    if not url:
-        return None
+    if not url: return None
     cached = _download_image(url)
-    if cached is None:
-        return None
+    if cached is None: return None
     data, size = cached
     return Image.frombytes("RGBA", size, data)
-
 
 def _rounded_mask(size, radius):
     mask = Image.new("L", size, 0)
@@ -188,16 +190,13 @@ def _rounded_mask(size, radius):
     d.rounded_rectangle([0, 0, size[0] - 1, size[1] - 1], radius=radius, fill=255)
     return mask
 
-
 def _circle_mask(size):
     mask = Image.new("L", size, 0)
     d = ImageDraw.Draw(mask)
     d.ellipse([0, 0, size[0] - 1, size[1] - 1], fill=255)
     return mask
 
-
 def _fit_cover(img, size):
-    """Resize + center-crop to exactly `size` (like CSS object-fit: cover)."""
     src_w, src_h = img.size
     target_w, target_h = size
     scale = max(target_w / src_w, target_h / src_h)
@@ -206,7 +205,6 @@ def _fit_cover(img, size):
     left = (new_w - target_w) // 2
     top = (new_h - target_h) // 2
     return img.crop((left, top, left + target_w, top + target_h))
-
 
 def _placeholder(size, accent, circle=False, icon="\u266A"):
     img = Image.new("RGBA", size, accent + (255,))
@@ -220,32 +218,25 @@ def _placeholder(size, accent, circle=False, icon="\u266A"):
         img.putalpha(_circle_mask(size))
     return img
 
-
-def _get_art(url, size, circle=False, accent=(29, 185, 84)):
+def _get_art(url, size, circle=False, accent=(29, 185, 84), icon="\u266A"):
     img = None
     if url and isinstance(url, str) and url.startswith("http"):
         img = _load_cached_image(url)
     if img is None:
-        return _placeholder(size, accent, circle=circle)
+        return _placeholder(size, accent, circle=circle, icon=icon)
     img = _fit_cover(img, size)
     mask = _circle_mask(size) if circle else _rounded_mask(size, int(size[0] * 0.18))
     out = img.convert("RGBA")
     out.putalpha(mask)
     return out
 
-
 def _initials(name):
     parts = [p for p in (name or "").strip().split() if p]
-    if not parts:
-        return "?"
-    if len(parts) == 1:
-        return parts[0][:2].upper()
+    if not parts: return "?"
+    if len(parts) == 1: return parts[0][:2].upper()
     return (parts[0][0] + parts[-1][0]).upper()
 
-
 def _avatar_image(username, accent, size=96, avatar_url=None):
-    """User avatar: their photo if a URL is provided, otherwise a clean
-    initials badge in the card's accent color."""
     if avatar_url:
         img = _load_cached_image(avatar_url)
         if img is not None:
@@ -253,7 +244,6 @@ def _avatar_image(username, accent, size=96, avatar_url=None):
             img = img.convert("RGBA")
             img.putalpha(_circle_mask((size, size)))
             return img
-
     img = Image.new("RGBA", (size, size), tuple(accent) + (255,))
     d = ImageDraw.Draw(img)
     f = _font(size * 0.4)
@@ -264,19 +254,14 @@ def _avatar_image(username, accent, size=96, avatar_url=None):
     img.putalpha(_circle_mask((size, size)))
     return img
 
-
 def _qr_image(url=APP_URL, size=140, pad_ratio=0.16):
-    """Small scannable QR badge linking back to Suggestify. Returns None
-    (silently) if the optional `qrcode` package isn't installed."""
-    if qrcode is None:
-        return None
+    if qrcode is None: return None
     try:
         qr = qrcode.QRCode(border=1, box_size=10)
         qr.add_data(url)
         qr.make(fit=True)
         code_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
         code_img = code_img.resize((size, size), Image.LANCZOS)
-
         pad = int(size * pad_ratio)
         card = Image.new("RGBA", (size + pad * 2, size + pad * 2), (255, 255, 255, 255))
         card.putalpha(_rounded_mask(card.size, int(pad * 1.1)))
@@ -285,9 +270,8 @@ def _qr_image(url=APP_URL, size=140, pad_ratio=0.16):
     except Exception:
         return None
 
-
 # ══════════════════════════════════════════════════════════════════
-# DOMINANT-COLOR EXTRACTION  (drives the "Auto" dynamic theme)
+# DOMINANT-COLOR EXTRACTION
 # ══════════════════════════════════════════════════════════════════
 def _extract_dominant_colors(img, n=5):
     small = img.convert("RGB").resize((64, 64))
@@ -299,16 +283,13 @@ def _extract_dominant_colors(img, n=5):
         colors.append(tuple(palette[idx * 3: idx * 3 + 3]))
     return colors
 
-
 def _adjust(color, factor):
     return tuple(max(0, min(255, int(c * factor))) for c in color)
-
 
 def _dynamic_theme_from_colors(colors):
     def sat_val(c):
         h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
         return s * v
-
     ordered = sorted(colors, key=sat_val, reverse=True)
     base = ordered[0]
     h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in base))
@@ -319,24 +300,19 @@ def _dynamic_theme_from_colors(colors):
     stops = [_adjust(accent, 0.34), _adjust(accent, 0.55), _adjust(accent, 0.10)]
     return {"stops": stops, "accent": accent, "accent2": accent2}
 
-
 def _get_dynamic_theme(image_url, fallback_theme):
     img = _load_cached_image(image_url) if image_url else None
-    if img is None:
-        return fallback_theme
+    if img is None: return fallback_theme
     try:
         colors = _extract_dominant_colors(img, n=5)
-        if not colors:
-            return fallback_theme
+        if not colors: return fallback_theme
         return _dynamic_theme_from_colors(colors)
     except Exception:
         return fallback_theme
 
-
 def _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, overview=None):
     if theme_choice != DYNAMIC_THEME_LABEL:
         return THEMES[theme_choice]
-
     top_artist_img = None
     if overview and overview.get("top_artist"):
         top_artist_img = overview["top_artist"].get("image_url")
@@ -344,9 +320,7 @@ def _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, overv
         ta_df = _fetch_data(run_query, "artists", 1, user_id, start_date, end_date)
         if ta_df is not None and not ta_df.empty:
             top_artist_img = ta_df.iloc[0].get("image_url")
-
     return _get_dynamic_theme(top_artist_img, THEMES["Spotify Green"])
-
 
 # ══════════════════════════════════════════════════════════════════
 # BACKGROUND / GLASS EFFECTS
@@ -367,7 +341,6 @@ def _make_gradient(size, stops):
         col.putpixel((0, y), (r, g, b))
     return col.resize((w, h)).convert("RGBA")
 
-
 def _add_glow(bg_rgba, center, radius, color, alpha=80):
     glow = Image.new("RGBA", bg_rgba.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(glow)
@@ -377,18 +350,11 @@ def _add_glow(bg_rgba, center, radius, color, alpha=80):
     glow = glow.filter(ImageFilter.GaussianBlur(radius // 2))
     return Image.alpha_composite(bg_rgba, glow)
 
-
 def _add_particles(bg_rgba, accent, seed=0, density=1.0):
-    """Bakes a still frame of the 'floating particles' effect into the PNG
-    (a real animation isn't possible in a static export — the live preview
-    inside the share dialog shows the true CSS-animated version). Small
-    bright dots plus a few soft oversized bokeh circles, scattered with a
-    per-user seed so re-generating the same card looks the same."""
     w, h = bg_rgba.size
     rnd = random.Random(seed)
     layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-
     dot_count = int(46 * density * (w * h) / (1080 * 1920))
     for _ in range(max(dot_count, 12)):
         x, y = rnd.uniform(0, w), rnd.uniform(0, h)
@@ -396,16 +362,13 @@ def _add_particles(bg_rgba, accent, seed=0, density=1.0):
         color = accent if rnd.random() < 0.35 else (255, 255, 255)
         alpha = rnd.randint(20, 85)
         d.ellipse([x - r, y - r, x + r, y + r], fill=tuple(color) + (alpha,))
-
     for _ in range(max(int(6 * density), 3)):
         x, y = rnd.uniform(0, w), rnd.uniform(0, h)
         r = rnd.uniform(26, 80) * (w / 1080)
         alpha = rnd.randint(10, 24)
         d.ellipse([x - r, y - r, x + r, y + r], fill=tuple(accent) + (alpha,))
-
     layer = layer.filter(ImageFilter.GaussianBlur(1))
     return Image.alpha_composite(bg_rgba, layer)
-
 
 def _drop_shadow(bg_rgba, box, radius=32, blur=26, offset=(0, 12), alpha=100):
     x0, y0, x1, y1 = box
@@ -418,114 +381,160 @@ def _drop_shadow(bg_rgba, box, radius=32, blur=26, offset=(0, 12), alpha=100):
     shadow = shadow.filter(ImageFilter.GaussianBlur(blur))
     return Image.alpha_composite(bg_rgba, shadow)
 
-
 def _glass_card(bg_rgba, box, radius=32, blur=22, tint=(255, 255, 255, 24),
                  border=(255, 255, 255, 50)):
     x0, y0, x1, y1 = [int(v) for v in box]
     region = bg_rgba.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(blur))
     mask = _rounded_mask((x1 - x0, y1 - y0), radius)
-
     frosted = Image.new("RGBA", bg_rgba.size, (0, 0, 0, 0))
     frosted.paste(region, (x0, y0), mask)
     out = Image.alpha_composite(bg_rgba, frosted)
-
     tint_layer = Image.new("RGBA", bg_rgba.size, (0, 0, 0, 0))
     solid = Image.new("RGBA", (x1 - x0, y1 - y0), tint)
     tint_layer.paste(solid, (x0, y0), mask)
     out = Image.alpha_composite(out, tint_layer)
-
     d = ImageDraw.Draw(out)
     d.rounded_rectangle([x0, y0, x1, y1], radius=radius, outline=border, width=2)
     return out
 
-
 # ══════════════════════════════════════════════════════════════════
-# DATA ACCESS  (share-dialog periods are independent of the page's
-# own filter bar, so we query fresh with our own date range)
+# DATA ACCESS 
 # ══════════════════════════════════════════════════════════════════
 def _date_range(period_key, min_date, max_date, custom_start=None, custom_end=None):
     if period_key == "custom":
         start = custom_start or min_date
         end = custom_end or max_date
-        if start > end:
-            start, end = end, start
+        if start > end: start, end = end, start
         return start, end
-    if period_key == "wrapped":
-        return datetime.date(max_date.year, 1, 1), max_date
-    if period_key == "month":
-        return max_date - datetime.timedelta(days=30), max_date
-    if period_key == "week":
-        return max_date - datetime.timedelta(days=7), max_date
-    return min_date, max_date  # "all"
-
+    if period_key == "wrapped": return datetime.date(max_date.year, 1, 1), max_date
+    if period_key == "month": return max_date - datetime.timedelta(days=30), max_date
+    if period_key == "week": return max_date - datetime.timedelta(days=7), max_date
+    return min_date, max_date
 
 def _period_label_and_range(period_key, min_date, max_date, custom_start=None, custom_end=None):
     start, end = _date_range(period_key, min_date, max_date, custom_start, custom_end)
-    if period_key == "all":
-        return "ALL TIME", "All time"
-    if period_key == "wrapped":
-        return f"WRAPPED {max_date.year}", f"Jan – {max_date.strftime('%b %Y')}"
-    if period_key == "month":
-        return "LAST MONTH", f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
-    if period_key == "week":
-        return "LAST WEEK", f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
-    # custom
+    if period_key == "all": return "ALL TIME", "All time"
+    if period_key == "wrapped": return f"WRAPPED {max_date.year}", f"Jan – {max_date.strftime('%b %Y')}"
+    if period_key == "month": return "LAST MONTH", f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
+    if period_key == "week": return "LAST WEEK", f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
     year_label = f"{start.year}" if start.year == end.year else f"{start.year}–{end.year}"
     return f"{year_label}", f"{start.strftime('%b %d, %Y')} – {end.strftime('%b %d, %Y')}"
 
+def _title_lines(kind, n, item_name=None):
+    if kind == "artists": return ["MY TOP", f"{n} ARTISTS"]
+    if kind == "tracks": return ["MY TOP", f"{n} TRACKS"]
+    if kind == "genres": return ["MY TOP", f"{n} GENRES"]
+    if kind == "seasons": return ["MY TOP", "SEASONS"]
+    if kind == "tod": return ["FAVORITE", "TIMES OF DAY"]
+    if kind == "specific_album":
+        safe = (item_name or "ALBUM").upper()
+        if len(safe) > 16: safe = safe[:15] + "…"
+        return ["TOP TRACKS FROM", safe]
+    if kind == "specific_artist":
+        safe = (item_name or "ARTIST").upper()
+        if len(safe) > 16: safe = safe[:15] + "…"
+        return [safe, "TOP INSIGHTS"]
+    return ["MY TOP", "ALBUMS"]
 
-def _fetch_data(run_query, kind, limit, user_id, start_date, end_date):
-    params = {"start_date": start_date, "end_date": end_date,
-              "user_id": user_id, "limit": limit}
+def _fetch_data(run_query, kind, limit, user_id, start_date, end_date, item_id=None):
+    params = {"start_date": start_date, "end_date": end_date, "user_id": user_id, "limit": limit}
+    if item_id is not None:
+        params["item_id"] = item_id
 
     if kind == "artists":
         sql = """
-            SELECT a.name AS name, a.image_url AS image_url,
-                   COUNT(s.id) AS streams,
-                   ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
-            FROM streams s
-            JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
-            JOIN artists a ON a.id = sa.artist_id
-            WHERE s.played_at::date BETWEEN :start_date AND :end_date
-              AND s.user_id = :user_id
-            GROUP BY a.id, a.name, a.image_url
-            ORDER BY streams DESC LIMIT :limit;
+            SELECT a.name AS name, a.image_url AS image_url, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
+            FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE JOIN artists a ON a.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id
+            GROUP BY a.id, a.name, a.image_url ORDER BY streams DESC LIMIT :limit;
         """
+        return run_query(sql, params)
     elif kind == "tracks":
         sql = """
-            SELECT so.title AS name, COALESCE(ar.name, 'Unknown') AS sub, so.image_url AS image_url,
-                   COUNT(s.id) AS streams,
-                   ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
-            FROM streams s
-            JOIN songs so ON so.id = s.song_id
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            LEFT JOIN artists ar ON ar.id = sa.artist_id
-            WHERE s.played_at::date BETWEEN :start_date AND :end_date
-              AND s.user_id = :user_id
-            GROUP BY so.id, so.title, ar.name, so.image_url
-            ORDER BY streams DESC LIMIT :limit;
+            SELECT so.title AS name, COALESCE(ar.name, 'Unknown') AS sub, so.image_url AS image_url, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
+            FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE LEFT JOIN artists ar ON ar.id = sa.artist_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id
+            GROUP BY so.id, so.title, ar.name, so.image_url ORDER BY streams DESC LIMIT :limit;
         """
-    else:  # albums
+        return run_query(sql, params)
+    elif kind == "albums":
         sql = """
-            SELECT COALESCE(al.title, 'Unknown Album') AS name,
-                   MAX(so.image_url) AS image_url,
-                   COUNT(s.id) AS streams,
-                   ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
-            FROM streams s
-            JOIN songs so ON so.id = s.song_id
-            LEFT JOIN albums al ON al.id = so.album_id
-            WHERE s.played_at::date BETWEEN :start_date AND :end_date
-              AND s.user_id = :user_id
-              AND so.album_id IS NOT NULL
-            GROUP BY al.id, al.title
-            ORDER BY streams DESC LIMIT :limit;
+            SELECT COALESCE(al.title, 'Unknown Album') AS name, MAX(so.image_url) AS image_url, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
+            FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN albums al ON al.id = so.album_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id AND so.album_id IS NOT NULL
+            GROUP BY al.id, al.title ORDER BY streams DESC LIMIT :limit;
         """
-    return run_query(sql, params)
+        return run_query(sql, params)
+    elif kind == "genres":
+        sql = """
+            WITH StreamBase AS (
+                SELECT s.id AS stream_id, s.ms_played, sa.artist_id, so.primary_genre AS song_genre, al.primary_genre AS album_genre, so.album_id
+                FROM streams s JOIN songs so ON so.id = s.song_id LEFT JOIN albums al ON al.id = so.album_id JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id
+            ),
+            Unrolled AS (
+                SELECT stream_id, ms_played, artist_id, song_genre AS genre_name FROM StreamBase WHERE song_genre IS NOT NULL
+                UNION ALL SELECT stream_id, ms_played, artist_id, album_genre FROM StreamBase WHERE album_genre IS NOT NULL
+                UNION ALL SELECT sb.stream_id, sb.ms_played, sb.artist_id, g.name FROM StreamBase sb JOIN album_genres ag ON ag.album_id = sb.album_id JOIN genres g ON g.id = ag.genre_id
+            ),
+            UniqueStreamGenres AS (
+                SELECT DISTINCT stream_id, ms_played, artist_id, INITCAP(TRIM(genre_name)) AS genre_name FROM Unrolled WHERE genre_name IS NOT NULL AND LOWER(genre_name) != 'unknown'
+            )
+            SELECT genre_name AS name, CAST(COUNT(DISTINCT artist_id) AS TEXT) || ' Artists' AS sub, NULL AS image_url, COUNT(stream_id) AS streams, ROUND(SUM(ms_played) / 3600000.0, 1) AS hours
+            FROM UniqueStreamGenres GROUP BY genre_name ORDER BY streams DESC LIMIT :limit;
+        """
+        return run_query(sql, params)
+    elif kind == "seasons":
+        sql = """
+            SELECT CASE WHEN EXTRACT(MONTH FROM played_at) IN (12,1,2) THEN 'Winter' WHEN EXTRACT(MONTH FROM played_at) IN (3,4,5) THEN 'Spring' WHEN EXTRACT(MONTH FROM played_at) IN (6,7,8) THEN 'Summer' ELSE 'Autumn' END AS name,
+                   'Seasonal Listening' AS sub, NULL AS image_url, COUNT(*) AS streams, ROUND(SUM(ms_played) / 3600000.0, 1) AS hours
+            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date AND user_id = :user_id GROUP BY name ORDER BY streams DESC LIMIT :limit;
+        """
+        df = run_query(sql, params)
+        if df is not None and not df.empty: df['image_url'] = df['name'].map(CUSTOM_IMAGES)
+        return df
+    elif kind == "tod":
+        sql = """
+            SELECT CASE WHEN EXTRACT(HOUR FROM played_at) >= 21 OR EXTRACT(HOUR FROM played_at) < 5 THEN 'Night' WHEN EXTRACT(HOUR FROM played_at) BETWEEN 5 AND 11 THEN 'Morning' WHEN EXTRACT(HOUR FROM played_at) BETWEEN 12 AND 16 THEN 'Afternoon' ELSE 'Evening' END AS name,
+                   'Time of Day' AS sub, NULL AS image_url, COUNT(*) AS streams, ROUND(SUM(ms_played) / 3600000.0, 1) AS hours
+            FROM streams WHERE played_at::date BETWEEN :start_date AND :end_date AND user_id = :user_id GROUP BY name ORDER BY streams DESC LIMIT :limit;
+        """
+        df = run_query(sql, params)
+        if df is not None and not df.empty: df['image_url'] = df['name'].map(CUSTOM_IMAGES)
+        return df
+    elif kind == "specific_album":
+        sql = """
+            SELECT so.title AS name, 'Track' AS sub, so.image_url AS image_url, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
+            FROM streams s JOIN songs so ON so.id = s.song_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id AND so.album_id = :item_id
+            GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT :limit;
+        """
+        return run_query(sql, params)
+    elif kind == "specific_artist":
+        sql_tracks = """
+            SELECT so.title AS name, 'Track' AS sub, so.image_url AS image_url, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played)/3600000.0,1) AS hours
+            FROM streams s JOIN songs so ON so.id=s.song_id JOIN song_artists sa ON sa.song_id=so.id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id AND sa.artist_id = :item_id AND sa.is_feature=FALSE
+            GROUP BY so.id, so.title, so.image_url ORDER BY streams DESC LIMIT 3
+        """
+        sql_albums = """
+            SELECT al.title AS name, 'Album' AS sub, MAX(so.image_url) AS image_url, COUNT(s.id) AS streams, ROUND(SUM(s.ms_played)/3600000.0,1) AS hours
+            FROM streams s JOIN songs so ON so.id=s.song_id JOIN albums al ON al.id=so.album_id JOIN song_artists sa ON sa.song_id=so.id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id AND sa.artist_id = :item_id AND sa.is_feature=FALSE
+            GROUP BY al.id, al.title ORDER BY streams DESC LIMIT 3
+        """
+        df_t = run_query(sql_tracks, params)
+        df_a = run_query(sql_albums, params)
+        dfs = []
+        if df_t is not None and not df_t.empty: dfs.append(df_t)
+        if df_a is not None and not df_a.empty: dfs.append(df_a)
+        if dfs:
+            return pd.concat(dfs, ignore_index=True)
+        return pd.DataFrame()
+    return pd.DataFrame()
 
 
 def _fetch_totals(run_query, user_id, start_date, end_date):
-    """Total streams/hours across the WHOLE selected date range — independent
-    of whatever Top-N list is being shown, so the footer never undercounts."""
     sql = """
         SELECT COUNT(s.id) AS streams,
                ROUND(SUM(s.ms_played) / 3600000.0, 1) AS hours
@@ -540,11 +549,8 @@ def _fetch_totals(run_query, user_id, start_date, end_date):
     row = result.iloc[0]
     return int(row.get("streams") or 0), float(row.get("hours") or 0.0)
 
-
 def _fetch_overview_data(run_query, user_id, start_date, end_date):
-    """Aggregate stats for the 'Overview' card: totals + #1 artist + #1 track."""
     params = {"start_date": start_date, "end_date": end_date, "user_id": user_id}
-
     totals_sql = """
         SELECT
             COUNT(s.id) AS total_streams,
@@ -557,13 +563,11 @@ def _fetch_overview_data(run_query, user_id, start_date, end_date):
           AND s.user_id = :user_id;
     """
     totals_df = run_query(totals_sql, params)
-
     overview = {
         "total_streams": 0, "total_hours": 0.0,
         "unique_artists": 0, "unique_tracks": 0,
         "top_artist": None, "top_track": None,
     }
-
     if totals_df is not None and not totals_df.empty:
         row = totals_df.iloc[0]
         overview["total_streams"] = int(row.get("total_streams") or 0)
@@ -580,7 +584,6 @@ def _fetch_overview_data(run_query, user_id, start_date, end_date):
         overview["top_track"] = top_track_df.iloc[0].to_dict()
 
     return overview
-
 
 def _fetch_personality_signals(run_query, user_id, start_date, end_date):
     sql = """
@@ -608,52 +611,30 @@ def _fetch_personality_signals(run_query, user_id, start_date, end_date):
         "unique_artists": int(row.get("unique_artists") or 0),
     }
 
-
 def _compute_personality(signals, overview):
     total = signals["total"]
-    if total < 20:
-        return PERSONALITIES["newcomer"]
-
+    if total < 20: return PERSONALITIES["newcomer"]
     night_pct = signals["night_count"] / total
     weekend_pct = signals["weekend_count"] / total
     unique_tracks = signals["unique_tracks"] or 1
     unique_artists = signals["unique_artists"] or 1
     repeat_rate = total / unique_tracks
     diversity = unique_artists / total
-
-    top_artist_streams = 0
-    if overview.get("top_artist"):
-        top_artist_streams = int(overview["top_artist"].get("streams") or 0)
+    top_artist_streams = int(overview["top_artist"].get("streams") or 0) if overview.get("top_artist") else 0
     concentration = (top_artist_streams / total) if total else 0
 
-    if night_pct >= 0.42:
-        return PERSONALITIES["night_owl"]
-    if concentration >= 0.22:
-        return PERSONALITIES["superfan"]
-    if overview.get("total_hours", 0) >= 250:
-        return PERSONALITIES["marathoner"]
-    if weekend_pct >= 0.45:
-        return PERSONALITIES["weekend_warrior"]
-    if repeat_rate >= 7:
-        return PERSONALITIES["repeater"]
-    if diversity >= 0.12 or unique_artists >= 120:
-        return PERSONALITIES["explorer"]
-    if unique_tracks >= total * 0.55:
-        return PERSONALITIES["collector"]
+    if night_pct >= 0.42: return PERSONALITIES["night_owl"]
+    if concentration >= 0.22: return PERSONALITIES["superfan"]
+    if overview.get("total_hours", 0) >= 250: return PERSONALITIES["marathoner"]
+    if weekend_pct >= 0.45: return PERSONALITIES["weekend_warrior"]
+    if repeat_rate >= 7: return PERSONALITIES["repeater"]
+    if diversity >= 0.12 or unique_artists >= 120: return PERSONALITIES["explorer"]
+    if unique_tracks >= total * 0.55: return PERSONALITIES["collector"]
     return PERSONALITIES["default"]
 
 
-def _title_lines(kind, n):
-    if kind == "artists":
-        return ["MY TOP", f"{n} ARTISTS"]
-    if kind == "tracks":
-        return ["MY TOP", f"{n} TRACKS"]
-    return ["MY TOP", "ALBUMS"]
-
-
 # ══════════════════════════════════════════════════════════════════
-# SHARED CARD SHELL  (background + header + footer, used by all 3
-# card builders below so Story/Square scaling logic lives in one place)
+# SHARED CARD SHELL 
 # ══════════════════════════════════════════════════════════════════
 def _card_background(card_w, card_h, theme, seed):
     bg = _make_gradient((card_w, card_h), theme["stops"])
@@ -662,12 +643,10 @@ def _card_background(card_w, card_h, theme, seed):
     bg = _add_particles(bg, theme["accent"], seed=seed, density=card_h / 1920)
     return bg
 
-
 def _card_header(bg, card_w, card_h, scale, accent, username, avatar_url, period_label,
-                  title_lines, subtitle_text, title_font_size=92):
+                 title_lines, subtitle_text, title_font_size=92):
     draw = ImageDraw.Draw(bg)
 
-    # ── Avatar + logo (top-left) ──
     avatar_size = int(64 * scale)
     avatar_img = _avatar_image(username, accent, size=avatar_size, avatar_url=avatar_url)
     avatar_y = int(56 * scale)
@@ -684,7 +663,6 @@ def _card_header(bg, card_w, card_h, scale, accent, username, avatar_url, period
     draw.text((logo_x, avatar_y + avatar_size / 2 + 14 * scale), f"@{username}",
                font=uname_font, fill=(255, 255, 255, 150))
 
-    # ── Period pill (top-right) ──
     pill_font = _font(26 * scale)
     pw = _text_w(draw, period_label, pill_font) + int(56 * scale)
     ph = int(54 * scale)
@@ -694,7 +672,6 @@ def _card_header(bg, card_w, card_h, scale, accent, username, avatar_url, period
     draw.text(((pill_box[0] + pill_box[2]) / 2, (pill_box[1] + pill_box[3]) / 2),
                period_label, font=pill_font, fill=(0, 0, 0, 255), anchor="mm")
 
-    # ── Title ──
     title_font = _font(title_font_size * scale)
     y = int(190 * scale)
     line_h = int(title_font_size * scale * 1.13)
@@ -703,17 +680,13 @@ def _card_header(bg, card_w, card_h, scale, accent, username, avatar_url, period
         draw.text(((card_w - w) / 2, y), line, font=title_font, fill=(255, 255, 255, 255))
         y += line_h
 
-    # ── Subtitle ──
     sub_font = _font(30 * scale)
     w = _text_w(draw, subtitle_text, sub_font)
     draw.text(((card_w - w) / 2, y + 14 * scale), subtitle_text, font=sub_font, fill=(255, 255, 255, 170))
 
     return bg, y + int(90 * scale)
 
-
-def _card_footer(bg, card_w, card_h, scale, accent, total_streams, total_hours):
-    """Glass stat strip (total streams / total hours) + a thin bottom band
-    with the QR code and the 'Generated by Suggestify' watermark."""
+def _card_footer(bg, card_w, card_h, scale, accent, footer_stats):
     extras_h = int(140 * scale)
     footer_h = int(150 * scale)
     footer_top = card_h - extras_h - footer_h - int(20 * scale)
@@ -723,20 +696,27 @@ def _card_footer(bg, card_w, card_h, scale, accent, total_streams, total_hours):
     bg = _glass_card(bg, foot_box, radius=int(26 * scale), blur=16, tint=(255, 255, 255, 18))
     draw = ImageDraw.Draw(bg)
 
-    stat_big = _font(40 * scale)
-    stat_small = _font(20 * scale, bold=False)
-    half_w = (foot_box[2] - foot_box[0]) / 2
-    cx1 = foot_box[0] + half_w / 2
-    cx2 = foot_box[0] + half_w + half_w / 2
+    num_stats = len(footer_stats)
+    col_w = (foot_box[2] - foot_box[0]) / num_stats
+    
+    stat_big = _font(36 * scale if num_stats > 2 else 40 * scale)
+    stat_small = _font(18 * scale if num_stats > 2 else 20 * scale, bold=False)
+    
     cy1 = foot_box[1] + footer_h * 0.38
     cy2 = foot_box[1] + footer_h * 0.72
 
-    draw.text((cx1, cy1), f"{total_streams:,}", font=stat_big, fill=(255, 255, 255, 255), anchor="mm")
-    draw.text((cx1, cy2), "TOTAL STREAMS", font=stat_small, fill=(255, 255, 255, 150), anchor="mm")
-    draw.text((cx2, cy1), f"{total_hours:,.1f}h", font=stat_big, fill=tuple(accent) + (255,), anchor="mm")
-    draw.text((cx2, cy2), "TIME LISTENED", font=stat_small, fill=(255, 255, 255, 150), anchor="mm")
+    for i, (val, lab) in enumerate(footer_stats):
+        cx = foot_box[0] + i * col_w + col_w / 2
+        
+        # Color logic: alternate white and accent
+        if num_stats == 3:
+            val_color = tuple(accent) + (255,) if i == 1 else (255, 255, 255, 255)
+        else:
+            val_color = (255, 255, 255, 255) if i == 0 else tuple(accent) + (255,)
+            
+        draw.text((cx, cy1), str(val), font=stat_big, fill=val_color, anchor="mm")
+        draw.text((cx, cy2), str(lab), font=stat_small, fill=(255, 255, 255, 150), anchor="mm")
 
-    # ── Bottom band: watermark (left) + QR code (right) ──
     extras_top = card_h - extras_h
     qr_size = int(96 * scale)
     qr_img = _qr_image(size=qr_size)
@@ -746,7 +726,6 @@ def _card_footer(bg, card_w, card_h, scale, accent, total_streams, total_hours):
     wm_text = "Generated by Suggestify"
     date_text = datetime.date.today().strftime("%b %d, %Y")
 
-    text_right_edge = card_w - MARGIN - (qr_img.width + 18 * scale if qr_img else 0)
     draw.text((MARGIN, extras_top + extras_h * 0.38), wm_text, font=wm_font,
                fill=(255, 255, 255, 200), anchor="lm")
     draw.text((MARGIN, extras_top + extras_h * 0.68), date_text, font=date_font,
@@ -760,19 +739,16 @@ def _card_footer(bg, card_w, card_h, scale, accent, total_streams, total_hours):
         scan_font = _font(14 * scale, bold=False)
         draw.text((qr_x + qr_img.width / 2, qr_y - 6 * scale), "SCAN ME", font=scan_font,
                    fill=(255, 255, 255, 130), anchor="mb")
-
     return bg
-
 
 def _finalize(bg):
     return bg.convert("RGB")
 
-
 # ══════════════════════════════════════════════════════════════════
-# CARD BUILDER 1 — Top-N ranked list (artists / tracks / albums)
+# CARD BUILDER 1 — Top-N ranked list 
 # ══════════════════════════════════════════════════════════════════
 def build_share_card(df, kind, username, period_label, theme, date_range_label, n,
-                      total_streams=0, total_hours=0.0, avatar_url=None,
+                      footer_stats, avatar_url=None, item_name=None,
                       card_w=CARD_W, card_h=CARD_H):
     accent = theme["accent"]
     scale = card_h / 1920.0
@@ -781,7 +757,7 @@ def build_share_card(df, kind, username, period_label, theme, date_range_label, 
     bg = _card_background(card_w, card_h, theme, seed)
     subtitle_text = f"@{username}  ·  {date_range_label}"
     bg, list_top = _card_header(bg, card_w, card_h, scale, accent, username, avatar_url,
-                                 period_label, _title_lines(kind, n), subtitle_text)
+                                 period_label, _title_lines(kind, n, item_name), subtitle_text)
 
     extras_h = int(140 * scale)
     footer_h = int(150 * scale)
@@ -790,21 +766,62 @@ def build_share_card(df, kind, username, period_label, theme, date_range_label, 
     rows = df.to_dict("records")
     n_rows = max(len(rows), 1)
     gap = int(16 * scale)
-    row_h = min(220 * scale, (list_bottom - list_top - gap * (n_rows - 1)) / n_rows)
-    row_h = max(row_h, int(70 * scale))
+    
+    available_h = list_bottom - list_top
+    header_h = 0
+    if kind == "specific_artist":
+        header_h = int(35 * scale)
+        available_h -= (2 * header_h) + int(15 * scale)
 
-    is_circle = (kind == "artists")
+    row_h = min(220 * scale, (available_h - gap * (n_rows - 1)) / n_rows)
+    row_h = max(row_h, int(60 * scale))
+
+    is_circle = (kind == "artists" or kind == "specific_artist")
     rank_col_w = int(96 * scale)
 
+    icon = "🎵"
+    if kind == "genres": icon = "🎸"
+    elif kind == "seasons": icon = "🌍"
+    elif kind == "tod": icon = "🕐"
+
+    track_count = 0
+    album_count = 0
+    current_y = list_top
+
     for i, row in enumerate(rows):
-        box = [MARGIN, list_top + i * (row_h + gap),
-               card_w - MARGIN, list_top + i * (row_h + gap) + row_h]
+        if kind == "specific_artist":
+            if row.get("sub") == "Track":
+                if track_count == 0:
+                    draw = ImageDraw.Draw(bg)
+                    header_f = _font(20 * scale, bold=True)
+                    txt = "TOP TRACKS"
+                    w = _text_w(draw, txt, header_f)
+                    draw.text((card_w/2 - w/2, current_y + 4 * scale), txt, font=header_f, fill=tuple(accent)+(255,))
+                    current_y += header_h
+                track_count += 1
+                rank = track_count
+            elif row.get("sub") == "Album":
+                if album_count == 0:
+                    current_y += int(15 * scale) 
+                    draw = ImageDraw.Draw(bg)
+                    header_f = _font(20 * scale, bold=True)
+                    txt = "TOP ALBUMS"
+                    w = _text_w(draw, txt, header_f)
+                    draw.text((card_w/2 - w/2, current_y + 4 * scale), txt, font=header_f, fill=tuple(accent)+(255,))
+                    current_y += header_h
+                album_count += 1
+                rank = album_count
+            else:
+                rank = i + 1
+        else:
+            rank = i + 1
+
+        box = [MARGIN, current_y, card_w - MARGIN, current_y + row_h]
 
         bg = _drop_shadow(bg, box, radius=int(28 * scale), blur=18, offset=(0, 8), alpha=85)
         bg = _glass_card(bg, box, radius=int(28 * scale), blur=18)
         draw = ImageDraw.Draw(bg)
 
-        rank = i + 1
         rank_color = RANK_COLORS.get(rank, (255, 255, 255))
         rank_font = _font(row_h * 0.4)
         draw.text((box[0] + rank_col_w / 2, (box[1] + box[3]) / 2),
@@ -813,7 +830,12 @@ def build_share_card(df, kind, username, period_label, theme, date_range_label, 
         art_size = int(row_h - 24 * scale)
         art_x = box[0] + rank_col_w
         art_y = box[1] + (row_h - art_size) / 2
-        art = _get_art(row.get("image_url"), (art_size, art_size), circle=is_circle, accent=accent)
+        
+        row_icon = icon
+        if kind == "specific_artist":
+            row_icon = "🎵" if row.get("sub") == "Track" else "💿"
+            
+        art = _get_art(row.get("image_url"), (art_size, art_size), circle=is_circle, accent=accent, icon=row_icon)
         bg.paste(art, (int(art_x), int(art_y)), art)
 
         info_x = art_x + art_size + 28 * scale
@@ -846,14 +868,15 @@ def build_share_card(df, kind, username, period_label, theme, date_range_label, 
         draw.text((stats_x, box[1] + row_h * 0.68), "STREAMS", font=label_font,
                    fill=(255, 255, 255, 140), anchor="rm")
 
-    bg = _card_footer(bg, card_w, card_h, scale, accent, total_streams, total_hours)
+        current_y += row_h + gap
+
+    bg = _card_footer(bg, card_w, card_h, scale, accent, footer_stats)
     return _finalize(bg)
 
-
 # ══════════════════════════════════════════════════════════════════
-# CARD BUILDER 2 — Overview (2×2 stat grid + top artist/track highlight)
+# CARD BUILDER 2 — Overview
 # ══════════════════════════════════════════════════════════════════
-def build_overview_card(overview, username, period_label, theme, date_range_label,
+def build_overview_card(overview, username, period_label, theme, date_range_label, footer_stats,
                          avatar_url=None, card_w=CARD_W, card_h=CARD_H):
     accent = theme["accent"]
     scale = card_h / 1920.0
@@ -865,7 +888,6 @@ def build_overview_card(overview, username, period_label, theme, date_range_labe
                                     period_label, ["MY LISTENING", "OVERVIEW"], subtitle_text,
                                     title_font_size=88)
 
-    # ── 2×2 big stat grid ──
     grid_gap = int(24 * scale)
     grid_h = int(230 * scale)
     col_w = (card_w - 2 * MARGIN - grid_gap) / 2
@@ -940,15 +962,14 @@ def build_overview_card(overview, username, period_label, theme, date_range_labe
         _highlight_row(highlight_top, tt.get("image_url"), False, tt.get("name", ""), tt.get("sub", ""),
                        int(tt.get("streams") or 0), "TOP TRACK")
 
-    bg = _card_footer(bg, card_w, card_h, scale, accent, overview["total_streams"], overview["total_hours"])
+    bg = _card_footer(bg, card_w, card_h, scale, accent, footer_stats)
     return _finalize(bg)
-
 
 # ══════════════════════════════════════════════════════════════════
 # CARD BUILDER 3 — Listening Personality
 # ══════════════════════════════════════════════════════════════════
 def build_personality_card(personality, overview, username, period_label, theme, date_range_label,
-                            avatar_url=None, card_w=CARD_W, card_h=CARD_H):
+                            footer_stats, avatar_url=None, card_w=CARD_W, card_h=CARD_H):
     accent = theme["accent"]
     scale = card_h / 1920.0
     seed = abs(hash((username, "personality", period_label))) % (2 ** 32)
@@ -960,7 +981,6 @@ def build_personality_card(personality, overview, username, period_label, theme,
                                     title_font_size=76)
     draw = ImageDraw.Draw(bg)
 
-    # ── Big glass hero card: emoji + archetype label + description ──
     hero_h = int(560 * scale)
     hero_box = [MARGIN, content_top, card_w - MARGIN, content_top + hero_h]
     bg = _drop_shadow(bg, hero_box, radius=int(40 * scale), blur=20, offset=(0, 10), alpha=90)
@@ -986,7 +1006,6 @@ def build_personality_card(personality, overview, username, period_label, theme,
         draw.text(((card_w - w) / 2, dy), line, font=desc_font, fill=(255, 255, 255, 190))
         dy += 40 * scale
 
-    # ── Supporting stat row ──
     stats_top = hero_box[3] + int(30 * scale)
     stats_h = int(190 * scale)
     stats_gap = int(20 * scale)
@@ -1008,15 +1027,13 @@ def build_personality_card(personality, overview, username, period_label, theme,
         d.text((cxi, box[1] + stats_h * 0.42), value, font=val_font, fill=(255, 255, 255, 255), anchor="mm")
         d.text((cxi, box[1] + stats_h * 0.72), label, font=lab_font, fill=(255, 255, 255, 150), anchor="mm")
 
-    bg = _card_footer(bg, card_w, card_h, scale, accent, overview["total_streams"], overview["total_hours"])
+    bg = _card_footer(bg, card_w, card_h, scale, accent, footer_stats)
     return _finalize(bg)
-
 
 def image_to_bytes(img):
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
-
 
 def _zip_bytes(named_pngs: dict):
     buf = io.BytesIO()
@@ -1025,13 +1042,8 @@ def _zip_bytes(named_pngs: dict):
             zf.writestr(name, data)
     return buf.getvalue()
 
-
 # ══════════════════════════════════════════════════════════════════
-# LIVE HTML/CSS PREVIEW (cosmetic, shown inside the modal only —
-# the downloadable PNG below is the real, CORS-safe export). This is
-# where the particle animation and avatar are actually alive/moving —
-# the PNG bakes in a still frame of the same effect since a raster
-# image can't animate.
+# LIVE HTML/CSS PREVIEW
 # ══════════════════════════════════════════════════════════════════
 def _particles_html(seed, accent_css, count=22):
     rnd = random.Random(seed)
@@ -1048,12 +1060,11 @@ def _particles_html(seed, accent_css, count=22):
         )
     return "".join(spans)
 
-
-def _html_preview(df, kind, username, period_label, theme, date_range_label, n, avatar_url=None):
+def _html_preview(df, kind, username, period_label, theme, date_range_label, n, avatar_url=None, item_name=None):
     accent = "rgb({},{},{})".format(*theme["accent"])
     s0, s1, s2 = theme["stops"]
     grad = f"linear-gradient(160deg, rgb{tuple(s1)} 0%, rgb{tuple(s0)} 45%, rgb{tuple(s2)} 100%)"
-    is_circle = kind == "artists"
+    is_circle = kind == "artists" or kind == "specific_artist"
     radius = "50%" if is_circle else "12px"
     seed = abs(hash((username, kind, period_label))) % (2 ** 32)
 
@@ -1062,13 +1073,42 @@ def _html_preview(df, kind, username, period_label, theme, date_range_label, n, 
         else f'<div class="sh-avatar-fallback" style="background:{accent}">{_initials(username)}</div>'
     )
 
+    icon = "🎵"
+    if kind == "genres": icon = "🎸"
+    elif kind == "seasons": icon = "🌍"
+    elif kind == "tod": icon = "🕐"
+
     rows_html = ""
+    track_count = 0
+    album_count = 0
+
     for i, row in df.head(n).iterrows():
-        rank = i + 1
+        if kind == "specific_artist":
+            if row.get("sub") == "Track":
+                if track_count == 0:
+                    rows_html += f'<div style="text-align:center; font-size:10px; font-weight:800; color:{accent}; margin: 8px 0 4px; letter-spacing:0.1em;">TOP TRACKS</div>'
+                track_count += 1
+                rank = track_count
+            elif row.get("sub") == "Album":
+                if album_count == 0:
+                    rows_html += f'<div style="text-align:center; font-size:10px; font-weight:800; color:{accent}; margin: 12px 0 4px; letter-spacing:0.1em;">TOP ALBUMS</div>'
+                album_count += 1
+                rank = album_count
+            else:
+                rank = i + 1
+        else:
+            rank = i + 1
+
         rank_color = "rgb({},{},{})".format(*RANK_COLORS.get(rank, (255, 255, 255)))
+        
+        row_icon = icon
+        if kind == "specific_artist":
+            row_icon = "🎵" if row.get("sub") == "Track" else "💿"
+
         img = row.get("image_url")
         art = (f'<img src="{img}" style="width:100%;height:100%;object-fit:cover;border-radius:{radius};">'
-               if isinstance(img, str) and img.startswith("http") else "\u266A")
+               if isinstance(img, str) and img.startswith("http") else row_icon)
+        
         sub = f'<div class="sh-sub">{row["sub"]}</div>' if "sub" in df.columns and row.get("sub") else ""
         rows_html += f"""
         <div class="sh-row">
@@ -1084,7 +1124,7 @@ def _html_preview(df, kind, username, period_label, theme, date_range_label, n, 
             </div>
         </div>"""
 
-    title = _title_lines(kind, n)
+    title = _title_lines(kind, n, item_name)
     particles = _particles_html(seed, accent)
     return f"""
     <!doctype html><html><head><meta charset="utf-8"></head>
@@ -1159,22 +1199,17 @@ def _html_preview(df, kind, username, period_label, theme, date_range_label, n, 
     </body></html>
     """
 
-
 # ══════════════════════════════════════════════════════════════════
 # STREAMLIT MODAL
 # ══════════════════════════════════════════════════════════════════
 _dialog_decorator = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
 
-
 def _generate_both_formats(builder_fn, **kwargs):
-    """Runs a card builder once per entry in FORMATS and returns
-    {"Story (1080×1920)": png_bytes, "Square (1080×1080)": png_bytes}."""
     out = {}
     for fmt_label, (w, h) in FORMATS.items():
         img = builder_fn(card_w=w, card_h=h, **kwargs)
         out[fmt_label] = image_to_bytes(img)
     return out
-
 
 def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_url=None):
     st.caption("Create a Wrapped-style card of your listening stats and share it anywhere.")
@@ -1192,7 +1227,6 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
     kind, n = STAT_TYPES[stat_choice]
     period_key = PERIODS[period_choice]
 
-    # ── Custom range picker (only shown when "Custom Range" is selected) ──
     custom_start, custom_end = None, None
     if period_key == "custom":
         cc1, cc2 = st.columns(2)
@@ -1211,9 +1245,121 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
         period_key, min_date, max_date, custom_start, custom_end
     )
 
-    # Totals for the footer always reflect the FULL selected date range,
-    # regardless of whether we're showing a Top 5 / Top 10 / Overview card.
+    # ---> NEW: TEXT INPUT SEARCH FOR SPECIFIC ALBUM / ARTIST <---
+    item_id = None
+    item_name = None
+
+    if kind == "specific_album":
+        search_term = st.text_input("🔍 Search for an Album (leave empty for your Top 50):", key="search_album_input")
+        if search_term:
+            albums_df = run_query("""
+                SELECT al.id, al.title, MAX(a.name) as artist
+                FROM streams s
+                JOIN songs so ON so.id = s.song_id
+                JOIN albums al ON al.id = so.album_id
+                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                LEFT JOIN artists a ON a.id = sa.artist_id
+                WHERE s.played_at::date BETWEEN :sd AND :ed AND s.user_id = :uid
+                  AND al.title ILIKE :search
+                GROUP BY al.id, al.title
+                ORDER BY COUNT(s.id) DESC LIMIT 20
+            """, {"sd": start_date, "ed": end_date, "uid": user_id, "search": f"%{search_term}%"})
+            
+            if albums_df is None or albums_df.empty:
+                st.warning("No albums found matching your search in this period.")
+                return
+            
+            opts = {row["id"]: f"{row['title']} (by {row['artist']})" for _, row in albums_df.iterrows()}
+            item_id = st.selectbox("Select Album:", options=list(opts.keys()), format_func=lambda x: opts[x])
+            item_name = albums_df.loc[albums_df["id"] == item_id, "title"].iloc[0]
+        else:
+            albums_df = run_query("""
+                SELECT al.id, al.title, MAX(a.name) as artist
+                FROM streams s
+                JOIN songs so ON so.id = s.song_id
+                JOIN albums al ON al.id = so.album_id
+                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                LEFT JOIN artists a ON a.id = sa.artist_id
+                WHERE s.played_at::date BETWEEN :sd AND :ed AND s.user_id = :uid
+                GROUP BY al.id, al.title
+                ORDER BY COUNT(s.id) DESC LIMIT 50
+            """, {"sd": start_date, "ed": end_date, "uid": user_id})
+            
+            if albums_df is None or albums_df.empty:
+                st.warning("No albums found in this period.")
+                return
+                
+            opts = {row["id"]: f"{row['title']} (by {row['artist']})" for _, row in albums_df.iterrows()}
+            item_id = st.selectbox("Select Album:", options=list(opts.keys()), format_func=lambda x: opts[x])
+            item_name = albums_df.loc[albums_df["id"] == item_id, "title"].iloc[0]
+
+    elif kind == "specific_artist":
+        search_term = st.text_input("🔍 Search for an Artist (leave empty for your Top 50):", key="search_artist_input")
+        if search_term:
+            artists_df = run_query("""
+                SELECT a.id, a.name
+                FROM streams s
+                JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE s.played_at::date BETWEEN :sd AND :ed AND s.user_id = :uid
+                  AND a.name ILIKE :search
+                GROUP BY a.id, a.name
+                ORDER BY COUNT(s.id) DESC LIMIT 20
+            """, {"sd": start_date, "ed": end_date, "uid": user_id, "search": f"%{search_term}%"})
+            
+            if artists_df is None or artists_df.empty:
+                st.warning("No artists found matching your search in this period.")
+                return
+                
+            opts = {row["id"]: row["name"] for _, row in artists_df.iterrows()}
+            item_id = st.selectbox("Select Artist:", options=list(opts.keys()), format_func=lambda x: opts[x])
+            item_name = opts[item_id]
+        else:
+            artists_df = run_query("""
+                SELECT a.id, a.name
+                FROM streams s
+                JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE s.played_at::date BETWEEN :sd AND :ed AND s.user_id = :uid
+                GROUP BY a.id, a.name
+                ORDER BY COUNT(s.id) DESC LIMIT 50
+            """, {"sd": start_date, "ed": end_date, "uid": user_id})
+            
+            if artists_df is None or artists_df.empty:
+                st.warning("No artists found in this period.")
+                return
+                
+            opts = {row["id"]: row["name"] for _, row in artists_df.iterrows()}
+            item_id = st.selectbox("Select Artist:", options=list(opts.keys()), format_func=lambda x: opts[x])
+            item_name = opts[item_id]
+
     total_streams, total_hours = _fetch_totals(run_query, user_id, start_date, end_date)
+    
+    # ── ΔΥΝΑΜΙΚΟ FOOTER ΓΙΑ ΣΥΓΚΕΚΡΙΜΕΝΟ ARTIST / ALBUM ──
+    footer_stats = [(f"{total_streams:,}", "TOTAL STREAMS"), (f"{total_hours:,.1f}h", "TIME LISTENED")]
+    
+    if kind == "specific_album":
+        item_overview = run_query("""
+            SELECT COUNT(s.id) AS streams, ROUND(COALESCE(SUM(s.ms_played),0)/3600000.0, 1) AS hours, COUNT(DISTINCT s.song_id) AS songs
+            FROM streams s JOIN songs so ON so.id = s.song_id
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id AND so.album_id = :item_id
+        """, {"start_date": start_date, "end_date": end_date, "user_id": user_id, "item_id": item_id}).iloc[0]
+        footer_stats = [
+            (f"{int(item_overview['streams']):,}", "STREAMS"),
+            (f"{float(item_overview['hours']):,.1f}h", "HOURS"),
+            (f"{int(item_overview['songs']):,}", "SONGS")
+        ]
+    elif kind == "specific_artist":
+        item_overview = run_query("""
+            SELECT COUNT(s.id) AS streams, ROUND(COALESCE(SUM(s.ms_played),0)/3600000.0, 1) AS hours, COUNT(DISTINCT s.song_id) AS songs
+            FROM streams s JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date AND s.user_id = :user_id AND sa.artist_id = :item_id
+        """, {"start_date": start_date, "end_date": end_date, "user_id": user_id, "item_id": item_id}).iloc[0]
+        footer_stats = [
+            (f"{int(item_overview['streams']):,}", "STREAMS"),
+            (f"{float(item_overview['hours']):,.1f}h", "HOURS"),
+            (f"{int(item_overview['songs']):,}", "SONGS")
+        ]
 
     generate = False
 
@@ -1235,7 +1381,7 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
                 pngs = _generate_both_formats(
                     build_overview_card, overview=overview, username=username,
                     period_label=period_label, theme=theme, date_range_label=date_range_label,
-                    avatar_url=avatar_url,
+                    footer_stats=footer_stats, avatar_url=avatar_url,
                 )
                 st.session_state["_share_png_bytes"] = pngs
                 st.session_state["_share_file_stub"] = f"suggestify_overview_{period_key}"
@@ -1258,13 +1404,13 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
                 pngs = _generate_both_formats(
                     build_personality_card, personality=personality, overview=overview,
                     username=username, period_label=period_label, theme=theme,
-                    date_range_label=date_range_label, avatar_url=avatar_url,
+                    date_range_label=date_range_label, footer_stats=footer_stats, avatar_url=avatar_url,
                 )
                 st.session_state["_share_png_bytes"] = pngs
                 st.session_state["_share_file_stub"] = f"suggestify_personality_{period_key}"
 
     else:
-        df = _fetch_data(run_query, kind, n, user_id, start_date, end_date)
+        df = _fetch_data(run_query, kind, n, user_id, start_date, end_date, item_id=item_id)
         if df is None or df.empty:
             st.warning("No listening data for this period yet — try a different range.")
             return
@@ -1272,7 +1418,7 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
         theme = _resolve_theme(theme_choice, run_query, user_id, start_date, end_date)
 
         components.html(
-            _html_preview(df, kind, username, period_label, theme, date_range_label, n, avatar_url=avatar_url),
+            _html_preview(df, kind, username, period_label, theme, date_range_label, n, avatar_url=avatar_url, item_name=item_name),
             height=565,
             scrolling=False,
         )
@@ -1286,7 +1432,7 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
                 pngs = _generate_both_formats(
                     build_share_card, df=df, kind=kind, username=username, period_label=period_label,
                     theme=theme, date_range_label=date_range_label, n=n,
-                    total_streams=total_streams, total_hours=total_hours, avatar_url=avatar_url,
+                    footer_stats=footer_stats, avatar_url=avatar_url, item_name=item_name
                 )
                 st.session_state["_share_png_bytes"] = pngs
                 st.session_state["_share_file_stub"] = f"suggestify_{kind}_{period_key}"
@@ -1332,62 +1478,26 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
         st.session_state.pop("_share_file_stub", None)
         st.rerun()
 
-
 def render_share_stats_button(run_query, user_id, username, min_date, max_date,
                                label="📤 Share Your Stats", accent="#1DB954", accent_dim="#169C46",
                                avatar_url=None):
-    """
-    Renders the trigger as a right-aligned gradient pill button.
-
-    Call this RIGHT AFTER your navbar markdown (before the tab row) so it
-    lines up visually in the top-right, e.g.:
-
-        st.markdown('<div class="navbar">...</div>', unsafe_allow_html=True)
-        render_share_stats_button(run_query=run_query, user_id=selected_user_id,
-                                   username=selected_username, min_date=min_date, max_date=max_date)
-        # ...tabs, filter bar, etc.
-
-    `avatar_url` is optional — pass a profile photo URL if you have one and
-    it'll be used on the generated cards; otherwise a colored initials
-    badge is drawn automatically.
-
-    NOTE: this intentionally does NOT use position:fixed/absolute. Your
-    app's global CSS animates `.main .block-container`, `[data-testid=
-    "stVerticalBlock"] > div`, etc. with `transform: translateY(...)`.
-    Per the CSS spec, ANY element with a transform other than `none`
-    (including an animated-to-identity one) becomes the containing block
-    for fixed/absolute descendants — so a `position: fixed` button gets
-    pinned to that animated wrapper instead of the real viewport, which
-    is exactly the "floats in the middle of the page" bug. Right-aligning
-    in normal flow sidesteps that entirely and is far more robust.
-    """
     if _dialog_decorator is None:
         st.error("Your Streamlit version doesn't support st.dialog — please upgrade streamlit (>=1.31.0).")
         return
 
     st.markdown(f"""
     <style>
-        .st-key-share_stats_btn_wrap {{
-            width: 100% !important;
-        }}
+        .st-key-share_stats_btn_wrap {{ width: 100% !important; }}
         .st-key-share_stats_btn_wrap div[data-testid="stButton"] {{
-            display: flex !important;
-            justify-content: flex-end !important;
-            width: 100% !important;
-            margin: -0.25rem 0 0.75rem 0 !important;
+            display: flex !important; justify-content: flex-end !important;
+            width: 100% !important; margin: -0.25rem 0 0.75rem 0 !important;
         }}
         .st-key-share_stats_btn_wrap div[data-testid="stButton"] button {{
-            width: auto !important;
-            background: linear-gradient(135deg, {accent} 0%, {accent_dim} 100%) !important;
-            color: #000 !important;
-            font-weight: 800 !important;
-            font-size: 0.85rem !important;
-            border: none !important;
-            border-radius: 999px !important;
-            padding: 0.6rem 1.4rem !important;
+            width: auto !important; background: linear-gradient(135deg, {accent} 0%, {accent_dim} 100%) !important;
+            color: #000 !important; font-weight: 800 !important; font-size: 0.85rem !important;
+            border: none !important; border-radius: 999px !important; padding: 0.6rem 1.4rem !important;
             box-shadow: 0 8px 24px {accent}55, 0 2px 10px rgba(0,0,0,0.45) !important;
-            transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
-            letter-spacing: 0.01em !important;
+            transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important; letter-spacing: 0.01em !important;
         }}
         .st-key-share_stats_btn_wrap div[data-testid="stButton"] button:hover {{
             transform: translateY(-2px) scale(1.03) !important;
@@ -1406,7 +1516,6 @@ def render_share_stats_button(run_query, user_id, username, min_date, max_date,
             st.session_state.pop("_share_png_bytes", None)
             st.session_state.pop("_share_file_stub", None)
             _open_dialog(run_query, user_id, username, min_date, max_date, avatar_url)
-
 
 @_dialog_decorator("🎉 Share Your Stats") if _dialog_decorator else (lambda f: f)
 def _open_dialog(run_query, user_id, username, min_date, max_date, avatar_url=None):
