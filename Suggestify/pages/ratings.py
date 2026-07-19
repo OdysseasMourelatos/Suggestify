@@ -10,10 +10,13 @@ import plotly.graph_objects as go
 from sqlalchemy import text
 from html import escape
 from types import SimpleNamespace
+import uuid
 
 # -- Rating scale --
-RATING_MAX: float = 10.0    # 10-star scale
-RATING_STEP: float = 0.5    # 0.5 steps (e.g., 9.5) — used on the full detail-page slider only
+RATING_MAX: float = 10.0          # 10-star scale
+RATING_STEP_SONG: float = 0.5     # songs: half-star precision (e.g. 9.5)
+RATING_STEP_ALBUM: float = 0.1    # albums: fine decimal precision (e.g. 9.9)
+RATING_STEP: float = RATING_STEP_SONG  # kept for distribution-chart bucketing
 
 STAR = "★"
 
@@ -74,6 +77,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
 
     def _getter(item_type): return get_song_rating if item_type == "song" else get_album_rating
     def _setter(item_type): return set_song_rating if item_type == "song" else set_album_rating
+    def _step(item_type) -> float: return RATING_STEP_SONG if item_type == "song" else RATING_STEP_ALBUM
 
     def _current(item_type: str, item_id, user_id: int) -> float:
         state_key = f"rating_val_{item_type}_{item_id}_{user_id}"
@@ -81,22 +85,52 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.session_state[state_key] = _getter(item_type)(user_id, item_id)
         return st.session_state[state_key]
 
-    STAR_SVG = 'data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M12%2017.27L18.18%2021l-1.64-7.03L22%209.24l-7.19-.61L12%202%209.19%208.63%202%209.24l5.46%204.73L5.82%2021z%22%2F%3E%3C%2Fsvg%3E'
+    # ==============================================================
+    # STATIC STAR BAR (For Chips, Hall of Fame rows, and the live preview)
+    #
+    # Renders real inline SVG star shapes (the same star path used
+    # elsewhere in the app) instead of the Unicode "★" glyph. Text-glyph
+    # stars depend on the active font actually containing that glyph and
+    # on `background-clip: text` being honored — when either fails, the
+    # browser falls back to a solid block, which is what produced the
+    # green rectangles instead of stars. An SVG <path> has no such
+    # dependency: it's drawn the same way everywhere. Each star gets its
+    # own <linearGradient> with a hard color stop at that star's exact
+    # fill percentage, so partial/decimal ratings render a precisely
+    # proportioned partial fill.
+    # ==============================================================
+    _STAR_PATH = "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
 
-    # ==============================================================
-    # STATIC STAR BAR (For Chips & Hall of Fame rows)
-    # ==============================================================
+    def _px(size: str) -> float:
+        try:
+            return float(str(size).replace("rem", "").replace("px", "").strip()) * (16 if "rem" in str(size) else 1)
+        except Exception:
+            return 24.0
+
     def star_bar_html(rating: float, max_stars: int = None, size: str = "1.6rem", glow: bool = True) -> str:
         n = max_stars or int(RATING_MAX)
-        pct = max(0.0, min(100.0, (rating / RATING_MAX) * 100)) if RATING_MAX else 0
-        stars = STAR * n
-        glow_css = f"text-shadow: 0 0 8px {GREEN}aa, 0 0 18px {GREEN}55;" if glow and rating > 0 else ""
-        return f'''
-        <div style="position:relative; display:inline-block; font-size:{size}; letter-spacing:3px; line-height:1;">
-            <div style="color:rgba(255,255,255,0.12);">{stars}</div>
-            <div style="position:absolute; top:0; left:0; overflow:hidden; width:{pct:.2f}%;
-                        white-space:nowrap; color:{GREEN}; {glow_css}">{stars}</div>
-        </div>'''
+        rating = max(0.0, min(RATING_MAX, rating or 0.0))
+        per_star = RATING_MAX / n
+        px = _px(size)
+        uid = uuid.uuid4().hex[:8]
+        glow_style = f"filter: drop-shadow(0 0 5px {GREEN}aa);" if glow and rating > 0 else ""
+
+        svgs = ""
+        for i in range(n):
+            fill_pct = max(0.0, min(1.0, (rating - i * per_star) / per_star)) * 100
+            gid = f"sg_{uid}_{i}"
+            svgs += (
+                f'<svg width="{px:.0f}" height="{px:.0f}" viewBox="0 0 24 24" '
+                f'style="display:inline-block; vertical-align:middle; margin:0 1px;">'
+                f'<defs><linearGradient id="{gid}">'
+                f'<stop offset="{fill_pct:.1f}%" stop-color="{GREEN}"/>'
+                f'<stop offset="{fill_pct:.1f}%" stop-color="rgba(255,255,255,0.14)"/>'
+                f'</linearGradient></defs>'
+                f'<path d="{_STAR_PATH}" fill="url(#{gid})"/>'
+                f'</svg>'
+            )
+
+        return f'<div style="display:inline-flex; align-items:center; {glow_style}">{svgs}</div>'
 
     def rating_chip_html(rating: float) -> str:
         label = f"{rating:g} / {RATING_MAX:g}" if rating else "Not rated"
@@ -192,17 +226,29 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                               help=f"{i}/10")
 
     # ==============================================================
-    # FULL DETAIL-PAGE WIDGET (CSS Mask Slider, unchanged — half-star precision)
+    # FULL DETAIL-PAGE WIDGET
+    # Gradient-fill star preview (star_bar_html) + a plain, unmodified
+    # Streamlit slider for input. Deliberately does NOT style the
+    # slider's internal track/thumb DOM — those node structures differ
+    # across Streamlit versions and any CSS targeting them can silently
+    # stop matching, which is what caused the earlier "nothing visibly
+    # updates" bug (the native per-step tick row was showing through
+    # instead, and it never changes with the value). The star preview is
+    # the only visual driven by `current`, so it always reflects the
+    # real rating.
     # ==============================================================
     @st.fragment
     def render_star_rating(item_type: str, item_id, user_id: int):
         assert item_type in ("song", "album")
         current = _current(item_type, item_id, user_id)
+        step = _step(item_type)
         widget_key = f"slider_{item_type}_{item_id}_{user_id}"
         wrap_key = f"ratewrap_{item_type}_{item_id}_{user_id}"
 
         def _on_change():
-            new_val = st.session_state[widget_key]
+            raw = st.session_state[widget_key]
+            new_val = round(round(raw / step) * step, 1)
+            new_val = max(0.0, min(RATING_MAX, new_val))
             if _setter(item_type)(user_id, item_id, new_val):
                 st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = new_val
 
@@ -213,53 +259,27 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
                 border: 1px solid rgba(255,255,255,0.08);
                 border-radius: 16px;
-                padding: 24px 30px 14px;
+                padding: 24px 30px 16px;
                 margin: 10px 0 6px;
             }}
             .st-key-{wrap_key} div[data-testid="stSlider"] {{
-                max-width: 440px !important;
-                margin: 0 auto !important; 
-                padding-top: 5px !important;
+                max-width: 460px !important;
+                margin: 10px auto 0 !important;
             }}
             .st-key-{wrap_key} div[data-testid="stSlider"] label {{ display:none; }}
-            .st-key-{wrap_key} div[data-testid="stTickBar"] {{ display:none; }}
-
-            .st-key-{wrap_key} div[data-baseweb="slider"] > div:first-child {{
-                height: 44px !important;
-                border-radius: 0 !important;
-                background: rgba(255,255,255,0.12) !important;
-                -webkit-mask-image: url('{STAR_SVG}') !important;
-                -webkit-mask-size: {100/RATING_MAX}% 100% !important;
-                -webkit-mask-repeat: repeat-x !important;
-                mask-image: url('{STAR_SVG}') !important;
-                mask-size: {100/RATING_MAX}% 100% !important;
-                mask-repeat: repeat-x !important;
-            }}
-            .st-key-{wrap_key} div[data-baseweb="slider"] > div:first-child > div {{
-                height: 44px !important;
-                border-radius: 0 !important;
-                background: linear-gradient(90deg, {GREEN}cc, {GREEN}) !important;
-                -webkit-mask-image: url('{STAR_SVG}') !important;
-                -webkit-mask-size: {100/RATING_MAX}% 100% !important;
-                -webkit-mask-repeat: repeat-x !important;
-                mask-image: url('{STAR_SVG}') !important;
-                mask-size: {100/RATING_MAX}% 100% !important;
-                mask-repeat: repeat-x !important;
-                filter: drop-shadow(0 0 8px {GREEN}88);
-            }}
-            .st-key-{wrap_key} div[role="slider"] {{
-                opacity: 0 !important; 
-                width: 44px !important;
-                height: 44px !important;
-                cursor: pointer !important;
-            }}
+            /* Native per-step tick row: this is *static* (it just marks
+               step positions and never changes with the value), so
+               without hiding it, it visually looks like "the rating
+               display isn't updating" even though the actual value is
+               changing underneath it. */
+            .st-key-{wrap_key} div[data-testid="stTickBar"] {{ display: none !important; }}
             .st-key-{wrap_key} button {{
                 background: transparent !important;
                 border: 1px solid rgba(255,255,255,0.15) !important;
                 color: {TEXT_MID} !important;
                 font-size: 0.75rem !important;
                 padding: 0.2rem 0 !important;
-                margin: 25px auto 0 !important;
+                margin: 18px auto 0 !important;
                 max-width: 120px !important;
                 display: block !important;
                 transition: all 0.2s ease !important;
@@ -277,7 +297,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             with head_l:
                 st.markdown(
                     f'<div style="font-size:0.75rem; letter-spacing:0.08em; text-transform:uppercase; '
-                    f'color:{TEXT_MID}; font-weight:700; margin-bottom:10px;">Drag to Rate</div>',
+                    f'color:{TEXT_MID}; font-weight:700; margin-bottom:8px;">Drag to Rate '
+                    f'<span style="opacity:0.6; text-transform:none; letter-spacing:0;">'
+                    f'(steps of {step:g})</span></div>',
                     unsafe_allow_html=True,
                 )
             with head_r:
@@ -289,8 +311,14 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                     unsafe_allow_html=True,
                 )
 
+            st.markdown(
+                f'<div style="margin: 2px 0 10px; text-align:center;">'
+                f'{star_bar_html(current, size="2.3rem", glow=True)}</div>',
+                unsafe_allow_html=True,
+            )
+
             st.slider(
-                "Your rating", min_value=0.0, max_value=RATING_MAX, step=RATING_STEP, value=current,
+                "Your rating", min_value=0.0, max_value=RATING_MAX, step=step, value=current,
                 key=widget_key, on_change=_on_change, label_visibility="collapsed",
             )
 
@@ -354,9 +382,12 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     # ==============================================================
     def _distribution(user_id: int, kind: str) -> pd.DataFrame:
         table = "song_ratings" if kind == "song" else "album_ratings"
+        # Bucket to the nearest 0.5 for the chart regardless of the input
+        # precision (albums can be rated to 0.1, but we still want a
+        # readable ~20-bar distribution rather than 100 tiny bars).
         df = run_query(f"""
-            SELECT rating, COUNT(*) AS n FROM {table}
-            WHERE user_id = :user_id GROUP BY rating ORDER BY rating;
+            SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n FROM {table}
+            WHERE user_id = :user_id GROUP BY 1 ORDER BY 1;
         """, {"user_id": user_id})
         buckets = [round(i * RATING_STEP, 1) for i in range(1, int(RATING_MAX / RATING_STEP) + 1)]
         full = pd.DataFrame({"rating": buckets})

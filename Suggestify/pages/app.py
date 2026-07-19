@@ -157,6 +157,60 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
 
+    # ΠΡΟΣΘΗΚΗ: Γραφήματα μέσα στη σελίδα της Εποχής/Ώρας/Χρονιάς!
+    st.markdown("<br>", unsafe_allow_html=True)
+    ch1, ch2, ch3 = st.columns(3)
+    
+    with ch1:
+        st.markdown('<div class="chart-container"><div class="chart-title">📈 Listening Timeline</div>', unsafe_allow_html=True)
+        df_t = run_query(f"""
+            SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
+                   ROUND(SUM(ms_played)/3600000.0, 2) AS hours_played
+            FROM streams s
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+              AND {extra_where}
+            GROUP BY 1 ORDER BY 1
+        """, {**F, **extra_params})
+        if not df_t.empty:
+            st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with ch2:
+        st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
+        df_h = run_query(f"""
+            SELECT EXTRACT(HOUR FROM played_at)::INT as hour, COUNT(*) as stream_count
+            FROM streams s
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+              AND {extra_where}
+            GROUP BY 1 ORDER BY 1
+        """, {**F, **extra_params})
+        if not df_h.empty:
+            st.plotly_chart(
+                chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with ch3:
+        st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
+        df_days = run_query(f"""
+            SELECT EXTRACT(ISODOW FROM played_at)::INT AS dow, COUNT(*) AS stream_count
+            FROM streams s
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+              AND {extra_where}
+            GROUP BY 1 ORDER BY 1;
+        """, {**F, **extra_params})
+        if not df_days.empty:
+            dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+            st.plotly_chart(
+                chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
 def get_current_view() -> dict:
     params = st.query_params
     return {
@@ -210,6 +264,9 @@ else:
 selected_user_id = user_dict.get(selected_username, 1)
 st.query_params["user"] = str(selected_user_id)
 
+qr_kwargs = dict(quick_rate=st.session_state.quick_rate_mode, R=R, 
+                 user_id=selected_user_id, rating_scale=10)
+
 if "start_date" not in st.session_state:
     st.session_state.start_date = get_parsed_date(params.get("start"), min_date)
     st.session_state.end_date = get_parsed_date(params.get("end"), max_date)
@@ -260,62 +317,46 @@ with col_brand:
     ''', unsafe_allow_html=True)
 
 with col_share:
-    st.markdown('''
+    st.markdown("<div style='margin-top: 15px; display:flex; gap:10px; justify-content:flex-end;'>", unsafe_allow_html=True)
+    with st.container(key="quick_rate_toggle"):
+        if st.button("⭐ Quick Rate: " + ("ON" if st.session_state.quick_rate_mode else "OFF"),
+                     key="quick_rate_btn",
+                     type="primary" if st.session_state.quick_rate_mode else "secondary"):
+            st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
+            st.rerun()
+    render_share_stats_button(
+        run_query=run_query,
+        user_id=selected_user_id,
+        username=selected_username,
+        min_date=min_date,
+        max_date=max_date,
+        label="📸 Share Stats"
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(f"""
     <style>
-    .st-key-quick_rate_toggle button {
+    div[data-testid="stButton"] button[kind="primary"]:has(+ div) {{}}
+    .st-key-quick_rate_toggle button {{
         border-radius: 999px !important;
         font-weight: 700 !important;
         font-size: 0.8rem !important;
-        padding: 0.5rem 1.2rem !important;
-        min-height: 0 !important;
+        padding: 0.45rem 1.1rem !important;
         transition: all 0.2s ease !important;
-        box-shadow: none !important;
-    }
-    .st-key-quick_rate_toggle button[kind="secondary"] {
+    }}
+    .st-key-quick_rate_toggle button[kind="secondary"] {{
         background: rgba(255,255,255,0.04) !important;
-        border: 1px solid rgba(255,255,255,0.12) !important;
-        color: ''' + TEXT_MID + ''' !important;
-    }
-    .st-key-quick_rate_toggle button[kind="secondary"]:hover {
-        border-color: rgba(29,185,84,0.35) !important;
-        color: ''' + TEXT + ''' !important;
-        background: rgba(29,185,84,0.06) !important;
-    }
-    .st-key-quick_rate_toggle button[kind="primary"] {
-        background: ''' + GREEN + ''' !important;
-        border: 1px solid ''' + GREEN + ''' !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
+        color: {TEXT_MID} !important;
+    }}
+    .st-key-quick_rate_toggle button[kind="primary"] {{
+        background: {GREEN} !important;
+        border: 1px solid {GREEN} !important;
         color: #000 !important;
         box-shadow: 0 4px 14px rgba(29,185,84,0.35) !important;
-    }
-    .st-key-quick_rate_toggle button[kind="primary"]:hover {
-        transform: translateY(-1px) !important;
-        box-shadow: 0 6px 18px rgba(29,185,84,0.4) !important;
-    }
+    }}
     </style>
-    ''', unsafe_allow_html=True)
-
-    b1, b2 = st.columns(2)
-    with b1:
-        with st.container(key="quick_rate_toggle"):
-            label = "⭐ Quick Rate ON" if st.session_state.quick_rate_mode else "⭐ Quick Rate"
-            if st.button(label, key="quick_rate_btn",
-                         type="primary" if st.session_state.quick_rate_mode else "secondary",
-                         use_container_width=True):
-                st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
-                st.rerun()
-    with b2:
-        render_share_stats_button(
-            run_query=run_query,
-            user_id=selected_user_id,
-            username=selected_username,
-            min_date=min_date,
-            max_date=max_date,
-            label="📸 Share Stats"
-        )
-
-# Quick-rate is fixed at a 10-star scale.
-qr_kwargs = dict(quick_rate=st.session_state.quick_rate_mode, R=R,
-                  user_id=selected_user_id, rating_scale=10)
+    """, unsafe_allow_html=True)
 
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
@@ -377,6 +418,36 @@ F = {
     "start_date": st.session_state.start_date, 
     "end_date": st.session_state.end_date,
     "user_id": selected_user_id
+}
+
+MONTH_NAMES = {
+    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
+}
+
+MONTH_FILTER_OPTIONS = ["All Months"] + list(MONTH_NAMES.values())
+HOUR_FILTER_OPTIONS = ["All Hours"] + [f"{h:02d}:00" for h in range(24)]
+
+SEASON_META = {
+    "Winter": {"icon": "❄️", "color": "#4FC3F7", "months": (12, 1, 2),
+               "image": "https://images.unsplash.com/photo-1418985991508-e47386d96a71?w=400&q=80&auto=format&fit=crop"},
+    "Spring": {"icon": "🌸", "color": "#F48FB1", "months": (3, 4, 5),
+               "image": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&q=80&auto=format&fit=crop"},
+    "Summer": {"icon": "☀️", "color": "#FFD54F", "months": (6, 7, 8),
+               "image": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&q=80&auto=format&fit=crop"},
+    "Autumn": {"icon": "🍂", "color": "#FF8A65", "months": (9, 10, 11),
+               "image": "https://images.unsplash.com/photo-1477414348463-c0eb7f1359b6?w=400&q=80&auto=format&fit=crop"},
+}
+
+TOD_META = {
+    "Night":     {"icon": "🌙", "range": "9PM–5AM",  "color": "#5C6BC0", "hours": [21, 22, 23, 0, 1, 2, 3, 4],
+                  "image": "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=400&q=80&auto=format&fit=crop"},
+    "Morning":   {"icon": "🌅", "range": "5AM–12PM", "color": "#FFD54F", "hours": list(range(5, 12)),
+                  "image": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=80&auto=format&fit=crop"},
+    "Afternoon": {"icon": "🌤️", "range": "12PM–5PM",  "color": "#4FC3F7", "hours": list(range(12, 17)),
+                  "image": "https://images.unsplash.com/photo-1500964757637-c85e8a162699?w=400&q=80&auto=format&fit=crop"},
+    "Evening":   {"icon": "🌆", "range": "5PM–9PM",   "color": "#FF7043", "hours": list(range(17, 21)),
+                  "image": "https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=400&q=80&auto=format&fit=crop"},
 }
 
 if detail_type and detail_id:
@@ -687,212 +758,205 @@ if detail_type and detail_id:
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    elif detail_type == "album":
-        alb_info = run_query("""
-        WITH AlbumPrimaryArtists AS (
-            SELECT a.id AS artist_id, a.name, COUNT(DISTINCT so.id) as track_cnt
-            FROM songs so
-            JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            JOIN artists a ON a.id = sa.artist_id
-            WHERE so.album_id = :id
-            GROUP BY a.id, a.name
-        ),
-        TopAlbumArtists AS (
-            SELECT STRING_AGG(name, ', ') as artist_names,
-                   MIN(artist_id) as primary_artist_id
-            FROM AlbumPrimaryArtists
-            WHERE track_cnt = (SELECT MAX(track_cnt) FROM AlbumPrimaryArtists)
-        ),
-        album_streams AS (
-            SELECT so.album_id, COUNT(*) as streams, ROUND(SUM(s.ms_played)/3600000.0, 2) as hours
+    elif detail_type == "genre":
+        genre_match_sql = """
+            (so.primary_genre ILIKE :genre OR al.primary_genre ILIKE :genre OR EXISTS (
+                SELECT 1 FROM album_genres ag2 
+                JOIN genres g2 ON g2.id = ag2.genre_id 
+                WHERE ag2.album_id = so.album_id AND g2.name ILIKE :genre
+            ))
+        """
+        
+        genre_info = run_query(f"""
+            SELECT COUNT(s.id) AS streams, ROUND(SUM(s.ms_played)/3600000.0, 2) AS hours,
+                   COUNT(DISTINCT s.song_id) AS unique_songs,
+                   COUNT(DISTINCT sa.artist_id) AS unique_artists
             FROM streams s
             JOIN songs so ON so.id = s.song_id
+            LEFT JOIN albums al ON al.id = so.album_id
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
-              AND so.album_id IS NOT NULL
-            GROUP BY so.album_id
-        ),
-        ranked AS (
-            SELECT album_id, RANK() OVER (ORDER BY streams DESC) as global_rank
-            FROM album_streams
-        )
-        SELECT al.title, MAX(so.image_url) as image_url,
-            COALESCE(ars.streams, 0) as streams,
-            COALESCE(ars.hours, 0) as hours,
-            COUNT(DISTINCT s.song_id) as track_count,
-            (SELECT artist_names FROM TopAlbumArtists) as artist_name,
-            (SELECT primary_artist_id FROM TopAlbumArtists) as primary_artist_id,
-            r.global_rank,
-            al.release_date, al.primary_genre, al.label, al.is_explicit, al.total_tracks
-        FROM albums al
-        LEFT JOIN songs so ON so.album_id = al.id
-        LEFT JOIN streams s ON s.song_id = so.id 
-             AND s.played_at::date BETWEEN :start_date AND :end_date
-             AND s.user_id = :user_id
-        LEFT JOIN album_streams ars ON ars.album_id = al.id
-        LEFT JOIN ranked r ON r.album_id = al.id
-        WHERE al.id = :id
-        GROUP BY al.id, al.title, ars.streams, ars.hours, r.global_rank,
-                 al.release_date, al.primary_genre, al.label, al.is_explicit, al.total_tracks
-    """, {"id": detail_id, **F})
+              AND {genre_match_sql}
+        """, {"genre": detail_id, **F})
 
-        if not alb_info.empty:
-            row = alb_info.iloc[0]
-            artist_name = row["artist_name"] if pd.notnull(row["artist_name"]) else "Unknown Artist"
-            rank_display = f"#{int(row['global_rank'])}" if pd.notnull(row.get('global_rank')) else "—"
-
-            display_title = str(row["title"]) if row["title"] else "Unknown Album"
-            if row.get("is_explicit"):
-                display_title += ' <span class="explicit-badge">E</span>'
-
+        if not genre_info.empty:
+            row = genre_info.iloc[0]
             render_detail_header(
-                type_label="Album",
-                title=display_title,
-                subtitle=f"by {artist_name} • {int(row['track_count'] or 0)} tracks played", 
-                icon="💿",
+                type_label="Genre",
+                title=str(detail_id).title(),
+                subtitle="Genre Explorer",
+                icon="🎸",
                 stats=[
-                    {"value": rank_display, "label": "Album Rank"},
                     {"raw": int(row['streams'] or 0), "label": "Streams"},
                     {"raw": float(row['hours'] or 0), "decimals": 1, "suffix": "h", "label": "Listened"},
-                ],
-                image_url=row.get("image_url")
+                    {"raw": int(row['unique_artists'] or 0), "label": "Artists"},
+                    {"raw": int(row['unique_songs'] or 0), "label": "Songs"},
+                ]
             )
-            R.render_star_rating("album", detail_id, selected_user_id)
-            
-            chips_html = '<div class="meta-chip-container">'
 
-            if pd.notnull(row.get("primary_artist_id")):
-                artist_href = build_filtered_href("artist", str(row["primary_artist_id"]))
-                artist_display_name = escape(str(row["artist_name"]).split(",")[0])
-                chips_html += (
-                    f'<a href="{artist_href}" class="meta-chip-link" target="_self"><div class="meta-chip">'
-                    f'<div class="meta-chip-icon">🎤</div><div class="meta-chip-text">'
-                    f'<div class="meta-chip-label">Artist</div>'
-                    f'<div class="meta-chip-value">{artist_display_name}</div>'
-                    f'</div></div></a>'
-                )
+            c1, c2, c3 = st.columns([1.2, 1, 1.2])
 
-            if pd.notnull(row.get("release_date")):
-                try:
-                    r_date = pd.to_datetime(row["release_date"]).strftime('%d %b %Y')
-                    chips_html += (
-                        f'<div class="meta-chip"><div class="meta-chip-icon">📅</div><div class="meta-chip-text">'
-                        f'<div class="meta-chip-label">Released</div>'
-                        f'<div class="meta-chip-value">{r_date}</div></div></div>'
-                    )
-                except: pass
-
-            if pd.notnull(row.get("primary_genre")):
-                chips_html += (
-                    f'<div class="meta-chip"><div class="meta-chip-icon">🎸</div><div class="meta-chip-text">'
-                    f'<div class="meta-chip-label">Genre</div>'
-                    f'<div class="meta-chip-value">{escape(str(row["primary_genre"]))}</div></div></div>'
-                )
-
-            if pd.notnull(row.get("label")):
-                label_text = str(row["label"])
-                label_display = label_text[:20] + "…" if len(label_text) > 20 else label_text
-                chips_html += (
-                    f'<div class="meta-chip"><div class="meta-chip-icon">🏢</div><div class="meta-chip-text">'
-                    f'<div class="meta-chip-label">Label</div>'
-                    f'<div class="meta-chip-value">{escape(label_display)}</div></div></div>'
-                )
-
-            if pd.notnull(row.get("total_tracks")) and row["total_tracks"] > 0:
-                chips_html += (
-                    f'<div class="meta-chip"><div class="meta-chip-icon">⏱️</div><div class="meta-chip-text">'
-                    f'<div class="meta-chip-label">Tracks</div>'
-                    f'<div class="meta-chip-value">{int(row["total_tracks"])}</div></div></div>'
-                )
-
-            chips_html += '</div>'
-            st.markdown(chips_html, unsafe_allow_html=True)
-
-            c_left, c_right = st.columns([1.2, 1.0])
-            
-            with c_left:
-                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
-                df_tracks = run_query("""
+            with c1:
+                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+                df_tracks = run_query(f"""
                     SELECT so.id AS song_id, so.title AS song_title,
-                           COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
+                           COALESCE(MAX(a.name), 'Unknown') AS main_artist, MAX(so.image_url) AS image_url,
                            COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 3) AS hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
+                    LEFT JOIN albums al ON al.id = so.album_id
                     LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
                     LEFT JOIN artists a ON a.id = sa.artist_id
-                    WHERE so.album_id = :aid 
-                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                    WHERE s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY so.id, so.title, a.name, so.image_url ORDER BY streams DESC
-                """, {"aid": detail_id, **F})
-                
+                      AND {genre_match_sql}
+                    GROUP BY so.id, so.title
+                    ORDER BY streams DESC LIMIT 10
+                """, {"genre": detail_id, **F})
                 if not df_tracks.empty:
                     render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                 else:
-                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
-                    
-            with c_right:
-                st.markdown('<div class="chart-container" style="margin-top: 0;"><div class="chart-title">📈 Top 5 Tracks Evolution</div>', unsafe_allow_html=True)
-                df_album_trend = run_query("""
-                    WITH top_tracks AS (
-                        SELECT so.id, so.title
-                        FROM streams s
-                        JOIN songs so ON so.id = s.song_id
-                        WHERE so.album_id = :aid 
-                          AND s.played_at::date BETWEEN :start_date AND :end_date
-                          AND s.user_id = :user_id
-                        GROUP BY so.id, so.title
-                        ORDER BY COUNT(*) DESC
-                        LIMIT 5
-                    )
-                    SELECT DATE_TRUNC('month', s.played_at) AS period, t.title AS track_title, COUNT(*) AS stream_count
+                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
+
+            with c2:
+                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
+                df_artists = run_query(f"""
+                    SELECT a.id AS artist_id, a.name AS artist_name, MAX(a.image_url) AS image_url,
+                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
-                    JOIN top_tracks t ON t.id = so.id
+                    LEFT JOIN albums al ON al.id = so.album_id
+                    JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                    JOIN artists a ON a.id = sa.artist_id
                     WHERE s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY 1, 2
-                    ORDER BY 1, 2
-                """, {"aid": detail_id, **F})
-                
-                if not df_album_trend.empty:
-                    st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
-                st.markdown('</div>', unsafe_allow_html=True)
+                      AND {genre_match_sql}
+                    GROUP BY a.id, a.name
+                    ORDER BY streams DESC LIMIT 10
+                """, {"genre": detail_id, **F})
+                if not df_artists.empty:
+                    df_artists["sub"] = "Artist"
+                    render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
+                else:
+                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
 
-                st.markdown('<div class="chart-container"><div class="chart-title">⏰ Peak Hours</div>', unsafe_allow_html=True)
-                df_hours = run_query("""
-                    SELECT EXTRACT(HOUR FROM s.played_at)::INT AS hour, COUNT(*) AS stream_count
+            with c3:
+                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
+                df_albums = run_query(f"""
+                    SELECT al.id AS album_id, al.title AS album_title, MAX(so.image_url) AS image_url,
+                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
-                    WHERE so.album_id = :aid 
-                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                    JOIN albums al ON al.id = so.album_id
+                    WHERE s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY 1 ORDER BY 1;
-                """, {"aid": detail_id, **F})
-                if not df_hours.empty:
-                    st.plotly_chart(
-                        chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
-                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
-                    )
-                st.markdown('</div>', unsafe_allow_html=True)
+                      AND {genre_match_sql}
+                    GROUP BY al.id, al.title
+                    ORDER BY streams DESC LIMIT 10
+                """, {"genre": detail_id, **F})
+                if not df_albums.empty:
+                    df_albums["sub"] = "Album"
+                    render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album", **qr_kwargs)
+                else:
+                    st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
 
-                st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
-                df_days = run_query("""
-                    SELECT EXTRACT(ISODOW FROM s.played_at)::INT AS dow, COUNT(*) AS stream_count
-                    FROM streams s
-                    JOIN songs so ON so.id = s.song_id
-                    WHERE so.album_id = :aid 
-                      AND s.played_at::date BETWEEN :start_date AND :end_date
-                      AND s.user_id = :user_id
-                    GROUP BY 1 ORDER BY 1;
-                """, {"aid": detail_id, **F})
-                if not df_days.empty:
-                    dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
-                    st.plotly_chart(
-                        chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
-                    )
-                st.markdown('</div>', unsafe_allow_html=True)
+    elif detail_type == "season":
+        safe_id = str(detail_id).title()
+        if safe_id in SEASON_META:
+            meta = SEASON_META[safe_id]
+            months = meta["months"]
+            month_options = [f"All of {safe_id}"] + [MONTH_NAMES[m] for m in months]
+            selected_month = st.selectbox(
+                "📅 Narrow down to a specific month", month_options,
+                key=f"month_filter_{safe_id}"
+            )
+
+            if selected_month == month_options[0]:
+                month_list = ",".join(str(m) for m in months)
+                cond = f"EXTRACT(MONTH FROM s.played_at) IN ({month_list})"
+                extra_params = {}
+                subtitle = f"Everything you played during {safe_id.lower()}"
+            else:
+                month_num = next(m for m in months if MONTH_NAMES[m] == selected_month)
+                cond = "EXTRACT(MONTH FROM s.played_at) = :month_val"
+                extra_params = {"month_val": month_num}
+                subtitle = f"Everything you played in {selected_month}"
+
+            render_dimension_detail(
+                extra_where=cond,
+                extra_params=extra_params,
+                type_label="Season", title=safe_id,
+                subtitle=subtitle,
+                icon=meta["icon"],
+                image_url=meta.get("image")
+            )
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>Unknown season</div>', unsafe_allow_html=True)
+
+    elif detail_type == "tod":
+        safe_id = str(detail_id).title()
+        if safe_id in TOD_META:
+            meta = TOD_META[safe_id]
+            hours_in_range = meta["hours"]
+            hour_options = [f"All {safe_id} ({meta['range']})"] + [f"{h:02d}:00" for h in hours_in_range]
+            selected_hour = st.selectbox(
+                "🕐 Narrow down to a specific hour", hour_options,
+                key=f"hour_filter_{safe_id}"
+            )
+
+            if selected_hour == hour_options[0]:
+                if safe_id == "Night":
+                    cond = "(EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5)"
+                else:
+                    cond = f"EXTRACT(HOUR FROM s.played_at) BETWEEN {hours_in_range[0]} AND {hours_in_range[-1]}"
+                extra_params = {}
+                subtitle = f"Streams during {meta['range']}"
+            else:
+                hour_val = int(selected_hour.split(":")[0])
+                cond = "EXTRACT(HOUR FROM s.played_at) = :hour_val"
+                extra_params = {"hour_val": hour_val}
+                subtitle = f"Streams at {selected_hour}"
+
+            render_dimension_detail(
+                extra_where=cond,
+                extra_params=extra_params,
+                type_label="Time of Day", title=safe_id,
+                subtitle=subtitle,
+                icon=meta["icon"],
+                image_url=meta.get("image")
+            )
+        else:
+            st.markdown('<div class="empty-state"><div class="icon">📭</div>Unknown time of day</div>', unsafe_allow_html=True)
+
+    elif detail_type == "year":
+        try:
+            year_val = int(detail_id)
+            if 1900 <= year_val <= 2100:
+                month_options = ["All Year"] + list(MONTH_NAMES.values())
+                selected_month = st.selectbox(
+                    "📅 Filter by month", month_options,
+                    key=f"year_month_filter_{detail_id}"
+                )
+
+                if selected_month == "All Year":
+                    cond = "EXTRACT(YEAR FROM s.played_at) = :year"
+                    extra_params = {"year": year_val}
+                    subtitle = "Your year in review"
+                else:
+                    month_num = next(k for k, v in MONTH_NAMES.items() if v == selected_month)
+                    cond = "EXTRACT(YEAR FROM s.played_at) = :year AND EXTRACT(MONTH FROM s.played_at) = :month_val"
+                    extra_params = {"year": year_val, "month_val": month_num}
+                    subtitle = f"{selected_month} {year_val}"
+
+                render_dimension_detail(
+                    extra_where=cond,
+                    extra_params=extra_params,
+                    type_label="Year", title=str(year_val),
+                    subtitle=subtitle, icon="📆"
+                )
+        except ValueError:
+            pass
 
 elif current_tab == "overview":
 
@@ -1227,38 +1291,59 @@ elif current_tab == "albums":
 elif current_tab == "genres":
     st.markdown('<div class="section-header"><span class="icon">🎸</span>Top Genres</div>', unsafe_allow_html=True)
 
-    col_search, col_sort, col_limit = st.columns([3, 1, 1])
+    col_search, col_limit = st.columns([3, 1])
     search_term = col_search.text_input("🔍 Search genres...", placeholder="e.g. Rap, Pop...", label_visibility="collapsed", key="search_genres")
-    sort_by = col_sort.selectbox("Sort", ["Streams", "Hours"], index=0, label_visibility="collapsed", key="sort_genres")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
 
     query_params = {**F, "limit": display_limit}
-    order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"
 
     base_genre_query = """
-        SELECT g.id AS genre_id, INITCAP(g.name) AS genre_name, 
-               COUNT(DISTINCT sa.artist_id) || ' Artists' AS subtitle,
-               COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
-        FROM streams s
-        JOIN songs so ON so.id = s.song_id
-        JOIN album_genres ag ON ag.album_id = so.album_id
-        JOIN genres g ON g.id = ag.genre_id
-        JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-        WHERE s.played_at::date BETWEEN :start_date AND :end_date
-          AND s.user_id = :user_id
+        WITH StreamBase AS (
+            SELECT s.id AS stream_id, s.ms_played, sa.artist_id, 
+                   so.primary_genre AS song_genre, al.primary_genre AS album_genre, so.album_id
+            FROM streams s
+            JOIN songs so ON so.id = s.song_id
+            LEFT JOIN albums al ON al.id = so.album_id
+            JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            WHERE s.played_at::date BETWEEN :start_date AND :end_date
+              AND s.user_id = :user_id
+        ),
+        Unrolled AS (
+            SELECT stream_id, ms_played, artist_id, song_genre AS genre_name FROM StreamBase WHERE song_genre IS NOT NULL
+            UNION ALL
+            SELECT stream_id, ms_played, artist_id, album_genre FROM StreamBase WHERE album_genre IS NOT NULL
+            UNION ALL
+            SELECT sb.stream_id, sb.ms_played, sb.artist_id, g.name 
+            FROM StreamBase sb
+            JOIN album_genres ag ON ag.album_id = sb.album_id
+            JOIN genres g ON g.id = ag.genre_id
+        ),
+        UniqueStreamGenres AS (
+            SELECT DISTINCT stream_id, ms_played, artist_id, INITCAP(TRIM(genre_name)) AS genre_name
+            FROM Unrolled
+            WHERE genre_name IS NOT NULL AND LOWER(genre_name) != 'unknown'
+        )
+        SELECT 
+            genre_name AS genre_id, 
+            genre_name,
+            CAST(COUNT(DISTINCT artist_id) AS TEXT) || ' Artists' AS subtitle,
+            COUNT(stream_id) AS streams,
+            ROUND(SUM(ms_played) / 3600000.0, 2) AS hours_played
+        FROM UniqueStreamGenres
+        WHERE 1=1
     """
 
     if search_term:
         query_params["search"] = f"%{search_term}%"
-        df_genres = run_query(base_genre_query + f"""
-            AND g.name ILIKE :search
-            GROUP BY g.id, g.name
-            ORDER BY {order_col} DESC LIMIT :limit;
+        df_genres = run_query(base_genre_query + """
+            AND genre_name ILIKE :search
+            GROUP BY genre_name
+            ORDER BY streams DESC LIMIT :limit;
         """, query_params)
     else:
-        df_genres = run_query(base_genre_query + f"""
-            GROUP BY g.id, g.name
-            ORDER BY {order_col} DESC LIMIT :limit;
+        df_genres = run_query(base_genre_query + """
+            GROUP BY genre_name
+            ORDER BY streams DESC LIMIT :limit;
         """, query_params)
 
     if not df_genres.empty:
@@ -1513,5 +1598,6 @@ elif current_tab == "habits":
             render_track_spotlight_card(row1b, "Freshest Find", "✨", newest_row, "release_date", fmt_year)
             render_track_spotlight_card(st.container(), "Longest Track Played", "⏳", longest_row, "duration_ms", fmt_duration)
         st.markdown('<div class="empty-state"><div class="icon">📭</div>No track length / release-date data available for this period yet</div>', unsafe_allow_html=True)
+
 elif current_tab == "ratings":
     R.render_ratings_dashboard(selected_user_id, F)
