@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from urllib.parse import quote
 import uuid
 
+from ui import render_kpi_grid, get_rank_class
+
 # -- Rating scale --
 RATING_MAX: float = 10.0          # 10-star scale
 RATING_STEP_SONG: float = 0.5     # songs: half-star precision (e.g. 9.5)
@@ -162,6 +164,20 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
 
     # ==============================================================
     # COMPACT QUICK-RATE (10 clickable star buttons — fully responsive)
+    #
+    # FIX (fill not reflecting the saved rating): the old version filled
+    # stars with a single blanket rule — `:nth-child(-n+{current})` on the
+    # column divs. nth-child counts a div's position among ALL of its
+    # siblings, which only lines up with "the first N stars" if nothing
+    # else shares that parent in exactly the order we assume. That
+    # assumption is invisible and can silently stop holding, and when it
+    # does, the only star that ever looks lit is the one under the mouse
+    # (via the separate `:hover` rule) — which is exactly the symptom
+    # reported. Fixing it properly means not depending on sibling
+    # position at all: each star now sits in its OWN uniquely-keyed
+    # container, and we target that key directly. That's a 1:1,
+    # unambiguous mapping from "star i" to "the CSS rule for star i" —
+    # it can't drift out of sync with what Streamlit actually renders.
     # ==============================================================
     @st.fragment
     def render_compact_star_rating(item_type: str, item_id, user_id: int, scale: int = 10):
@@ -182,37 +198,35 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             return _cb
 
         with st.container(key=wrap_key):
-            fill_rule = ""
-            if current > 0:
-                fill_rule = f"""
-                .st-key-{wrap_key} div[data-testid="column"]:nth-child(-n+{current}) button::before {{
-                    background-color: {GREEN} !important;
-                }}
-                .st-key-{wrap_key} div[data-testid="column"]:nth-child(-n+{current}) button {{
-                    transform: scale(1) !important;
-                }}
-                """
+            # One explicit, deterministic rule per star — filled if its
+            # index is <= the saved rating, unfilled otherwise.
+            cell_fill_rules = "\n".join(
+                f'.st-key-{wrap_key}_cell_{i} button::before {{ '
+                f'background-color: {GREEN if i <= current else "rgba(255,255,255,0.22)"} !important; }}'
+                for i in range(1, 11)
+            )
+
             st.markdown(f"""
             <style>
+            /* Ανυψώνουμε το container για να φάμε το κενό του Streamlit */
+            div.element-container:has(> .st-key-{wrap_key}) {{
+                margin-top: -0.2rem !important;
+            }}
+
             .st-key-{wrap_key} {{
                 display: flex !important;
                 align-items: center !important;
-                
-                /* THE FIX: Hardcoded hex that mimics the exact 75% alpha mix over pure black */
-                background: #151515 !important; 
-                backdrop-filter: none !important;
-                -webkit-backdrop-filter: none !important;
-                
-                /* MATCHES BORDERS & CORNERS */
+                background: #151515 !important;
+                backdrop-filter: blur(10px) !important;
+                -webkit-backdrop-filter: blur(10px) !important;
                 border: 1px solid {BORDER} !important;
                 border-top: none !important; 
                 border-radius: 0 0 14px 14px !important; 
-                
                 padding: 4px 1.5rem 10px !important;
-                
-                /* PERFECTLY NEGATES STREAMLIT'S 0.2REM GAP WITH ZERO OVERLAP */
-                margin: -0.2rem 0 0.6rem 0 !important;
+                margin: 0 !important;
                 width: 100% !important;
+                /* ΜΟΝΟ χρώματα στο transition, ΟΧΙ transform! */
+                transition: background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease !important;
             }}
             .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] {{
                 display: flex !important;
@@ -263,7 +277,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             }}
             .st-key-{wrap_key} button:hover {{ transform: scale(1.22) !important; }}
             .st-key-{wrap_key} button:hover::before {{ background-color: {GREEN}cc !important; }}
-            {fill_rule}
+            {cell_fill_rules}
 
             @media (max-width: 768px) {{
                 .st-key-{wrap_key} {{
@@ -286,22 +300,11 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             cols = st.columns(10)
             for i, col in enumerate(cols, start=1):
                 with col:
-                    st.button("★", key=f"{wrap_key}_star_{i}", on_click=_make_cb(i), help=f"{i}/10")
+                    with st.container(key=f"{wrap_key}_cell_{i}"):
+                        st.button("★", key=f"{wrap_key}_star_{i}", on_click=_make_cb(i), help=f"{i}/10")
+
     # ==============================================================
     # FULL DETAIL-PAGE WIDGET
-    # Gradient-fill star preview (star_bar_html) + a plain, unmodified
-    # Streamlit slider for input. Deliberately does NOT style the
-    # slider's internal track/thumb DOM — those node structures differ
-    # across Streamlit versions and any CSS targeting them can silently
-    # stop matching, which is what caused the earlier "nothing visibly
-    # updates" bug (the native per-step tick row was showing through
-    # instead, and it never changes with the value). The star preview is
-    # the only visual driven by `current`, so it always reflects the
-    # real rating.
-    #
-    # Compact by default: only used at full size while "Rating Mode" is
-    # switched on (see app.py). When rating mode is off, callers should
-    # show `rating_chip_html(...)` instead, which is a one-line summary.
     # ==============================================================
     @st.fragment
     def render_star_rating(item_type: str, item_id, user_id: int, compact: bool = False):
@@ -337,11 +340,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 margin: 4px auto 0 !important;
             }}
             .st-key-{wrap_key} div[data-testid="stSlider"] label {{ display:none; }}
-            /* Native per-step tick row: this is *static* (it just marks
-               step positions and never changes with the value), so
-               without hiding it, it visually looks like "the rating
-               display isn't updating" even though the actual value is
-               changing underneath it. */
             .st-key-{wrap_key} div[data-testid="stTickBar"] {{ display: none !important; }}
             .st-key-{wrap_key} button {{
                 background: transparent !important;
@@ -446,9 +444,8 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                         st.rerun()
         return st.session_state[state_key]
 
-
     # ==============================================================
-    # DASHBOARD QUERIES & RENDER
+    # DASHBOARD QUERIES
     # ==============================================================
     def _distribution(user_id: int, kind: str) -> pd.DataFrame:
         table = "song_ratings" if kind == "song" else "album_ratings"
@@ -462,6 +459,30 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         buckets = [round(i * RATING_STEP, 1) for i in range(1, int(RATING_MAX / RATING_STEP) + 1)]
         full = pd.DataFrame({"rating": buckets})
         return full.merge(df, on="rating", how="left").fillna(0)
+
+    def _rating_stats(user_id: int, kind: str) -> dict:
+        """Headline KPIs for the dashboard: total rated, mean rating,
+        perfect (max-score) count, and how many were rated this month."""
+        table = "song_ratings" if kind == "song" else "album_ratings"
+        df = run_query(f"""
+            SELECT
+                COUNT(*) AS total,
+                AVG(rating) AS avg_rating,
+                SUM(CASE WHEN rating >= :max_r THEN 1 ELSE 0 END) AS perfect,
+                SUM(CASE WHEN date_trunc('month', updated_at) = date_trunc('month', now())
+                         THEN 1 ELSE 0 END) AS this_month
+            FROM {table}
+            WHERE user_id = :user_id;
+        """, {"user_id": user_id, "max_r": RATING_MAX})
+        if df.empty or int(df.iloc[0]["total"] or 0) == 0:
+            return {"total": 0, "avg": 0.0, "perfect": 0, "this_month": 0}
+        row = df.iloc[0]
+        return {
+            "total": int(row["total"]),
+            "avg": float(row["avg_rating"] or 0.0),
+            "perfect": int(row["perfect"] or 0),
+            "this_month": int(row["this_month"] or 0),
+        }
 
     def _hall_of_fame_songs(user_id: int, limit: int = 20) -> pd.DataFrame:
         return run_query("""
@@ -512,6 +533,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             ORDER BY so.id, sa.is_feature ASC NULLS LAST
         """, {**F, "user_id": user_id})
 
+    # ==============================================================
+    # CHARTS
+    # ==============================================================
     def _chart_distribution(df: pd.DataFrame) -> go.Figure:
         max_val = df["n"].max() if not df.empty else 0
         colors = [GREEN if v == max_val and v > 0 else "rgba(29,185,84,0.35)" for v in df["n"]]
@@ -562,13 +586,19 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                       legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center"),
                       margin=dict(t=40, b=40, l=50, r=20))
 
-    def _render_hof_row(row: pd.Series, item_type: str, user_id: int, subtitle: str):
+    # ==============================================================
+    # HALL OF FAME ROW (ranked, matching render_list_v2's rank badges)
+    # ==============================================================
+    def _render_hof_row(row: pd.Series, item_type: str, user_id: int, subtitle: str, rank: int = None):
         item_id = row["song_id"] if item_type == "song" else row["album_id"]
         title = escape(str(row.get("song_title") or row.get("album_title")))[:50]
         image_url = row.get("image_url")
         radius = "50%" if item_type == "artist" else "8px"
         art_html = (f'<img src="{image_url}" style="width:100%;height:100%;object-fit:cover;border-radius:{radius};">'
                     if image_url and pd.notnull(image_url) and str(image_url).startswith("http") else "🎵")
+
+        rank_class = get_rank_class(rank) if rank else ""
+        rank_html = f'<div class="item-rank {rank_class}">{rank}</div>' if rank else ""
 
         row_key = f"hof_row_{item_type}_{item_id}"
         with st.container(key=row_key):
@@ -578,7 +608,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             .st-key-{row_key}:hover {{ background: rgba(255,255,255,0.03); }}
             </style>
             """, unsafe_allow_html=True)
-            c_art, c_info, c_stars = st.columns([0.5, 3.5, 2.0], vertical_alignment="center")
+            c_rank, c_art, c_info, c_stars = st.columns([0.4, 0.5, 3.1, 2.0], vertical_alignment="center")
+            with c_rank:
+                st.markdown(rank_html, unsafe_allow_html=True)
             with c_art:
                 st.markdown(f'<div style="width:40px;height:40px;border-radius:{radius};overflow:hidden;'
                             f'display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);">{art_html}</div>',
@@ -590,43 +622,46 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             with c_stars:
                 st.markdown(f'<div style="text-align:right;">{star_bar_html(float(row["rating"]), size="1.2rem", glow=False)}</div>', unsafe_allow_html=True)
 
+    # ==============================================================
+    # DASHBOARD RENDER
+    # ==============================================================
     def render_ratings_dashboard(user_id: int, F: dict):
         kind = _segmented_toggle("ratings_scope", ["Songs", "Albums"])
         kind_key = "song" if kind == "Songs" else "album"
 
-        st.markdown('<div class="section-header" style="margin-top:14px;"><span class="icon">⭐</span>Rating Distribution</div>', unsafe_allow_html=True)
-        dist_df = _distribution(user_id, kind_key)
-        total_rated = int(dist_df["n"].sum())
-        if total_rated == 0:
+        stats = _rating_stats(user_id, kind_key)
+        if stats["total"] == 0:
             st.markdown(f'<div class="empty-state"><div class="icon">⭐</div>No {kind.lower()} rated yet</div>', unsafe_allow_html=True)
             return
 
-        avg_rating = float((dist_df["rating"] * dist_df["n"]).sum() / total_rated)
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.plotly_chart(_chart_distribution(dist_df), use_container_width=True,
-                             config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
-            st.markdown('</div>', unsafe_allow_html=True)
-        with c2:
-            st.markdown(f'''
-            <div class="kpi-card" style="text-align:center; padding: 2rem;">
-                <div class="kpi-title">Average Rating</div>
-                <div class="kpi-value" style="font-size:2.4rem;">{avg_rating:.1f} / {RATING_MAX:g}</div>
-                {star_bar_html(avg_rating, size="1.3rem", glow=False)}
-                <div class="stat-label" style="margin-top:6px;">{total_rated} {kind.lower()} rated</div>
-            </div>
-            ''', unsafe_allow_html=True)
+        # --- Headline KPIs, using the app's shared counter-animated grid ---
+        st.markdown('<div class="section-header" style="margin-top:14px;"><span class="icon">⭐</span>Rating Overview</div>', unsafe_allow_html=True)
+        render_kpi_grid([
+            {"icon": "⭐", "title": "Average Rating", "raw": stats["avg"], "decimals": 1, "suffix": f" / {RATING_MAX:g}"},
+            {"icon": "🎯", "title": f"{kind} Rated", "raw": stats["total"], "decimals": 0},
+            {"icon": "🏆", "title": f"Perfect {RATING_MAX:g}s", "raw": stats["perfect"], "decimals": 0},
+            {"icon": "🆕", "title": "Rated This Month", "raw": stats["this_month"], "decimals": 0},
+        ])
 
+        # --- Distribution chart ---
+        st.markdown('<div class="section-header" style="margin-top:20px;"><span class="icon">📊</span>Rating Distribution</div>', unsafe_allow_html=True)
+        dist_df = _distribution(user_id, kind_key)
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        st.plotly_chart(_chart_distribution(dist_df), use_container_width=True,
+                         config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # --- Hall of Fame, now ranked ---
         st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
         hof_df = _hall_of_fame_songs(user_id) if kind_key == "song" else _hall_of_fame_albums(user_id)
         if hof_df.empty:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Nothing rated yet</div>', unsafe_allow_html=True)
         else:
-            for _, row in hof_df.iterrows():
+            for i, row in hof_df.iterrows():
                 subtitle = (row.get("main_artist") or "Unknown") if kind_key == "song" else "Album"
-                _render_hof_row(row, kind_key, user_id, subtitle)
+                _render_hof_row(row, kind_key, user_id, subtitle, rank=i + 1)
 
+        # --- Hidden Gems vs Guilty Pleasures (songs only) ---
         if kind_key == "song":
             st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🔎</span>Hidden Gems vs Guilty Pleasures</div>', unsafe_allow_html=True)
             st.markdown(f'<div style="color:{TEXT_MID}; font-size:0.85rem; margin-bottom:8px;">'

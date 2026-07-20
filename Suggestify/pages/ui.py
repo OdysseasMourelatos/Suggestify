@@ -265,10 +265,56 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             if p_end:  href += f"&end={p_end}"
             if p_user: href += f"&user={p_user}"
 
-            st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-            
             if has_rating:
-                R.render_compact_star_rating(link_type, item_id, user_id, rating_scale)        
+                item_wrap_key = f"itemwrap_{link_type}_{item_id}"
+                crate_key = f"crate_{link_type}_{item_id}_{user_id}"
+                st.markdown(f"""
+                <style>
+                /* 1. Ο ΓΟΝΕΑΣ: Το κουτί που αγκαλιάζει την κάρτα και τα αστέρια */
+                .st-key-{item_wrap_key} {{ 
+                    margin-bottom: 0.6rem; 
+                    transition: transform 0.22s ease !important;
+                }}
+                .st-key-{item_wrap_key} a.custom-link {{ margin-bottom: 0 !important; }}
+                
+                /* 2. ΚΙΝΗΣΗ: Όταν το ποντίκι μπαίνει στον Γονέα, κουνάει ΟΛΟ ΤΟ ΠΑΚΕΤΟ */
+                .st-key-{item_wrap_key}:hover {{
+                    transform: translateX(6px) !important;
+                }}
+
+                /* 3. ΚΛΕΙΔΩΜΑ ΚΙΝΗΣΗΣ: Ακυρώνουμε την αυτόνομη κίνηση των παιδιών για να μην "ξεκολλήσουν" και να μη κάνουν διπλό άλμα */
+                .st-key-{item_wrap_key} .list-item,
+                .st-key-{item_wrap_key} a.custom-link:hover .list-item,
+                .st-key-{item_wrap_key} .st-key-{crate_key},
+                .st-key-{item_wrap_key} .st-key-{crate_key}:hover {{
+                    transform: none !important;
+                }}
+
+                /* 4. ΣΥΓΧΡΟΝΙΣΜΟΣ ΧΡΩΜΑΤΟΣ (ΠΑΝΩ ΚΑΡΤΑ): Βάζουμε το σωστό CARD_HOVER */
+                .st-key-{item_wrap_key}:hover .list-item {{
+                    background: {CARD_HOVER} !important;
+                    border-color: {BORDER_HL} !important;
+                    box-shadow: none !important; /* Η σκιά πέφτει από το κάτω μέρος για να ενώσει τις κάρτες */
+                }}
+
+                /* 5. ΣΥΓΧΡΟΝΙΣΜΟΣ ΧΡΩΜΑΤΟΣ (ΚΑΤΩ ΚΑΡΤΑ): Βάζουμε το solid hex που αντιστοιχεί ακριβώς στο CARD_HOVER */
+                .st-key-{item_wrap_key}:hover .st-key-{crate_key} {{
+                    background: #262626 !important;
+                    border-color: {BORDER_HL} !important;
+                    box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important;
+                }}
+
+                /* 6. ΕΣΩΤΕΡΙΚΑ ΕΦΕ (Εξώφυλλο & Βελάκι): Αντιδρούν και αυτά όταν ακουμπάμε τον γονέα */
+                .st-key-{item_wrap_key}:hover .item-art {{ transform: scale(1.07) !important; }}
+                .st-key-{item_wrap_key}:hover .item-arrow {{ transform: translateX(4px) !important; color: {GREEN} !important; }}
+                </style>
+                """, unsafe_allow_html=True)
+                
+                with st.container(key=item_wrap_key):
+                    st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
+                    R.render_compact_star_rating(link_type, item_id, user_id, rating_scale)
+            else:
+                st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
         else:
             st.markdown(card_html, unsafe_allow_html=True)
 

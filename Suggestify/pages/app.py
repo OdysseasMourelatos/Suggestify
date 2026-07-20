@@ -360,10 +360,9 @@ with col_share:
         """, unsafe_allow_html=True)
 
         col_a, col_b = st.columns(2)
-        toggle_slot = col_b if rating_mode_on else col_a
-        share_slot = col_a if rating_mode_on else col_b
 
-        with toggle_slot:
+        # Καρφώνουμε το κουμπί του Rating ΜΟΝΙΜΑ στην αριστερή θέση (col_a)
+        with col_a:
             with st.container(key="quick_rate_toggle"):
                 rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
                 if st.button(rating_label, key="quick_rate_btn",
@@ -371,9 +370,8 @@ with col_share:
                     st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
                     st.rerun()
 
-        # Called directly in its column — no extra wrapper — same as
-        # the original working version, just in a swappable slot.
-        with share_slot:
+        # Καρφώνουμε το κουμπί του Share ΜΟΝΙΜΑ στη δεξιά θέση (col_b)
+        with col_b:
             render_share_stats_button(
                 run_query=run_query,
                 user_id=selected_user_id,
