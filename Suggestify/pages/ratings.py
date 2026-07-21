@@ -208,9 +208,11 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
 
             st.markdown(f"""
             <style>
-            /* Ανυψώνουμε το container για να φάμε το κενό του Streamlit */
+            /* Σφραγίζουμε τη χαραμάδα και κρύβουμε τη σκιά της πάνω κάρτας */
             div.element-container:has(> .st-key-{wrap_key}) {{
-                margin-top: -0.2rem !important;
+                margin-top: -0.35rem !important; /* Μεγαλώσαμε το τράβηγμα για να κλείσει 100% η τρύπα */
+                position: relative !important;
+                z-index: 10 !important; /* Καβαλάει τη σκιά της πάνω κάρτας και την κρύβει κάτω της */
             }}
 
             .st-key-{wrap_key} {{

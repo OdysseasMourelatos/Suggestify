@@ -31,9 +31,18 @@ inject_counter_script()
 inject_custom_css()
 
 if "quick_rate_mode" not in st.session_state:
-    st.session_state.quick_rate_mode = False
+    # Διαβάζουμε από τοπικό αρχείο για να μην χάνεται ΠΟΤΕ στα hard reloads
+    try:
+        with open("qr_state.txt", "r") as f:
+            st.session_state.quick_rate_mode = (f.read().strip() == "1")
+    except FileNotFoundError:
+        st.session_state.quick_rate_mode = (st.query_params.get("qr") == "1")
+
+if st.session_state.quick_rate_mode:
+    st.query_params["qr"] = "1"
+else:
+    st.query_params.pop("qr", None)
     
-# Go to line 37 in app.py and update it to this:
 R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
@@ -233,6 +242,7 @@ def go_back():
     start = params.get("start")
     end = params.get("end")
     user = params.get("user")
+    qr = params.get("qr")
 
     st.query_params.clear()
     st.query_params["tab"] = tab
@@ -243,6 +253,7 @@ def go_back():
     if start: st.query_params["start"] = start
     if end: st.query_params["end"] = end
     if user: st.query_params["user"] = user
+    if qr: st.query_params["qr"] = qr
 
 min_date, max_date = get_date_bounds()
 
@@ -361,15 +372,28 @@ with col_share:
 
         col_a, col_b = st.columns(2)
 
-        # Καρφώνουμε το κουμπί του Rating ΜΟΝΙΜΑ στην αριστερή θέση (col_a)
+        #Καρφώνουμε το κουμπί του Rating ΜΟΝΙΜΑ στην αριστερή θέση (col_a)
         with col_a:
             with st.container(key="quick_rate_toggle"):
                 rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
                 if st.button(rating_label, key="quick_rate_btn",
                              type="primary" if rating_mode_on else "secondary"):
-                    st.session_state.quick_rate_mode = not st.session_state.quick_rate_mode
-                    st.rerun()
+                    
+                    new_mode = not st.session_state.quick_rate_mode
+                    st.session_state.quick_rate_mode = new_mode
+                    
+                    # Γράφουμε κατευθείαν την επιλογή στο αρχείο!
+                    try:
+                        with open("qr_state.txt", "w") as f:
+                            f.write("1" if new_mode else "0")
+                    except:
+                        pass
 
+                    if new_mode:
+                        st.query_params["qr"] = "1"
+                    else:
+                        st.query_params.pop("qr", None)
+                    st.rerun()
         # Καρφώνουμε το κουμπί του Share ΜΟΝΙΜΑ στη δεξιά θέση (col_b)
         with col_b:
             render_share_stats_button(
@@ -393,6 +417,7 @@ def navigate_to_tab(tab_id: str):
     curr_start = st.query_params.get("start")
     curr_end = st.query_params.get("end")
     curr_user = st.query_params.get("user")
+    curr_qr = st.query_params.get("qr")
 
     st.query_params.clear()
     st.query_params["tab"] = tab_id
@@ -401,6 +426,7 @@ def navigate_to_tab(tab_id: str):
     if curr_start: st.query_params["start"] = curr_start
     if curr_end: st.query_params["end"] = curr_end
     if curr_user: st.query_params["user"] = curr_user
+    if curr_qr: st.query_params["qr"] = curr_qr
 
     st.rerun()
 
@@ -866,7 +892,12 @@ if detail_type and detail_id:
                 ],
                 image_url=row.get("image_url")
             )
-            R.render_star_rating("album", detail_id, selected_user_id)
+            
+            # Replace R.render_star_rating("album", detail_id, selected_user_id) with:
+            if st.session_state.quick_rate_mode:
+                R.render_star_rating("album", detail_id, selected_user_id, compact=True)
+            else:
+                st.markdown(R.rating_chip_html(R.get_album_rating(selected_user_id, detail_id)), unsafe_allow_html=True)
             
             chips_html = '<div class="meta-chip-container">'
 
@@ -1266,7 +1297,7 @@ elif current_tab == "overview":
         """, F)
         if not df_top_tracks.empty:
             render_list_v2(df_top_tracks, "song_title", "main_artist", "streams", "hours_played",
-                           "song_id", "song", reveal_top_n=5, **qr_kwargs)
+                           "song_id", "song", reveal_top_n=5)
 
     with c2:
         st.markdown('<div class="section-header"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
