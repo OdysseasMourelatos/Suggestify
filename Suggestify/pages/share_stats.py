@@ -43,7 +43,7 @@ THEMES = {
                        "accent": (212, 175, 55), "accent2": (245, 222, 140)},
 }
 
-DYNAMIC_THEME_LABEL = "🎨 Auto (Top Artist Colors)"
+DYNAMIC_THEME_LABEL = "🎨 Auto (Dynamic Colors)"
 
 PERIODS = {
     "All Time": "all",
@@ -289,15 +289,29 @@ def _adjust(color, factor):
 def _dynamic_theme_from_colors(colors):
     def sat_val(c):
         h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
-        return s * v
+        return s * v  # Δίνουμε προτεραιότητα στα ζωντανά χρώματα
+        
     ordered = sorted(colors, key=sat_val, reverse=True)
     base = ordered[0]
     h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in base))
+
+    # --- ΝΕΟΣ ΕΛΕΓΧΟΣ ΓΙΑ ΓΚΡΙ/ΑΣΠΡΟΜΑΥΡΑ ΕΞΩΦΥΛΛΑ ---
+    if s < 0.15:
+        # Αν το πιο "ζωντανό" χρώμα έχει ελάχιστο saturation, 
+        # σημαίνει πως το εξώφυλλο είναι ασπρόμαυρο.
+        # Επιστρέφουμε ένα πολύ καθαρό, sleek γκρι/ασημί theme:
+        accent = (210, 210, 215)  # Ανοιχτό γκρι/ασημί για τα texts/highlights
+        accent2 = (255, 255, 255) # Καθαρό λευκό για τα glows
+        stops = [(35, 35, 38), (65, 65, 70), (10, 10, 12)] # Dark grey gradient
+        return {"stops": stops, "accent": accent, "accent2": accent2}
+
+    # --- ΚΑΝΟΝΙΚΗ ΛΟΓΙΚΗ ΓΙΑ ΕΓΧΡΩΜΑ ΕΞΩΦΥΛΛΑ ---
     s = max(s, 0.55)
     v = max(v, 0.75)
     accent = tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h, s, v))
     accent2 = tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h, max(s - 0.3, 0.15), min(v + 0.15, 1)))
     stops = [_adjust(accent, 0.34), _adjust(accent, 0.55), _adjust(accent, 0.10)]
+    
     return {"stops": stops, "accent": accent, "accent2": accent2}
 
 def _get_dynamic_theme(image_url, fallback_theme):
@@ -310,17 +324,28 @@ def _get_dynamic_theme(image_url, fallback_theme):
     except Exception:
         return fallback_theme
 
-def _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, overview=None):
+def _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, overview=None, df=None):
     if theme_choice != DYNAMIC_THEME_LABEL:
         return THEMES[theme_choice]
-    top_artist_img = None
-    if overview and overview.get("top_artist"):
-        top_artist_img = overview["top_artist"].get("image_url")
-    if not top_artist_img:
+    
+    target_img_url = None
+
+    # 1. Πρώτα ελέγχουμε αν υπάρχει συγκεκριμένο DataFrame (π.χ. Συγκεκριμένο Album ή Tracks)
+    if df is not None and not df.empty and "image_url" in df.columns:
+        target_img_url = df.iloc[0].get("image_url")
+        
+    # 2. Αν δεν βρέθηκε, κοιτάμε το overview (εφόσον πρόκειται για overview/personality κάρτα)
+    if not target_img_url and overview and overview.get("top_artist"):
+        target_img_url = overview["top_artist"].get("image_url")
+        
+    # 3. Αν πάλι δεν βρέθηκε, κάνουμε fallback στο top artist του χρήστη για το συγκεκριμένο διάστημα
+    if not target_img_url:
         ta_df = _fetch_data(run_query, "artists", 1, user_id, start_date, end_date)
         if ta_df is not None and not ta_df.empty:
-            top_artist_img = ta_df.iloc[0].get("image_url")
-    return _get_dynamic_theme(top_artist_img, THEMES["Spotify Green"])
+            target_img_url = ta_df.iloc[0].get("image_url")
+
+    # Ανάκτηση και δημιουργία δυναμικού θέματος
+    return _get_dynamic_theme(target_img_url, THEMES["Spotify Green"])
 
 # ══════════════════════════════════════════════════════════════════
 # BACKGROUND / GLASS EFFECTS
@@ -1415,7 +1440,8 @@ def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_u
             st.warning("No listening data for this period yet — try a different range.")
             return
 
-        theme = _resolve_theme(theme_choice, run_query, user_id, start_date, end_date)
+        # ΝΕΑ ΚΛΗΣΗ: Περνάμε το df ως όρισμα για να πάρει τα χρώματα από το εξώφυλλο
+        theme = _resolve_theme(theme_choice, run_query, user_id, start_date, end_date, df=df)
 
         components.html(
             _html_preview(df, kind, username, period_label, theme, date_range_label, n, avatar_url=avatar_url, item_name=item_name),

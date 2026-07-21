@@ -199,15 +199,20 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                    id_col: str = None, link_type: str = None, image_col: str = "image_url",
                    rank_col: str = None, reveal_top_n: int = 0,
                    reveal_delay_base: float = 0.5, reveal_delay_step: float = 0.2,
-                   quick_rate: bool = False, R=None, user_id: int = None, rating_scale: int = 10):
+                   quick_rate: bool = False, R=None, user_id: int = None, rating_scale: int = 10,
+                   stat1_label: str = "Streams", stat2_label: str = "Time",
+                   stat1_fmt=None, stat2_fmt=None):
     current_tab = st.query_params.get("tab", "overview")
+    _fmt1 = stat1_fmt or (lambda v: f"{int(v):,}")
+    _fmt2 = stat2_fmt or (lambda v: f"{float(v):.1f}h")
+
     for i, row in df.iterrows():
         rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
         rank_class = get_rank_class(rank)
         title = escape(str(row[title_col]))[:60]
         subtitle = escape(str(row[sub_col]))[:50]
-        streams = f"{int(row[streams_col]):,}"
-        hours = f"{float(row[hours_col]):.1f}"
+        streams = _fmt1(row[streams_col])
+        hours = _fmt2(row[hours_col])
         can_navigate = link_type and id_col and id_col in row.index
 
         image_url = row.get(image_col) if image_col in row else None
@@ -223,7 +228,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             reveal_style = f'style="animation-delay: {delay:.1f}s;"'
 
         reveal_class = "list-item-reveal" if reveal_style else ""
-        
+
         has_rating = quick_rate and link_type in ("song", "album") and R is not None and user_id is not None
         item_class = "list-item-has-rating" if has_rating else ""
 
@@ -238,11 +243,11 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             <div class="item-stats">
                 <div class="stat">
                     <div class="stat-value">{streams}</div>
-                    <div class="stat-label">Streams</div>
+                    <div class="stat-label">{stat1_label}</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value green">{hours}h</div>
-                    <div class="stat-label">Time</div>
+                    <div class="stat-value green">{hours}</div>
+                    <div class="stat-label">{stat2_label}</div>
                 </div>
             </div>
             {"<div class='item-arrow'>→</div>" if can_navigate else ""}
@@ -257,7 +262,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             p_start = st.query_params.get("start")
             p_end = st.query_params.get("end")
             p_user = st.query_params.get("user")
-            
+
             href = f"?tab={current_tab}&view={link_type}&id={item_id}"
             if p_view and p_id:  href += f"&pview={p_view}&pid={p_id}"
             if p_preset:  href += f"&preset={p_preset}"
@@ -270,46 +275,35 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                 crate_key = f"crate_{link_type}_{item_id}_{user_id}"
                 st.markdown(f"""
                 <style>
-                /* 1. Ο ΓΟΝΕΑΣ: Το κουτί που αγκαλιάζει την κάρτα και τα αστέρια */
                 .st-key-{item_wrap_key} {{ 
                     margin-bottom: 0.6rem; 
                     transition: transform 0.22s ease !important;
                 }}
                 .st-key-{item_wrap_key} a.custom-link {{ margin-bottom: 0 !important; }}
-                
-                /* 2. ΚΙΝΗΣΗ: Όταν το ποντίκι μπαίνει στον Γονέα, κουνάει ΟΛΟ ΤΟ ΠΑΚΕΤΟ */
                 .st-key-{item_wrap_key}:hover {{
                     transform: translateX(6px) !important;
                 }}
-
-                /* 3. ΚΛΕΙΔΩΜΑ ΚΙΝΗΣΗΣ: Ακυρώνουμε την αυτόνομη κίνηση των παιδιών για να μην "ξεκολλήσουν" και να μη κάνουν διπλό άλμα */
                 .st-key-{item_wrap_key} .list-item,
                 .st-key-{item_wrap_key} a.custom-link:hover .list-item,
                 .st-key-{item_wrap_key} .st-key-{crate_key},
                 .st-key-{item_wrap_key} .st-key-{crate_key}:hover {{
                     transform: none !important;
                 }}
-
-                /* 4. ΣΥΓΧΡΟΝΙΣΜΟΣ ΧΡΩΜΑΤΟΣ (ΠΑΝΩ ΚΑΡΤΑ): Βάζουμε το σωστό CARD_HOVER */
                 .st-key-{item_wrap_key}:hover .list-item {{
                     background: {CARD_HOVER} !important;
                     border-color: {BORDER_HL} !important;
-                    box-shadow: none !important; /* Η σκιά πέφτει από το κάτω μέρος για να ενώσει τις κάρτες */
+                    box-shadow: none !important;
                 }}
-
-                /* 5. ΣΥΓΧΡΟΝΙΣΜΟΣ ΧΡΩΜΑΤΟΣ (ΚΑΤΩ ΚΑΡΤΑ): Βάζουμε το solid hex που αντιστοιχεί ακριβώς στο CARD_HOVER */
                 .st-key-{item_wrap_key}:hover .st-key-{crate_key} {{
                     background: #262626 !important;
                     border-color: {BORDER_HL} !important;
                     box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important;
                 }}
-
-                /* 6. ΕΣΩΤΕΡΙΚΑ ΕΦΕ (Εξώφυλλο & Βελάκι): Αντιδρούν και αυτά όταν ακουμπάμε τον γονέα */
                 .st-key-{item_wrap_key}:hover .item-art {{ transform: scale(1.07) !important; }}
                 .st-key-{item_wrap_key}:hover .item-arrow {{ transform: translateX(4px) !important; color: {GREEN} !important; }}
                 </style>
                 """, unsafe_allow_html=True)
-                
+
                 with st.container(key=item_wrap_key):
                     st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
                     R.render_compact_star_rating(link_type, item_id, user_id, rating_scale)

@@ -1,11 +1,19 @@
 """
-ratings.py — Song/Album rating system for Suggestify (v3).
+ratings.py — Song/Album rating system for Suggestify (v4).
+
+v4 adds a full statistical layer to the ratings dashboard: dispersion,
+shape (skew), median/mean divergence, month-over-month rating drift
+(inflation/deflation), and a behavioral cross-analysis between rating
+and stream engagement (correlation + value-density / efficiency
+ranking). All of it is computed from a single per-scope roundtrip so
+the dashboard stays fast even as history grows.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from sqlalchemy import text
 from html import escape
@@ -22,6 +30,11 @@ RATING_STEP_ALBUM: float = 0.1    # albums: fine decimal precision (e.g. 9.9)
 RATING_STEP: float = RATING_STEP_SONG  # kept for distribution-chart bucketing
 
 STAR = "★"
+
+# Minimum sample sizes below which a statistic is hidden rather than shown
+# as a misleadingly precise (and noisy) number.
+MIN_N_FOR_SKEW = 3
+MIN_N_FOR_TREND_WINDOW = 3
 
 # Replace your current definition of init_ratings_module (lines 14-15) with this:
 def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER, build_href_fn=None):
@@ -477,28 +490,83 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         return full.merge(df, on="rating", how="left").fillna(0)
 
     def _rating_stats(user_id: int, kind: str) -> dict:
-        """Headline KPIs for the dashboard: total rated, mean rating,
-        perfect (max-score) count, and how many were rated this month."""
+        """Full statistical profile for the dashboard, computed in a
+        SINGLE roundtrip: central tendency (mean/median), spread (std),
+        shape (skew), a month-over-month rating-drift signal (are you
+        inflating or deflating your own ratings over time?), plus the
+        legacy headline counts (total/perfect/this-month).
+
+        We pull the raw (rating, updated_at) pairs once and derive
+        everything client-side with pandas/numpy rather than stacking
+        correlated subqueries in SQL — for a per-user ratings table
+        (hundreds to low-thousands of rows) this is both faster to
+        write/maintain and just as fast to run, and it keeps every
+        formula auditable in one place instead of buried in SQL.
+        """
         table = "song_ratings" if kind == "song" else "album_ratings"
         df = run_query(f"""
-            SELECT
-                COUNT(*) AS total,
-                AVG(rating) AS avg_rating,
-                SUM(CASE WHEN rating >= :max_r THEN 1 ELSE 0 END) AS perfect,
-                SUM(CASE WHEN date_trunc('month', updated_at) = date_trunc('month', now())
-                         THEN 1 ELSE 0 END) AS this_month
-            FROM {table}
-            WHERE user_id = :user_id;
-        """, {"user_id": user_id, "max_r": RATING_MAX})
-        if df.empty or int(df.iloc[0]["total"] or 0) == 0:
-            return {"total": 0, "avg": 0.0, "perfect": 0, "this_month": 0}
-        row = df.iloc[0]
-        return {
-            "total": int(row["total"]),
-            "avg": float(row["avg_rating"] or 0.0),
-            "perfect": int(row["perfect"] or 0),
-            "this_month": int(row["this_month"] or 0),
+            SELECT rating, updated_at FROM {table} WHERE user_id = :user_id;
+        """, {"user_id": user_id})
+
+        empty = {
+            "total": 0, "avg": 0.0, "median": 0.0, "std": 0.0, "skew": 0.0,
+            "perfect": 0, "this_month": 0, "mean_median_div": 0.0,
+            "trend_delta": None, "recent_avg": None, "prior_avg": None,
+            "consistency": 0.0,
         }
+        if df.empty:
+            return empty
+
+        ratings = pd.to_numeric(df["rating"], errors="coerce").dropna()
+        total = int(len(ratings))
+        if total == 0:
+            return empty
+
+        updated = pd.to_datetime(df["updated_at"], errors="coerce", utc=True)
+
+        avg = float(ratings.mean())
+        median = float(ratings.median())
+        std = float(ratings.std(ddof=1)) if total > 1 else 0.0
+        skew = float(ratings.skew()) if total > MIN_N_FOR_SKEW else 0.0
+        perfect = int((ratings >= RATING_MAX).sum())
+
+        now = pd.Timestamp.now(tz="UTC")
+        this_month = int(((updated.dt.year == now.year) & (updated.dt.month == now.month)).sum())
+
+        recent_mask = updated >= (now - pd.Timedelta(days=30))
+        prior_mask = (updated < (now - pd.Timedelta(days=30))) & (updated >= (now - pd.Timedelta(days=60)))
+        recent_n, prior_n = int(recent_mask.sum()), int(prior_mask.sum())
+        recent_avg = float(ratings[recent_mask].mean()) if recent_n >= MIN_N_FOR_TREND_WINDOW else None
+        prior_avg = float(ratings[prior_mask].mean()) if prior_n >= MIN_N_FOR_TREND_WINDOW else None
+        trend_delta = (recent_avg - prior_avg) if (recent_avg is not None and prior_avg is not None) else None
+
+        # Consistency score (0-100): how tightly ratings cluster around
+        # the mean, relative to the maximum possible spread on this scale.
+        # The theoretical max std for a value bounded in [0, RATING_MAX]
+        # is RATING_MAX/2 (all mass split between the two extremes), so
+        # that's the natural denominator for a 0-100 normalization.
+        max_plausible_std = RATING_MAX / 2
+        consistency = max(0.0, min(100.0, (1 - (std / max_plausible_std)) * 100)) if max_plausible_std else 0.0
+
+        return {
+            "total": total, "avg": avg, "median": median, "std": std, "skew": skew,
+            "perfect": perfect, "this_month": this_month,
+            "mean_median_div": avg - median,
+            "trend_delta": trend_delta, "recent_avg": recent_avg, "prior_avg": prior_avg,
+            "consistency": consistency,
+        }
+
+    def _rating_trend_over_time(user_id: int, kind: str) -> pd.DataFrame:
+        """Monthly average rating — the raw series behind the
+        inflation/deflation trend line chart."""
+        table = "song_ratings" if kind == "song" else "album_ratings"
+        return run_query(f"""
+            SELECT DATE_TRUNC('month', updated_at) AS period,
+                   AVG(rating) AS avg_rating, COUNT(*) AS n
+            FROM {table}
+            WHERE user_id = :user_id
+            GROUP BY 1 ORDER BY 1;
+        """, {"user_id": user_id})
 
     def _hall_of_fame_songs(user_id: int, limit: int = 20) -> pd.DataFrame:
         return run_query("""
@@ -549,21 +617,91 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             ORDER BY so.id, sa.is_feature ASC NULLS LAST
         """, {**F, "user_id": user_id})
 
+    def _engagement_metrics(df: pd.DataFrame) -> dict:
+        """Behavioral layer on top of the rating/streams cross-analysis:
+        - corr: Pearson correlation between rating and streams — how much
+          your taste (rating) tracks your habit (plays). Near 0 means you
+          rate independently of how often you actually listen.
+        - efficiency: rating earned per unit of log-scaled exposure
+          (rating / log1p(streams)) — a "value density" score that
+          surfaces songs delivering a lot of love for very little airplay,
+          without letting a single-digit stream count blow up to infinity
+          the way a raw rating/streams ratio would.
+        """
+        if df.empty or len(df) < 3:
+            return {"corr": None, "efficiency_top": pd.DataFrame()}
+
+        d = df.copy()
+        corr = float(d["rating"].corr(d["streams"])) if d["streams"].std() > 0 else None
+        d["efficiency"] = d["rating"] / np.log1p(d["streams"])
+        efficiency_top = d[d["streams"] > 0].sort_values("efficiency", ascending=False).head(5)
+        return {"corr": corr, "efficiency_top": efficiency_top}
+
     # ==============================================================
     # CHARTS
     # ==============================================================
-    def _chart_distribution(df: pd.DataFrame) -> go.Figure:
+    def _chart_distribution(df: pd.DataFrame, mean_val: float = None, median_val: float = None) -> go.Figure:
         max_val = df["n"].max() if not df.empty else 0
         colors = [GREEN if v == max_val and v > 0 else "rgba(29,185,84,0.35)" for v in df["n"]]
         fig = go.Figure(go.Bar(
-            x=[f"{r:g}" for r in df["rating"]], y=df["n"],
+            x=df["rating"], y=df["n"], width=RATING_STEP * 0.85,
             marker_color=colors, marker_line=dict(width=0),
-            hovertemplate="<b>%{x} ★</b><br>%{y:,.0f} ratings<extra></extra>",
+            hovertemplate="<b>%{x:g} ★</b><br>%{y:,.0f} ratings<extra></extra>",
         ))
-        return themed(fig, xaxis_title="Rating", yaxis_title="Count", bargap=0.35,
-                      margin=dict(t=20, b=40, l=50, r=20))
+        if mean_val:
+            fig.add_vline(x=mean_val, line_dash="dash", line_color="#FFD54F",
+                          annotation_text=f"Mean {mean_val:.2f}", annotation_position="top right",
+                          annotation_font_color="#FFD54F", annotation_font_size=11)
+        if median_val and abs(median_val - (mean_val or 0)) > 1e-6:
+            fig.add_vline(x=median_val, line_dash="dot", line_color="#4FC3F7",
+                          annotation_text=f"Median {median_val:.2f}", annotation_position="bottom right",
+                          annotation_font_color="#4FC3F7", annotation_font_size=11)
+        return themed(fig, xaxis_title="Rating", yaxis_title="Count", bargap=0.15,
+                      xaxis=dict(tickmode="linear", dtick=max(RATING_STEP, 1) if RATING_MAX / RATING_STEP > 12 else RATING_STEP,
+                                 gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)",
+                                 zeroline=False, fixedrange=True),
+                      margin=dict(t=50, b=40, l=50, r=20))
 
-    def _chart_cross_analysis(df: pd.DataFrame) -> go.Figure:
+    def _chart_rating_trend(df: pd.DataFrame) -> go.Figure:
+        if df.empty or len(df) < 2:
+            return themed(go.Figure())
+        d = df.copy()
+        d["period"] = pd.to_datetime(d["period"])
+        x_numeric = np.arange(len(d))
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=d["period"], y=d["avg_rating"], mode="lines+markers", name="Monthly Avg",
+            line=dict(color=GREEN, width=3, shape="spline"),
+            marker=dict(size=7, color=GREEN, line=dict(width=2, color=BG)),
+            fill="tozeroy", fillcolor="rgba(29,185,84,0.08)",
+            customdata=d["n"],
+            hovertemplate="<b>%{x|%b %Y}</b><br>Avg %{y:.2f}★ · %{customdata} rated<extra></extra>",
+        ))
+
+        if len(d) >= 3:
+            slope, intercept = np.polyfit(x_numeric, d["avg_rating"], 1)
+            trend_y = intercept + slope * x_numeric
+            if slope > 0.015:
+                trend_label = "Trend: Inflating 📈"
+            elif slope < -0.015:
+                trend_label = "Trend: Deflating 📉"
+            else:
+                trend_label = "Trend: Stable ➡️"
+            fig.add_trace(go.Scatter(
+                x=d["period"], y=trend_y, mode="lines", name=trend_label,
+                line=dict(color="rgba(255,255,255,0.45)", width=2, dash="dot"),
+                hoverinfo="skip",
+            ))
+
+        return themed(fig, yaxis_title="Avg Rating", xaxis_title="",
+                      yaxis=dict(range=[0, RATING_MAX + 0.5], gridcolor="rgba(255,255,255,0.05)",
+                                 linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True),
+                      hovermode="x unified",
+                      legend=dict(orientation="h", y=1.16, x=0.5, xanchor="center"),
+                      margin=dict(t=44, b=40, l=50, r=20))
+
+    def _chart_cross_analysis(df: pd.DataFrame, corr: float = None) -> go.Figure:
         if df.empty:
             return themed(go.Figure())
         median_streams = df["streams"].median()
@@ -574,33 +712,44 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         rest_idx = df.index.difference(hidden_gems.index).difference(guilty_pleasures.index)
         rest = df.loc[rest_idx]
 
+        def _labels(d):
+            return d["song_title"] + " — " + d["main_artist"].fillna("Unknown")
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=rest["streams"], y=rest["rating"], mode="markers", name="Other",
             marker=dict(size=9, color="rgba(255,255,255,0.25)", line=dict(width=0)),
-            text=rest["song_title"] + " — " + rest["main_artist"].fillna("Unknown"),
+            text=_labels(rest),
             hovertemplate="<b>%{text}</b><br>%{x:,} streams · %{y}★<extra></extra>",
         ))
         fig.add_trace(go.Scatter(
             x=hidden_gems["streams"], y=hidden_gems["rating"], mode="markers", name="Hidden Gems",
             marker=dict(size=12, color=GREEN, line=dict(width=1, color=BG)),
-            text=hidden_gems["song_title"] + " — " + hidden_gems["main_artist"].fillna("Unknown"),
+            text=_labels(hidden_gems),
             hovertemplate="<b>%{text}</b><br>%{x:,} streams · %{y}★<extra></extra>",
         ))
         fig.add_trace(go.Scatter(
             x=guilty_pleasures["streams"], y=guilty_pleasures["rating"], mode="markers", name="Guilty Pleasures",
             marker=dict(size=12, color="#FF7043", line=dict(width=1, color=BG)),
-            text=guilty_pleasures["song_title"] + " — " + guilty_pleasures["main_artist"].fillna("Unknown"),
+            text=_labels(guilty_pleasures),
             hovertemplate="<b>%{text}</b><br>%{x:,} streams · %{y}★<extra></extra>",
         ))
         fig.add_vline(x=median_streams, line_dash="dot", line_color="rgba(255,255,255,0.2)")
         fig.add_hline(y=RATING_MAX / 2, line_dash="dot", line_color="rgba(255,255,255,0.2)")
+
+        if corr is not None:
+            fig.add_annotation(
+                xref="paper", yref="paper", x=0.0, y=1.16, showarrow=False, align="left",
+                text=f"Taste ↔ plays correlation: r = {corr:+.2f}",
+                font=dict(color=TEXT_MID, size=11),
+            )
+
         return themed(fig, xaxis_title="Streams", yaxis_title="Your Rating",
                       yaxis=dict(range=[0, RATING_MAX + 0.5], dtick=max(1, RATING_MAX // 5),
                                  gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)",
                                  zeroline=False, fixedrange=True),
                       legend=dict(orientation="h", y=1.12, x=0.5, xanchor="center"),
-                      margin=dict(t=40, b=40, l=50, r=20))
+                      margin=dict(t=54, b=40, l=50, r=20))
 
     # ==============================================================
     # HALL OF FAME ROW (ranked, matching render_list_v2's rank badges)
@@ -639,6 +788,28 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 st.markdown(f'<div style="text-align:right;">{star_bar_html(float(row["rating"]), size="1.2rem", glow=False)}</div>', unsafe_allow_html=True)
 
     # ==============================================================
+    # SMALL FORMATTING HELPERS
+    # ==============================================================
+    def _skew_label(skew: float) -> str:
+        # Positive skew: tail toward high ratings -> most ratings sit low
+        # with rare high outliers -> a harsh rater. Negative skew: tail
+        # toward low ratings -> most ratings sit high -> a generous rater.
+        if skew > 0.5:
+            return "Harsh Critic"
+        if skew < -0.5:
+            return "Generous Rater"
+        return "Balanced Rater"
+
+    def _trend_kpi(trend_delta) -> dict:
+        if trend_delta is None:
+            return {"value": "Not enough data"}
+        if trend_delta > 0.05:
+            return {"value": f"📈 +{trend_delta:.2f}"}
+        if trend_delta < -0.05:
+            return {"value": f"📉 {trend_delta:.2f}"}
+        return {"value": f"➡️ {trend_delta:+.2f}"}
+
+    # ==============================================================
     # DASHBOARD RENDER
     # ==============================================================
     def render_ratings_dashboard(user_id: int, F: dict):
@@ -650,24 +821,50 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.markdown(f'<div class="empty-state"><div class="icon">⭐</div>No {kind.lower()} rated yet</div>', unsafe_allow_html=True)
             return
 
-        # --- Headline KPIs, using the app's shared counter-animated grid ---
+        # --- Headline KPIs ---
         st.markdown('<div class="section-header" style="margin-top:14px;"><span class="icon">⭐</span>Rating Overview</div>', unsafe_allow_html=True)
         render_kpi_grid([
-            {"icon": "⭐", "title": "Average Rating", "raw": stats["avg"], "decimals": 1, "suffix": f" / {RATING_MAX:g}"},
+            {"icon": "⭐", "title": "Average Rating", "raw": stats["avg"], "decimals": 2, "suffix": f" / {RATING_MAX:g}"},
             {"icon": "🎯", "title": f"{kind} Rated", "raw": stats["total"], "decimals": 0},
             {"icon": "🏆", "title": f"Perfect {RATING_MAX:g}s", "raw": stats["perfect"], "decimals": 0},
             {"icon": "🆕", "title": "Rated This Month", "raw": stats["this_month"], "decimals": 0},
         ])
 
+        # --- Statistical deep-dive ---
+        st.markdown('<div class="section-header" style="margin-top:20px;"><span class="icon">📐</span>Statistical Profile</div>', unsafe_allow_html=True)
+        render_kpi_grid([
+            {"icon": "📏", "title": "Median Rating", "raw": stats["median"], "decimals": 2},
+            {"icon": "📊", "title": "Std. Deviation", "raw": stats["std"], "decimals": 2},
+            {"icon": "🎭", "title": _skew_label(stats["skew"]), "raw": stats["skew"], "decimals": 2},
+            {"icon": "🌊", "title": "30-Day Trend (vs. prior 30d)", **_trend_kpi(stats["trend_delta"])},
+        ])
+        st.markdown(
+            f'<div style="color:{TEXT_MID}; font-size:0.8rem; margin: -6px 0 6px;">'
+            f'Consistency score: <b style="color:{GREEN};">{stats["consistency"]:.0f}/100</b>'
+            f'&nbsp;·&nbsp;Mean − median gap: <b>{stats["mean_median_div"]:+.2f}</b>'
+            f'&nbsp;<span style="opacity:0.7;">(positive = a few low outliers pull the average down '
+            f'from a mostly-high median, and vice versa)</span></div>',
+            unsafe_allow_html=True
+        )
+
         # --- Distribution chart ---
         st.markdown('<div class="section-header" style="margin-top:20px;"><span class="icon">📊</span>Rating Distribution</div>', unsafe_allow_html=True)
         dist_df = _distribution(user_id, kind_key)
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.plotly_chart(_chart_distribution(dist_df), use_container_width=True,
+        st.plotly_chart(_chart_distribution(dist_df, stats["avg"], stats["median"]), use_container_width=True,
                          config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- Hall of Fame, now ranked ---
+        # --- Rating trend over time (inflation / deflation) ---
+        trend_df = _rating_trend_over_time(user_id, kind_key)
+        if not trend_df.empty and len(trend_df) >= 2:
+            st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🌊</span>Rating Trend Over Time</div>', unsafe_allow_html=True)
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.plotly_chart(_chart_rating_trend(trend_df), use_container_width=True,
+                             config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # --- Hall of Fame, ranked ---
         st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
         hof_df = _hall_of_fame_songs(user_id) if kind_key == "song" else _hall_of_fame_albums(user_id)
         if hof_df.empty:
@@ -677,7 +874,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 subtitle = (row.get("main_artist") or "Unknown") if kind_key == "song" else "Album"
                 _render_hof_row(row, kind_key, user_id, subtitle, rank=i + 1)
 
-        # --- Hidden Gems vs Guilty Pleasures (songs only) ---
+        # --- Hidden Gems vs Guilty Pleasures + engagement metrics (songs only) ---
         if kind_key == "song":
             st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🔎</span>Hidden Gems vs Guilty Pleasures</div>', unsafe_allow_html=True)
             st.markdown(f'<div style="color:{TEXT_MID}; font-size:0.85rem; margin-bottom:8px;">'
@@ -688,10 +885,27 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             if cross_df.empty:
                 st.markdown('<div class="empty-state"><div class="icon">📭</div>Rate some songs to see this chart</div>', unsafe_allow_html=True)
             else:
+                metrics = _engagement_metrics(cross_df)
                 st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-                st.plotly_chart(_chart_cross_analysis(cross_df), use_container_width=True,
+                st.plotly_chart(_chart_cross_analysis(cross_df, metrics["corr"]), use_container_width=True,
                                  config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
                 st.markdown('</div>', unsafe_allow_html=True)
+
+                eff_top = metrics["efficiency_top"]
+                if not eff_top.empty:
+                    st.markdown(
+                        '<div class="section-header" style="margin-top:14px; font-size:0.95rem;">'
+                        '<span class="icon">💎</span>Highest Value-Density Tracks</div>',
+                        unsafe_allow_html=True
+                    )
+                    st.markdown(
+                        f'<div style="color:{TEXT_MID}; font-size:0.8rem; margin-bottom:6px;">'
+                        f'Rating earned per unit of exposure — the tracks giving you the most love '
+                        f'for the least airplay.</div>',
+                        unsafe_allow_html=True
+                    )
+                    for _, row in eff_top.iterrows():
+                        _render_hof_row(row, "song", user_id, row.get("main_artist") or "Unknown")
 
     return SimpleNamespace(
         set_song_rating=set_song_rating,
