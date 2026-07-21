@@ -1,14 +1,3 @@
-"""
-ratings.py — Song/Album rating system for Suggestify (v4).
-
-v4 adds a full statistical layer to the ratings dashboard: dispersion,
-shape (skew), median/mean divergence, month-over-month rating drift
-(inflation/deflation), and a behavioral cross-analysis between rating
-and stream engagement (correlation + value-density / efficiency
-ranking). All of it is computed from a single per-scope roundtrip so
-the dashboard stays fast even as history grows.
-"""
-
 from __future__ import annotations
 
 import streamlit as st
@@ -21,7 +10,7 @@ from types import SimpleNamespace
 from urllib.parse import quote
 import uuid
 
-from ui import render_kpi_grid, get_rank_class
+from ui import render_kpi_grid, get_rank_class, render_list_v2, build_filtered_href
 
 # -- Rating scale --
 RATING_MAX: float = 10.0          # 10-star scale
@@ -36,7 +25,6 @@ STAR = "★"
 MIN_N_FOR_SKEW = 3
 MIN_N_FOR_TREND_WINDOW = 3
 
-# Replace your current definition of init_ratings_module (lines 14-15) with this:
 def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER, build_href_fn=None):
     CARD = CARD or "rgba(255,255,255,0.04)"
     BORDER = BORDER or "rgba(255,255,255,0.08)"
@@ -84,6 +72,20 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         if ok: run_query.clear()
         return ok
 
+    def bump_song(user_id: int, song_id) -> bool:
+        ok = _execute("UPDATE song_ratings SET updated_at = now() WHERE user_id = :uid AND song_id = :sid;", 
+                        {"uid": user_id, "sid": song_id})
+        if ok: 
+            run_query.clear()
+        return ok
+
+    def bump_album(user_id: int, album_id) -> bool:
+        ok = _execute("UPDATE album_ratings SET updated_at = now() WHERE user_id = :uid AND album_id = :aid;", 
+                        {"uid": user_id, "aid": album_id})
+        if ok: 
+            run_query.clear()
+        return ok
+        
     def get_song_rating(user_id: int, song_id) -> float:
         df = run_query(_GET_SONG, {"user_id": user_id, "song_id": song_id})
         return float(df.iloc[0]["rating"]) if not df.empty else 0.0
@@ -118,28 +120,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.session_state[f"rating_val_{item_type}_{i}_{user_id}"] = float(found.get(i, 0.0))
     # ==============================================================
     # STATIC STAR BAR (For Chips, Hall of Fame rows, and the live preview)
-    #
-    # Renders real inline SVG star shapes (the same star path used
-    # elsewhere in the app) instead of the Unicode "★" glyph. Text-glyph
-    # stars depend on the active font actually containing that glyph and
-    # on `background-clip: text` being honored — when either fails, the
-    # browser falls back to a solid block, which is what produced the
-    # green rectangles instead of stars. An SVG <path> has no such
-    # dependency: it's drawn the same way everywhere. Each star gets its
-    # own <linearGradient> with a hard color stop at that star's exact
-    # fill percentage, so partial/decimal ratings render a precisely
-    # proportioned partial fill.
     # ==============================================================
     _STAR_PATH = "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
 
-    # Same star shape, packaged as a URL-encoded SVG data-URI so it can be
-    # used as a CSS mask on real <button> elements (the compact quick-rate
-    # stars below). Buttons need a *clickable* star, not just a painted
-    # one, so we can't reuse the gradient-<svg> trick from star_bar_html
-    # (that one is inert, decorative markup). Masking a plain background
-    # color onto this shape gives a crisp star that is 100% font-independent
-    # (fixing the "broken glyph" look) while still letting a real <button>
-    # sit underneath for the click handling.
     _STAR_SVG_DATAURI = (
         "data:image/svg+xml," + quote(
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
@@ -191,31 +174,26 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
 
     # ==============================================================
     # COMPACT QUICK-RATE (10 clickable star buttons — fully responsive)
-    #
-    # FIX (fill not reflecting the saved rating): the old version filled
-    # stars with a single blanket rule — `:nth-child(-n+{current})` on the
-    # column divs. nth-child counts a div's position among ALL of its
-    # siblings, which only lines up with "the first N stars" if nothing
-    # else shares that parent in exactly the order we assume. That
-    # assumption is invisible and can silently stop holding, and when it
-    # does, the only star that ever looks lit is the one under the mouse
-    # (via the separate `:hover` rule) — which is exactly the symptom
-    # reported. Fixing it properly means not depending on sibling
-    # position at all: each star now sits in its OWN uniquely-keyed
-    # container, and we target that key directly. That's a 1:1,
-    # unambiguous mapping from "star i" to "the CSS rule for star i" —
-    # it can't drift out of sync with what Streamlit actually renders.
+    # ==============================================================
+    # ==============================================================
+    # COMPACT QUICK-RATE (10 clickable star buttons — fully responsive)
     # ==============================================================
     @st.fragment
-    def render_compact_star_rating(item_type: str, item_id, user_id: int, scale: int = 10):
+    def render_compact_star_rating(item_type: str, item_id, user_id: int, scale: int = 10, key_prefix: str = ""):
         assert item_type in ("song", "album")
-        current = int(round(_current(item_type, item_id, user_id)))
-        wrap_key = f"crate_{item_type}_{item_id}_{user_id}"
+        
+        # ΑΦΑΙΡΕΣΑΜΕ ΤΟ int(round(...)) - Κρατάμε τα δεκαδικά (π.χ. 8.5 ή 9.9)!
+        current = float(_current(item_type, item_id, user_id))
+        
+        # Βάζουμε το prefix ΜΟΝΟ στο UI wrap key για να μην υπάρχει conflict
+        wrap_key = f"crate_{key_prefix}{item_type}_{item_id}_{user_id}"
+        
+        # Αφήνουμε το state_key ΧΩΡΙΣ prefix.
         state_key = f"rating_val_{item_type}_{item_id}_{user_id}"
 
         def _make_cb(star_n):
             def _cb():
-                new_val = 0.0 if star_n == current else float(star_n)
+                new_val = 0.0 if float(star_n) == current else float(star_n)
                 previous = st.session_state.get(state_key, current)
                 st.session_state[state_key] = new_val
                 if _setter(item_type)(user_id, item_id, new_val):
@@ -224,22 +202,29 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                     st.session_state[state_key] = previous
             return _cb
 
-        with st.container(key=wrap_key):
-            # One explicit, deterministic rule per star — filled if its
-            # index is <= the saved rating, unfilled otherwise.
-            cell_fill_rules = "\n".join(
-                f'.st-key-{wrap_key}_cell_{i} button::before {{ '
-                f'background-color: {GREEN if i <= current else "rgba(255,255,255,0.22)"} !important; }}'
-                for i in range(1, 11)
+        # Υπολογισμός ποσοστού γεμίσματος (linear-gradient) για κάθε αστέρι!
+        cell_fill_rules_list = []
+        for i in range(1, 11):
+            fill_pct = max(0.0, min(1.0, current - (i - 1))) * 100
+            if fill_pct == 100:
+                bg = f"{GREEN}"
+            elif fill_pct == 0:
+                bg = "rgba(255,255,255,0.22)"
+            else:
+                bg = f"linear-gradient(90deg, {GREEN} {fill_pct}%, rgba(255,255,255,0.22) {fill_pct}%)"
+                
+            cell_fill_rules_list.append(
+                f'.st-key-{wrap_key}_cell_{i} button::before {{ background: {bg} !important; }}'
             )
+        cell_fill_rules = "\n".join(cell_fill_rules_list)
 
+        with st.container(key=wrap_key):
             st.markdown(f"""
             <style>
-            /* Σφραγίζουμε τη χαραμάδα και κρύβουμε τη σκιά της πάνω κάρτας */
             div.element-container:has(> .st-key-{wrap_key}) {{
-                margin-top: -0.35rem !important; /* Μεγαλώσαμε το τράβηγμα για να κλείσει 100% η τρύπα */
+                margin-top: -0.35rem !important;
                 position: relative !important;
-                z-index: 10 !important; /* Καβαλάει τη σκιά της πάνω κάρτας και την κρύβει κάτω της */
+                z-index: 10 !important;
             }}
 
             .st-key-{wrap_key} {{
@@ -254,7 +239,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 padding: 4px 1.5rem 10px !important;
                 margin: 0 !important;
                 width: 100% !important;
-                /* ΜΟΝΟ χρώματα στο transition, ΟΧΙ transform! */
                 transition: background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease !important;
             }}
             .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] {{
@@ -293,7 +277,7 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 content: "";
                 position: absolute;
                 inset: 0;
-                background-color: rgba(255,255,255,0.22);
+                background: rgba(255,255,255,0.22);
                 -webkit-mask-image: url("{_STAR_SVG_DATAURI}");
                 mask-image: url("{_STAR_SVG_DATAURI}");
                 -webkit-mask-size: contain;
@@ -302,10 +286,10 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 mask-repeat: no-repeat;
                 -webkit-mask-position: center;
                 mask-position: center;
-                transition: background-color 0.12s ease;
+                transition: background 0.12s ease;
             }}
             .st-key-{wrap_key} button:hover {{ transform: scale(1.22) !important; }}
-            .st-key-{wrap_key} button:hover::before {{ background-color: {GREEN}cc !important; }}
+            .st-key-{wrap_key} button:hover::before {{ background: {GREEN}cc !important; }}
             {cell_fill_rules}
 
             @media (max-width: 768px) {{
@@ -331,6 +315,16 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 with col:
                     with st.container(key=f"{wrap_key}_cell_{i}"):
                         st.button("★", key=f"{wrap_key}_star_{i}", on_click=_make_cb(i), help=f"{i}/10")
+    # Lightweight stand-in for the full R namespace, so list-card helpers
+    # defined further down in this closure (render_ratings_dashboard,
+    # render_full_ratings_list) can pass "R=" into render_list_v2's
+    # quick_rate feature without waiting for the full SimpleNamespace at
+    # the bottom of this function to exist.
+    _qr_R = SimpleNamespace(
+        render_compact_star_rating=render_compact_star_rating,
+        bump_song=bump_song,
+        bump_album=bump_album
+    )
 
     # ==============================================================
     # FULL DETAIL-PAGE WIDGET
@@ -477,36 +471,61 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
     # DASHBOARD QUERIES
     # ==============================================================
     def _distribution(user_id: int, kind: str) -> pd.DataFrame:
-        table = "song_ratings" if kind == "song" else "album_ratings"
-        # Bucket to the nearest 0.5 for the chart regardless of the input
-        # precision (albums can be rated to 0.1, but we still want a
-        # readable ~20-bar distribution rather than 100 tiny bars).
-        df = run_query(f"""
-            SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n FROM {table}
-            WHERE user_id = :user_id GROUP BY 1 ORDER BY 1;
-        """, {"user_id": user_id})
+        if kind == "song":
+            sql = """
+                WITH unique_ratings AS (
+                    SELECT DISTINCT ON (sr.song_id) sr.rating
+                    FROM song_ratings sr
+                    JOIN songs s ON s.id = sr.song_id
+                    WHERE sr.user_id = :user_id
+                    ORDER BY sr.song_id
+                )
+                SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n 
+                FROM unique_ratings
+                GROUP BY 1 ORDER BY 1;
+            """
+        else:
+            sql = """
+                WITH unique_ratings AS (
+                    SELECT DISTINCT ON (ar.album_id) ar.rating
+                    FROM album_ratings ar
+                    JOIN albums a ON a.id = ar.album_id
+                    WHERE ar.user_id = :user_id
+                    ORDER BY ar.album_id
+                )
+                SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n 
+                FROM unique_ratings
+                GROUP BY 1 ORDER BY 1;
+            """
+        df = run_query(sql, {"user_id": user_id})
         buckets = [round(i * RATING_STEP, 1) for i in range(1, int(RATING_MAX / RATING_STEP) + 1)]
         full = pd.DataFrame({"rating": buckets})
         return full.merge(df, on="rating", how="left").fillna(0)
-
+    
     def _rating_stats(user_id: int, kind: str) -> dict:
-        """Full statistical profile for the dashboard, computed in a
-        SINGLE roundtrip: central tendency (mean/median), spread (std),
-        shape (skew), a month-over-month rating-drift signal (are you
-        inflating or deflating your own ratings over time?), plus the
-        legacy headline counts (total/perfect/this-month).
-
-        We pull the raw (rating, updated_at) pairs once and derive
-        everything client-side with pandas/numpy rather than stacking
-        correlated subqueries in SQL — for a per-user ratings table
-        (hundreds to low-thousands of rows) this is both faster to
-        write/maintain and just as fast to run, and it keeps every
-        formula auditable in one place instead of buried in SQL.
-        """
-        table = "song_ratings" if kind == "song" else "album_ratings"
-        df = run_query(f"""
-            SELECT rating, updated_at FROM {table} WHERE user_id = :user_id;
-        """, {"user_id": user_id})
+        if kind == "song":
+            sql = """
+                WITH unique_ratings AS (
+                    SELECT DISTINCT ON (sr.song_id) sr.rating, sr.updated_at
+                    FROM song_ratings sr
+                    JOIN songs s ON s.id = sr.song_id
+                    WHERE sr.user_id = :user_id
+                    ORDER BY sr.song_id
+                )
+                SELECT rating, updated_at FROM unique_ratings;
+            """
+        else:
+            sql = """
+                WITH unique_ratings AS (
+                    SELECT DISTINCT ON (ar.album_id) ar.rating, ar.updated_at
+                    FROM album_ratings ar
+                    JOIN albums a ON a.id = ar.album_id
+                    WHERE ar.user_id = :user_id
+                    ORDER BY ar.album_id
+                )
+                SELECT rating, updated_at FROM unique_ratings;
+            """
+        df = run_query(sql, {"user_id": user_id})
 
         empty = {
             "total": 0, "avg": 0.0, "median": 0.0, "std": 0.0, "skew": 0.0,
@@ -514,8 +533,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             "trend_delta": None, "recent_avg": None, "prior_avg": None,
             "consistency": 0.0,
         }
-        if df.empty:
-            return empty
 
         ratings = pd.to_numeric(df["rating"], errors="coerce").dropna()
         total = int(len(ratings))
@@ -540,11 +557,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         prior_avg = float(ratings[prior_mask].mean()) if prior_n >= MIN_N_FOR_TREND_WINDOW else None
         trend_delta = (recent_avg - prior_avg) if (recent_avg is not None and prior_avg is not None) else None
 
-        # Consistency score (0-100): how tightly ratings cluster around
-        # the mean, relative to the maximum possible spread on this scale.
-        # The theoretical max std for a value bounded in [0, RATING_MAX]
-        # is RATING_MAX/2 (all mass split between the two extremes), so
-        # that's the natural denominator for a 0-100 normalization.
         max_plausible_std = RATING_MAX / 2
         consistency = max(0.0, min(100.0, (1 - (std / max_plausible_std)) * 100)) if max_plausible_std else 0.0
 
@@ -557,21 +569,41 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         }
 
     def _rating_trend_over_time(user_id: int, kind: str) -> pd.DataFrame:
-        """Monthly average rating — the raw series behind the
-        inflation/deflation trend line chart."""
-        table = "song_ratings" if kind == "song" else "album_ratings"
-        return run_query(f"""
-            SELECT DATE_TRUNC('month', updated_at) AS period,
-                   AVG(rating) AS avg_rating, COUNT(*) AS n
-            FROM {table}
-            WHERE user_id = :user_id
-            GROUP BY 1 ORDER BY 1;
-        """, {"user_id": user_id})
+        if kind == "song":
+            sql = """
+                WITH unique_ratings AS (
+                    SELECT DISTINCT ON (sr.song_id) sr.rating, sr.updated_at
+                    FROM song_ratings sr
+                    JOIN songs s ON s.id = sr.song_id
+                    WHERE sr.user_id = :user_id
+                    ORDER BY sr.song_id
+                )
+                SELECT DATE_TRUNC('month', updated_at) AS period,
+                       AVG(rating) AS avg_rating, COUNT(*) AS n
+                FROM unique_ratings
+                GROUP BY 1 ORDER BY 1;
+            """
+        else:
+            sql = """
+                WITH unique_ratings AS (
+                    SELECT DISTINCT ON (ar.album_id) ar.rating, ar.updated_at
+                    FROM album_ratings ar
+                    JOIN albums a ON a.id = ar.album_id
+                    WHERE ar.user_id = :user_id
+                    ORDER BY ar.album_id
+                )
+                SELECT DATE_TRUNC('month', updated_at) AS period,
+                       AVG(rating) AS avg_rating, COUNT(*) AS n
+                FROM unique_ratings
+                GROUP BY 1 ORDER BY 1;
+            """
+        return run_query(sql, {"user_id": user_id})
 
     def _hall_of_fame_songs(user_id: int, limit: int = 20) -> pd.DataFrame:
         return run_query("""
             SELECT DISTINCT ON (so.id)
-                   so.id AS song_id, so.title AS song_title, a.name AS main_artist,
+                   so.id AS song_id, so.title AS song_title,
+                   COALESCE(a.name, 'Unknown') AS main_artist,
                    so.image_url, sr.rating, sr.updated_at
             FROM song_ratings sr
             JOIN songs so ON so.id = sr.song_id
@@ -597,6 +629,50 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             ["rating", "updated_at"], ascending=[False, False]
         ).head(limit).reset_index(drop=True)
 
+    def _all_rated_songs(user_id: int, search: str = None) -> pd.DataFrame:
+        """Every rated song, unpaginated — backs the 'See Full Ranking' page."""
+        sql = """
+            SELECT DISTINCT ON (so.id)
+                   so.id AS song_id, so.title AS song_title,
+                   COALESCE(a.name, 'Unknown') AS main_artist,
+                   so.image_url, sr.rating, sr.updated_at
+            FROM song_ratings sr
+            JOIN songs so ON so.id = sr.song_id
+            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            LEFT JOIN artists a ON a.id = sa.artist_id
+            WHERE sr.user_id = :user_id
+        """
+        params = {"user_id": user_id}
+        if search:
+            sql += " AND (so.title ILIKE :search OR a.name ILIKE :search)"
+            params["search"] = f"%{search}%"
+        sql += " ORDER BY so.id, sa.is_feature ASC NULLS LAST"
+        df = run_query(sql, params)
+        if df.empty:
+            return df
+        return df.sort_values(["rating", "updated_at"], ascending=[False, False]).reset_index(drop=True)
+
+    def _all_rated_albums(user_id: int, search: str = None) -> pd.DataFrame:
+        """Every rated album, unpaginated — backs the 'See Full Ranking' page."""
+        sql = """
+            SELECT DISTINCT ON (al.id)
+                   al.id AS album_id, al.title AS album_title,
+                   (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = al.id) AS image_url,
+                   ar.rating, ar.updated_at
+            FROM album_ratings ar
+            JOIN albums al ON al.id = ar.album_id
+            WHERE ar.user_id = :user_id
+        """
+        params = {"user_id": user_id}
+        if search:
+            sql += " AND al.title ILIKE :search"
+            params["search"] = f"%{search}%"
+        sql += " ORDER BY al.id"
+        df = run_query(sql, params)
+        if df.empty:
+            return df
+        return df.sort_values(["rating", "updated_at"], ascending=[False, False]).reset_index(drop=True)
+
     def _cross_analysis_songs(user_id: int, F: dict) -> pd.DataFrame:
         return run_query("""
             WITH stream_counts AS (
@@ -606,7 +682,8 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                 GROUP BY song_id
             )
             SELECT DISTINCT ON (so.id)
-                   so.id AS song_id, so.title AS song_title, a.name AS main_artist,
+                   so.id AS song_id, so.title AS song_title,
+                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
                    sr.rating, COALESCE(sc.streams, 0) AS streams
             FROM song_ratings sr
             JOIN songs so ON so.id = sr.song_id
@@ -618,16 +695,6 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         """, {**F, "user_id": user_id})
 
     def _engagement_metrics(df: pd.DataFrame) -> dict:
-        """Behavioral layer on top of the rating/streams cross-analysis:
-        - corr: Pearson correlation between rating and streams — how much
-          your taste (rating) tracks your habit (plays). Near 0 means you
-          rate independently of how often you actually listen.
-        - efficiency: rating earned per unit of log-scaled exposure
-          (rating / log1p(streams)) — a "value density" score that
-          surfaces songs delivering a lot of love for very little airplay,
-          without letting a single-digit stream count blow up to infinity
-          the way a raw rating/streams ratio would.
-        """
         if df.empty or len(df) < 3:
             return {"corr": None, "efficiency_top": pd.DataFrame()}
 
@@ -752,48 +819,9 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                       margin=dict(t=54, b=40, l=50, r=20))
 
     # ==============================================================
-    # HALL OF FAME ROW (ranked, matching render_list_v2's rank badges)
-    # ==============================================================
-    def _render_hof_row(row: pd.Series, item_type: str, user_id: int, subtitle: str, rank: int = None):
-        item_id = row["song_id"] if item_type == "song" else row["album_id"]
-        title = escape(str(row.get("song_title") or row.get("album_title")))[:50]
-        image_url = row.get("image_url")
-        radius = "50%" if item_type == "artist" else "8px"
-        art_html = (f'<img src="{image_url}" style="width:100%;height:100%;object-fit:cover;border-radius:{radius};">'
-                    if image_url and pd.notnull(image_url) and str(image_url).startswith("http") else "🎵")
-
-        rank_class = get_rank_class(rank) if rank else ""
-        rank_html = f'<div class="item-rank {rank_class}">{rank}</div>' if rank else ""
-
-        row_key = f"hof_row_{item_type}_{item_id}"
-        with st.container(key=row_key):
-            st.markdown(f"""
-            <style>
-            .st-key-{row_key} {{ padding: 6px 10px; border-radius: 10px; transition: background 0.2s ease; }}
-            .st-key-{row_key}:hover {{ background: rgba(255,255,255,0.03); }}
-            </style>
-            """, unsafe_allow_html=True)
-            c_rank, c_art, c_info, c_stars = st.columns([0.4, 0.5, 3.1, 2.0], vertical_alignment="center")
-            with c_rank:
-                st.markdown(rank_html, unsafe_allow_html=True)
-            with c_art:
-                st.markdown(f'<div style="width:40px;height:40px;border-radius:{radius};overflow:hidden;'
-                            f'display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);">{art_html}</div>',
-                            unsafe_allow_html=True)
-            with c_info:
-                st.markdown(f'<div style="font-weight:600;">{title}</div>'
-                            f'<div style="color:{TEXT_MID}; font-size:0.8rem;">{escape(subtitle)}</div>',
-                            unsafe_allow_html=True)
-            with c_stars:
-                st.markdown(f'<div style="text-align:right;">{star_bar_html(float(row["rating"]), size="1.2rem", glow=False)}</div>', unsafe_allow_html=True)
-
-    # ==============================================================
     # SMALL FORMATTING HELPERS
     # ==============================================================
     def _skew_label(skew: float) -> str:
-        # Positive skew: tail toward high ratings -> most ratings sit low
-        # with rare high outliers -> a harsh rater. Negative skew: tail
-        # toward low ratings -> most ratings sit high -> a generous rater.
         if skew > 0.5:
             return "Harsh Critic"
         if skew < -0.5:
@@ -808,6 +836,84 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         if trend_delta < -0.05:
             return {"value": f"📉 {trend_delta:.2f}"}
         return {"value": f"➡️ {trend_delta:+.2f}"}
+
+    def _fmt_rating(v) -> str:
+        return f"{float(v):g}/{RATING_MAX:g}"
+
+    def _fmt_rated_date(v) -> str:
+        return pd.to_datetime(v).strftime("%b %d, %Y") if pd.notnull(v) else "—"
+
+    # ==============================================================
+    # FULL RANKED LIST PAGE ("See Full Ranking" destination)
+    # ==============================================================
+    def render_full_ratings_list(user_id: int, kind_key: str):
+        assert kind_key in ("song", "album")
+        label = "Songs" if kind_key == "song" else "Albums"
+
+        st.markdown(
+            f'<div class="section-header" style="margin-top:0;"><span class="icon">🏆</span>All Rated {label}</div>',
+            unsafe_allow_html=True
+        )
+
+        col_search, col_sort, col_limit = st.columns([3, 1, 1])
+        search_term = col_search.text_input(
+            f"🔍 Search rated {label.lower()}...",
+            placeholder=f"e.g. search a {'song or artist' if kind_key == 'song' else 'album'}...",
+            label_visibility="collapsed", key=f"search_full_ratings_{kind_key}",
+        )
+        sort_by = col_sort.selectbox(
+            "Sort", ["Highest Rated", "Recently Rated"], index=0,
+            label_visibility="collapsed", key=f"sort_full_ratings_{kind_key}",
+        )
+        display_limit = col_limit.selectbox(
+            "Limit", [50, 100, 200, "All"], index=0,
+            label_visibility="collapsed", key=f"limit_full_ratings_{kind_key}",
+        )
+
+        df = (_all_rated_songs(user_id, search_term) if kind_key == "song"
+              else _all_rated_albums(user_id, search_term))
+
+        if df.empty:
+            st.markdown(
+                f'<div class="empty-state"><div class="icon">📭</div>No rated {label.lower()} found</div>',
+                unsafe_allow_html=True
+            )
+            return
+
+        if sort_by == "Recently Rated":
+            df = df.sort_values("updated_at", ascending=False).reset_index(drop=True)
+        # "Highest Rated" is already the sort order returned by the query helpers.
+
+        if display_limit != "All":
+            df = df.head(int(display_limit))
+
+        df = df.reset_index(drop=True)
+        df["global_rank"] = df.index + 1
+
+        qr = dict(
+            quick_rate=st.session_state.get("quick_rate_mode", False),
+            R=_qr_R, user_id=user_id, rating_scale=int(RATING_MAX),
+        )
+
+        if kind_key == "song":
+            render_list_v2(
+                df, "song_title", "main_artist", "rating", "updated_at",
+                id_col="song_id", link_type="song", rank_col="global_rank",
+                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
+                stat1_label="Rating", stat1_fmt=_fmt_rating,
+                stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
+                **qr,
+            )
+        else:
+            df["subtitle"] = "Album"
+            render_list_v2(
+                df, "album_title", "subtitle", "rating", "updated_at",
+                id_col="album_id", link_type="album", rank_col="global_rank",
+                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
+                stat1_label="Rating", stat1_fmt=_fmt_rating,
+                stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
+                **qr,
+            )
 
     # ==============================================================
     # DASHBOARD RENDER
@@ -852,7 +958,8 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         dist_df = _distribution(user_id, kind_key)
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         st.plotly_chart(_chart_distribution(dist_df, stats["avg"], stats["median"]), use_container_width=True,
-                         config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                         config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
+                         key=f"chart_dist_{kind_key}")
         st.markdown('</div>', unsafe_allow_html=True)
 
         # --- Rating trend over time (inflation / deflation) ---
@@ -861,18 +968,48 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🌊</span>Rating Trend Over Time</div>', unsafe_allow_html=True)
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
             st.plotly_chart(_chart_rating_trend(trend_df), use_container_width=True,
-                             config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                         config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
+                         key=f"chart_trend_{kind_key}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # --- Hall of Fame, ranked ---
+        # --- Hall of Fame, ranked — now the real, clickable list card ---
         st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
         hof_df = _hall_of_fame_songs(user_id) if kind_key == "song" else _hall_of_fame_albums(user_id)
         if hof_df.empty:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Nothing rated yet</div>', unsafe_allow_html=True)
         else:
-            for i, row in hof_df.iterrows():
-                subtitle = (row.get("main_artist") or "Unknown") if kind_key == "song" else "Album"
-                _render_hof_row(row, kind_key, user_id, subtitle, rank=i + 1)
+            hof_df = hof_df.copy()
+            hof_df["global_rank"] = hof_df.index + 1
+            qr = dict(
+                quick_rate=st.session_state.get("quick_rate_mode", False),
+                R=_qr_R, user_id=user_id, rating_scale=int(RATING_MAX),
+            )
+            if kind_key == "song":
+                render_list_v2(
+                    hof_df, "song_title", "main_artist", "rating", "updated_at",
+                    id_col="song_id", link_type="song", rank_col="global_rank",
+                    stat1_label="Rating", stat1_fmt=_fmt_rating,
+                    stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
+                    **qr,
+                )
+            else:
+                hof_df["subtitle"] = "Album"
+                render_list_v2(
+                    hof_df, "album_title", "subtitle", "rating", "updated_at",
+                    id_col="album_id", link_type="album", rank_col="global_rank",
+                    stat1_label="Rating", stat1_fmt=_fmt_rating,
+                    stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
+                    **qr,
+                )
+
+            full_href = build_filtered_href("ratings_full", kind_key)
+            st.markdown(
+                f'<a href="{full_href}" target="_self" style="text-decoration:none;">'
+                f'<div class="back-btn" style="display:inline-flex; margin-top: 6px;">'
+                f'See Full Ranking ({stats["total"]:,}) →'
+                f'</div></a>',
+                unsafe_allow_html=True
+            )
 
         # --- Hidden Gems vs Guilty Pleasures + engagement metrics (songs only) ---
         if kind_key == "song":
@@ -887,8 +1024,10 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             else:
                 metrics = _engagement_metrics(cross_df)
                 st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                # (περίπου γραμμή 911)
                 st.plotly_chart(_chart_cross_analysis(cross_df, metrics["corr"]), use_container_width=True,
-                                 config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                                 config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
+                                 key=f"chart_cross_{kind_key}")                
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 eff_top = metrics["efficiency_top"]
@@ -904,18 +1043,30 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
                         f'for the least airplay.</div>',
                         unsafe_allow_html=True
                     )
-                    for _, row in eff_top.iterrows():
-                        _render_hof_row(row, "song", user_id, row.get("main_artist") or "Unknown")
+                    eff_df = eff_top.reset_index(drop=True)
+                    eff_df["global_rank"] = eff_df.index + 1
+                    render_list_v2(
+                        eff_df, "song_title", "main_artist", "rating", "efficiency",
+                        id_col="song_id", link_type="song", rank_col="global_rank",
+                        stat1_label="Rating", stat1_fmt=_fmt_rating,
+                        stat2_label="Value Density", stat2_fmt=lambda v: f"{float(v):.2f}",
+                        quick_rate=st.session_state.get("quick_rate_mode", False),
+                        R=_qr_R, user_id=user_id, rating_scale=int(RATING_MAX),
+                        key_prefix="eff_"
+                    )
 
     return SimpleNamespace(
         set_song_rating=set_song_rating,
         set_album_rating=set_album_rating,
         get_song_rating=get_song_rating,
         get_album_rating=get_album_rating,
+        bump_song=bump_song,     # <--- ΠΡΟΣΘΗΚΗ
+        bump_album=bump_album,   # <--- ΠΡΟΣΘΗΚΗ
         render_star_rating=render_star_rating,
         render_compact_star_rating=render_compact_star_rating,
         rating_chip_html=rating_chip_html,
         star_bar_html=star_bar_html,
         render_ratings_dashboard=render_ratings_dashboard,
+        render_full_ratings_list=render_full_ratings_list,
         preload_ratings=preload_ratings,
     )

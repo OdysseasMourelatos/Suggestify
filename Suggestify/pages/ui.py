@@ -17,8 +17,6 @@ def inject_counter_script():
     (function() {
         const doc = window.parent.document;
         function animate(el) {
-            if (el.dataset.animated) return;
-            el.dataset.animated = "1";
             const target = parseFloat(el.dataset.target || "0");
             const decimals = parseInt(el.dataset.decimals || "0");
             const prefix = el.dataset.prefix || "";
@@ -33,8 +31,23 @@ def inject_counter_script():
             }
             requestAnimationFrame(frame);
         }
-        function scan() { doc.querySelectorAll('.count-up:not([data-animated])').forEach(animate); }
-        new MutationObserver(scan).observe(doc.body, {childList: true, subtree: true});
+        function scan() { 
+            doc.querySelectorAll('.count-up').forEach(el => {
+                const currentTarget = el.dataset.target || "0";
+                // Κάνει animate ΜΟΝΟ αν ο νέος στόχος είναι διαφορετικός από τον προηγούμενο
+                if (el.dataset.animatedTarget !== currentTarget) {
+                    el.dataset.animatedTarget = currentTarget;
+                    animate(el);
+                }
+            }); 
+        }
+        // Προσθέσαμε attributes: true για να "ακούει" τις αλλαγές όταν πατάς το toggle!
+        new MutationObserver(scan).observe(doc.body, {
+            childList: true, 
+            subtree: true, 
+            attributes: true, 
+            attributeFilter: ['data-target']
+        });
         scan();
     })();
     </script>
@@ -201,7 +214,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                    reveal_delay_base: float = 0.5, reveal_delay_step: float = 0.2,
                    quick_rate: bool = False, R=None, user_id: int = None, rating_scale: int = 10,
                    stat1_label: str = "Streams", stat2_label: str = "Time",
-                   stat1_fmt=None, stat2_fmt=None):
+                   stat1_fmt=None, stat2_fmt=None, key_prefix: str = ""):
     current_tab = st.query_params.get("tab", "overview")
     _fmt1 = stat1_fmt or (lambda v: f"{int(v):,}")
     _fmt2 = stat2_fmt or (lambda v: f"{float(v):.1f}h")
@@ -214,6 +227,9 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         streams = _fmt1(row[streams_col])
         hours = _fmt2(row[hours_col])
         can_navigate = link_type and id_col and id_col in row.index
+
+        # --- ΔΙΟΡΘΩΣΗ: Ορίζουμε το item_id ΕΔΩ ΠΑΝΩ, πριν το χρησιμοποιήσουμε! ---
+        item_id = str(row[id_col]) if can_navigate else f"idx_{i}"
 
         image_url = row.get(image_col) if image_col in row else None
         if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
@@ -232,9 +248,15 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         has_rating = quick_rate and link_type in ("song", "album") and R is not None and user_id is not None
         item_class = "list-item-has-rating" if has_rating else ""
 
+        # Τώρα το bump_key ξέρει τι είναι το item_id
+        bump_key = f"bump_{key_prefix}{link_type}_{item_id}"
+
         card_html = f'''
         <div class="list-item {reveal_class} {item_class}" {reveal_style}>
-            <div class="item-rank {rank_class}">{rank}</div>
+            <div class="item-rank-container">
+                <div class="item-rank {rank_class}">{rank}</div>
+                <div class="bump-overlay" id="{bump_key}_anchor"></div>
+            </div>
             <div class="item-art">{art_html}</div>
             <div class="item-info">
                 <div class="item-title">{title}</div>
@@ -255,7 +277,6 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         '''
 
         if can_navigate:
-            item_id = str(row[id_col])
             p_view = st.query_params.get("view")
             p_id = st.query_params.get("id")
             p_preset = st.query_params.get("preset")
@@ -271,10 +292,26 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             if p_user: href += f"&user={p_user}"
 
             if has_rating:
-                item_wrap_key = f"itemwrap_{link_type}_{item_id}"
-                crate_key = f"crate_{link_type}_{item_id}_{user_id}"
+                item_wrap_key = f"itemwrap_{key_prefix}{link_type}_{item_id}"
+                crate_key = f"crate_{key_prefix}{link_type}_{item_id}_{user_id}"
+                
+                # --- Callback για το Bump ---
+                def _do_bump(t=link_type, i=item_id):
+                    if t == "song": R.bump_song(user_id, i)
+                    else: R.bump_album(user_id, i)
+                    st.toast(f"Pushed to Top! 🚀", icon="⬆️")
+                # -----------------------------
+
                 st.markdown(f"""
                 <style>
+                /* CSS για το Bump Button */
+                .item-rank-container {{ position: relative; display: flex; align-items: center; justify-content: center; width: 40px; }}
+                .st-key-{bump_key} {{ position: absolute !important; left: -10px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.2s; z-index: 20; }}
+                .st-key-{item_wrap_key}:hover .st-key-{bump_key} {{ opacity: 1; }}
+                .st-key-{bump_key} button {{ background: rgba(29,185,84,0.15) !important; border: 1px solid {GREEN} !important; border-radius: 50% !important; width: 26px !important; height: 26px !important; padding: 0 !important; color: {GREEN} !important; display: flex !important; align-items: center !important; justify-content: center !important; transition: all 0.2s !important; }}
+                .st-key-{bump_key} button:hover {{ background: {GREEN} !important; color: #000 !important; transform: scale(1.1) !important; }}
+                .st-key-{item_wrap_key}:hover .item-rank {{ opacity: 0.1; }}
+                
                 .st-key-{item_wrap_key} {{ 
                     margin-bottom: 0.6rem; 
                     transition: transform 0.22s ease !important;
@@ -305,8 +342,12 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
                 """, unsafe_allow_html=True)
 
                 with st.container(key=item_wrap_key):
+                    # Βάζουμε το κουμπί bump πριν την κάρτα
+                    with st.container(key=bump_key):
+                        st.button("↑", key=f"btn_{bump_key}", on_click=_do_bump, help="Push to Top")
+                    
                     st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-                    R.render_compact_star_rating(link_type, item_id, user_id, rating_scale)
+                    R.render_compact_star_rating(link_type, item_id, user_id, rating_scale, key_prefix=key_prefix)
             else:
                 st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
         else:

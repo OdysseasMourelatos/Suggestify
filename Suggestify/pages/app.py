@@ -1247,7 +1247,9 @@ if detail_type and detail_id:
                 )
         except ValueError:
             pass
-
+    elif detail_type == "ratings_full":
+            kind_key = detail_id if detail_id in ("song", "album") else "song"
+            R.render_full_ratings_list(selected_user_id, kind_key)
 elif current_tab == "overview":
 
     if st.session_state.date_preset == "wrapped":
