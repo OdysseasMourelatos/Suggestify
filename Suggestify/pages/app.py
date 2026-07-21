@@ -30,13 +30,15 @@ load_css()
 inject_counter_script()
 inject_custom_css()
 
+# Η μνήμη του server που "πεθαίνει" μόλις κάνεις restart το app (streamlit run app.py)
+@st.cache_resource
+def get_qr_global_state():
+    return {"mode": False}
+
+qr_global = get_qr_global_state()
+
 if "quick_rate_mode" not in st.session_state:
-    # Διαβάζουμε από τοπικό αρχείο για να μην χάνεται ΠΟΤΕ στα hard reloads
-    try:
-        with open("qr_state.txt", "r") as f:
-            st.session_state.quick_rate_mode = (f.read().strip() == "1")
-    except FileNotFoundError:
-        st.session_state.quick_rate_mode = (st.query_params.get("qr") == "1")
+    st.session_state.quick_rate_mode = qr_global["mode"]
 
 if st.session_state.quick_rate_mode:
     st.query_params["qr"] = "1"
@@ -92,8 +94,9 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             ORDER BY streams DESC LIMIT 10
         """, {**F, **extra_params})
         if not df_tracks.empty:
+            R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
             render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
-
+            
             redirect_filters = {}
             if "month_val" in extra_params: redirect_filters["month"] = int(extra_params["month_val"])
             if "hour_val" in extra_params: redirect_filters["hour"] = int(extra_params["hour_val"])
@@ -168,10 +171,12 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         """, {**F, **extra_params})
         if not df_albums.empty:
             df_albums["sub"] = "Album"
+            R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
             render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album", **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
 
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     ch1, ch2, ch3 = st.columns(3)
     
@@ -372,7 +377,7 @@ with col_share:
 
         col_a, col_b = st.columns(2)
 
-        #Καρφώνουμε το κουμπί του Rating ΜΟΝΙΜΑ στην αριστερή θέση (col_a)
+        # Καρφώνουμε το κουμπί του Rating ΜΟΝΙΜΑ στην αριστερή θέση (col_a)
         with col_a:
             with st.container(key="quick_rate_toggle"):
                 rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
@@ -382,12 +387,8 @@ with col_share:
                     new_mode = not st.session_state.quick_rate_mode
                     st.session_state.quick_rate_mode = new_mode
                     
-                    # Γράφουμε κατευθείαν την επιλογή στο αρχείο!
-                    try:
-                        with open("qr_state.txt", "w") as f:
-                            f.write("1" if new_mode else "0")
-                    except:
-                        pass
+                    # Αποθήκευση στη μνήμη του server (ώστε να επιβιώνει απ' τα links!)
+                    qr_global["mode"] = new_mode
 
                     if new_mode:
                         st.query_params["qr"] = "1"
@@ -729,6 +730,7 @@ if detail_type and detail_id:
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
+                    R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
                     render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                     
                     if st.button("See Full List →", key=f"btn_full_tracks_{detail_id}", use_container_width=True):
@@ -757,6 +759,7 @@ if detail_type and detail_id:
                 
                 if not df_albums.empty:
                     df_albums["subtitle"] = "Album"
+                    R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
                     render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album", **qr_kwargs)
                     
                     if st.button("See Full List →", key=f"btn_full_albums_{detail_id}", use_container_width=True):
@@ -972,10 +975,10 @@ if detail_type and detail_id:
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
+                    R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
                     render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                 else:
                     st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
-                    
             with c_right:
                 st.markdown('<div class="chart-container" style="margin-top: 0;"><div class="chart-title">📈 Top 5 Tracks Evolution</div>', unsafe_allow_html=True)
                 df_album_trend = run_query("""
@@ -1101,6 +1104,7 @@ if detail_type and detail_id:
                     ORDER BY streams DESC LIMIT 10
                 """, {"genre": detail_id, **F})
                 if not df_tracks.empty:
+                    R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
                     render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                 else:
                     st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found</div>', unsafe_allow_html=True)
@@ -1108,8 +1112,7 @@ if detail_type and detail_id:
             with c2:
                 st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
                 df_artists = run_query(f"""
-                    SELECT a.id AS artist_id, a.name AS artist_name, MAX(a.image_url) AS image_url,
-                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+                    SELECT a.id AS artist_id, a.name AS artist_name, MAX(a.image_url) AS image_url,                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
                     LEFT JOIN albums al ON al.id = so.album_id
@@ -1143,6 +1146,7 @@ if detail_type and detail_id:
                 """, {"genre": detail_id, **F})
                 if not df_albums.empty:
                     df_albums["sub"] = "Album"
+                    R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
                     render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album", **qr_kwargs)
                 else:
                     st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
@@ -1413,6 +1417,7 @@ elif current_tab == "tracks":
         """, query_params)
         
         if not df_songs.empty:
+            R.preload_ratings(selected_user_id, "song", df_songs["song_id"].tolist())
             render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
                "song_id", "song", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
         else:
@@ -1435,6 +1440,7 @@ elif current_tab == "tracks":
         """, query_params)
 
         if not df_songs.empty:
+           R.preload_ratings(selected_user_id, "song", df_songs["song_id"].tolist())
            render_list_v2(df_songs, "song_title", "main_artist", "streams", "hours_played",
                "song_id", "song", rank_col="global_rank",
                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
@@ -1549,6 +1555,7 @@ elif current_tab == "albums":
         """, query_params)
         
         if not df_albums.empty:
+            R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
             render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
                "album_id", "album", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
 
@@ -1573,6 +1580,7 @@ elif current_tab == "albums":
         """, query_params)
 
         if not df_albums.empty:
+            R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
             render_list_v2(df_albums, "album_title", "artist_name", "streams", "hours_played",
                "album_id", "album", rank_col="global_rank",
                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)

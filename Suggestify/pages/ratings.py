@@ -89,6 +89,20 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
             st.session_state[state_key] = _getter(item_type)(user_id, item_id)
         return st.session_state[state_key]
 
+    _GET_SONG_BULK = "SELECT song_id AS item_id, rating FROM song_ratings WHERE user_id = :user_id AND song_id = ANY(:ids);"
+    _GET_ALBUM_BULK = "SELECT album_id AS item_id, rating FROM album_ratings WHERE user_id = :user_id AND album_id = ANY(:ids);"
+
+    def preload_ratings(user_id: int, item_type: str, item_ids: list) -> None:
+        assert item_type in ("song", "album")
+        ids = [i for i in dict.fromkeys(item_ids) if i is not None]
+        missing = [i for i in ids if f"rating_val_{item_type}_{i}_{user_id}" not in st.session_state]
+        if not missing:
+            return
+        sql = _GET_SONG_BULK if item_type == "song" else _GET_ALBUM_BULK
+        df = run_query(sql, {"user_id": user_id, "ids": missing})
+        found = dict(zip(df["item_id"], df["rating"])) if not df.empty else {}
+        for i in missing:
+            st.session_state[f"rating_val_{item_type}_{i}_{user_id}"] = float(found.get(i, 0.0))
     # ==============================================================
     # STATIC STAR BAR (For Chips, Hall of Fame rows, and the live preview)
     #
@@ -689,4 +703,5 @@ def init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TE
         rating_chip_html=rating_chip_html,
         star_bar_html=star_bar_html,
         render_ratings_dashboard=render_ratings_dashboard,
+        preload_ratings=preload_ratings,
     )
