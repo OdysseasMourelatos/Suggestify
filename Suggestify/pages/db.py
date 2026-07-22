@@ -18,7 +18,14 @@ def get_engine():
 def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
     with get_engine().connect() as conn:
         return pd.read_sql(text(sql), conn, params=params or {})
-    
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def run_rating_query(sql: str, params: dict | None = None) -> pd.DataFrame:
+    """Separate cache bucket for rating-dependent queries, so clearing it
+    after a rate/bump action doesn't wipe the KPI/chart/date-bounds cache too."""
+    with get_engine().connect() as conn:
+        return pd.read_sql(text(sql), conn, params=params or {})
+
 @st.cache_data(ttl=600, show_spinner=False)
 def get_date_bounds() -> tuple[datetime.date, datetime.date]:
     df = run_query("SELECT MIN(played_at)::date AS mn, MAX(played_at)::date AS mx FROM streams;")

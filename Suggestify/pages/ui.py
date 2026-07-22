@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
 import os
 import streamlit.components.v1 as components
 from html import escape
 from config import *
+from types import SimpleNamespace
+from urllib.parse import quote
+import uuid
 
 def counter_span(value: float, decimals: int = 0, prefix: str = "", suffix: str = "") -> str:
     return (
@@ -34,14 +39,12 @@ def inject_counter_script():
         function scan() { 
             doc.querySelectorAll('.count-up').forEach(el => {
                 const currentTarget = el.dataset.target || "0";
-                // Κάνει animate ΜΟΝΟ αν ο νέος στόχος είναι διαφορετικός από τον προηγούμενο
                 if (el.dataset.animatedTarget !== currentTarget) {
                     el.dataset.animatedTarget = currentTarget;
                     animate(el);
                 }
             }); 
         }
-        // Προσθέσαμε attributes: true για να "ακούει" τις αλλαγές όταν πατάς το toggle!
         new MutationObserver(scan).observe(doc.body, {
             childList: true, 
             subtree: true, 
@@ -104,14 +107,8 @@ def inject_custom_css():
     .list-item:hover .item-arrow {{ transform: translateX(5px); color: {GREEN}; }}
     .stat-value {{ transition: color 0.2s ease; }}
     
-    /* ΤΕΛΕΙΑ ΣΥΡΡΑΦΗ ΚΑΡΤΑΣ-ΑΣΤΕΡΙΩΝ */
-    a.custom-link:has(.list-item-has-rating) {{
-        margin-bottom: 0 !important;
-    }}
-    .list-item-has-rating {{
-        border-radius: 14px 14px 0 0 !important;
-        border-bottom: none !important;
-    }}
+    a.custom-link:has(.list-item-has-rating) {{ margin-bottom: 0 !important; }}
+    .list-item-has-rating {{ border-radius: 14px 14px 0 0 !important; border-bottom: none !important; }}
 
     .kpi-card {{ transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; animation: fadeSlideUp 0.5s ease both; }}
     .kpi-card:hover {{ transform: translateY(-5px); box-shadow: 0 12px 30px rgba(29,185,84,0.14); border-color: rgba(29,185,84,0.3); }}
@@ -182,6 +179,67 @@ def inject_custom_css():
         background: rgba(255, 255, 255, 0.1); color: #fff; padding: 2px 6px; 
         border-radius: 4px; font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; margin-left: 8px;
     }}
+    /* =========================================================
+       PURE HTML LIST ROWS: STARS, BUMP LINKS, HOVER STATES
+       ========================================================= */
+    .list-item-wrapper {{ margin-bottom: 0.6rem; transition: transform 0.22s ease; }}
+    .list-item-wrapper a.custom-link {{ margin-bottom: 0 !important; }}
+    .list-item-wrapper:hover {{ transform: translateX(6px); }}
+    .list-item-wrapper .list-item {{ transition: none !important; }}
+    .list-item-wrapper:hover .list-item {{ background: {CARD_HOVER} !important; border-color: {BORDER_HL} !important; box-shadow: none !important; }}
+    .list-item-wrapper:hover .crate-stars {{ background: #262626 !important; border-color: {BORDER_HL} !important; box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important; }}
+    .list-item-wrapper:hover .item-art {{ transform: scale(1.07) !important; }}
+    .list-item-wrapper:hover .item-arrow {{ transform: translateX(4px) !important; color: {GREEN} !important; }}
+
+    .item-rank-container {{ position: relative; display: flex; align-items: center; justify-content: center; width: 40px; }}
+
+    .bump-container {{
+        position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
+        opacity: 0; transition: opacity 0.2s ease; z-index: 20;
+        display: flex; flex-direction: column; gap: 2px;
+    }}
+    .list-item-wrapper:hover .bump-container {{ opacity: 1; }}
+    .list-item-wrapper:hover .item-rank {{ opacity: 0.05; }}
+
+    .bump-link {{
+        display: flex; align-items: center; justify-content: center;
+        width: 22px; height: 16px; background: rgba(29,185,84,0.12);
+        border: 1px solid {GREEN}; border-radius: 4px;
+        color: {GREEN}; font-size: 10px; line-height: 1; text-decoration: none !important;
+        transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }}
+    .bump-link:hover {{ background: {GREEN}; color: #000; transform: scale(1.15); }}
+
+    .crate-stars {{
+        display: flex; align-items: center; justify-content: center; gap: 2px;
+        background: #151515; backdrop-filter: blur(10px);
+        border: 1px solid {BORDER}; border-top: none;
+        border-radius: 0 0 14px 14px; padding: 4px 1.5rem 10px;
+        margin: -0.35rem 0 0 0; width: 100%; position: relative; z-index: 10;
+        transition: background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+    }}
+    .list-item-has-rating {{ border-radius: 14px 14px 0 0 !important; border-bottom: none !important; }}
+
+    .star-cell {{
+        display: block; width: 18px; height: 18px; margin: 0 auto;
+        position: relative; transition: transform 0.12s ease;
+    }}
+    .star-cell::before {{
+        content: ""; position: absolute; inset: 0;
+        background: linear-gradient(90deg, {GREEN} var(--fill, 0%), rgba(255,255,255,0.22) var(--fill, 0%));
+        -webkit-mask-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Cpath d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/%3E%3C/svg%3E');
+        mask-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Cpath d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/%3E%3C/svg%3E');
+        -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+        -webkit-mask-position: center; mask-position: center;
+        transition: background 0.12s ease;
+    }}
+    .star-cell:hover {{ transform: scale(1.22); }}
+    .star-cell:hover::before {{ background: rgba(29,185,84,0.8) !important; }}
+
+    @media (max-width: 768px) {{
+        .crate-stars {{ padding: 6px 0.8rem 8px; }}
+        .star-cell {{ width: 14px; height: 14px; }}
+    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -208,6 +266,18 @@ def build_filtered_href(view_type: str, id_val: str) -> str:
     if p_user: href += f"&user={p_user}"
     return href
 
+def build_base_qs() -> str:
+    """Query-string prefix carrying forward all current params except action params (rate_*, bump)."""
+    always_exclude = {"rate_type", "rate_id", "rate_val", "bump"}
+    params = st.query_params
+    tab = params.get("tab", "overview")
+    qs = f"?tab={tab}"
+    for key, val in params.items():
+        if key == "tab" or key in always_exclude:
+            continue
+        qs += f"&{key}={val}"
+    return qs
+
 def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: str, hours_col: str,
                    id_col: str = None, link_type: str = None, image_col: str = "image_url",
                    rank_col: str = None, reveal_top_n: int = 0,
@@ -219,6 +289,11 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
     _fmt1 = stat1_fmt or (lambda v: f"{int(v):,}")
     _fmt2 = stat2_fmt or (lambda v: f"{float(v):.1f}h")
 
+    has_rating_col = 'rating' in df.columns
+    base_qs = build_base_qs()
+
+    html_rows = []
+
     for i, row in df.iterrows():
         rank = int(row[rank_col]) if (rank_col and rank_col in row.index) else (i + 1)
         rank_class = get_rank_class(rank)
@@ -228,8 +303,15 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         hours = _fmt2(row[hours_col])
         can_navigate = link_type and id_col and id_col in row.index
 
-        # --- ΔΙΟΡΘΩΣΗ: Ορίζουμε το item_id ΕΔΩ ΠΑΝΩ, πριν το χρησιμοποιήσουμε! ---
         item_id = str(row[id_col]) if can_navigate else f"idx_{i}"
+
+        can_up, can_down = False, False
+        if can_navigate and has_rating_col:
+            my_rating = float(row['rating'])
+            if i > 0 and float(df.iloc[i-1]['rating']) == my_rating:
+                can_up = True
+            if i < len(df) - 1 and float(df.iloc[i+1]['rating']) == my_rating:
+                can_down = True
 
         image_url = row.get(image_col) if image_col in row else None
         if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
@@ -242,116 +324,75 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         if reveal_top_n > 0 and rank <= reveal_top_n:
             delay = reveal_delay_base + (rank - 1) * reveal_delay_step
             reveal_style = f'style="animation-delay: {delay:.1f}s;"'
-
         reveal_class = "list-item-reveal" if reveal_style else ""
 
         has_rating = quick_rate and link_type in ("song", "album") and R is not None and user_id is not None
         item_class = "list-item-has-rating" if has_rating else ""
 
-        # Τώρα το bump_key ξέρει τι είναι το item_id
-        bump_key = f"bump_{key_prefix}{link_type}_{item_id}"
+        bump_html = ""
+        show_arrows = rank <= 50
+        if can_navigate and has_rating_col and has_rating and show_arrows:
+            top_href = f"{base_qs}&bump={link_type}:{item_id}:top"
+            up_href = f"{base_qs}&bump={link_type}:{item_id}:up"
+            down_href = f"{base_qs}&bump={link_type}:{item_id}:down"
+            bump_buttons = ""
+            if can_up:
+                bump_buttons += f'<a href="{top_href}" target="_self" class="bump-link" title="Push to Top">⇈</a>'
+                bump_buttons += f'<a href="{up_href}" target="_self" class="bump-link" title="Move Up 1">▲</a>'
+            if can_down:
+                bump_buttons += f'<a href="{down_href}" target="_self" class="bump-link" title="Move Down 1">▼</a>'
+            if bump_buttons:
+                bump_html = f'<div class="bump-container">{bump_buttons}</div>'
 
-        card_html = f'''
-        <div class="list-item {reveal_class} {item_class}" {reveal_style}>
-            <div class="item-rank-container">
-                <div class="item-rank {rank_class}">{rank}</div>
-                <div class="bump-overlay" id="{bump_key}_anchor"></div>
-            </div>
-            <div class="item-art">{art_html}</div>
-            <div class="item-info">
-                <div class="item-title">{title}</div>
-                <div class="item-subtitle">{subtitle}</div>
-            </div>
-            <div class="item-stats">
-                <div class="stat">
-                    <div class="stat-value">{streams}</div>
-                    <div class="stat-label">{stat1_label}</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value green">{hours}</div>
-                    <div class="stat-label">{stat2_label}</div>
-                </div>
-            </div>
-            {"<div class='item-arrow'>→</div>" if can_navigate else ""}
-        </div>
-        '''
+        # Flattened HTML to prevent Streamlit from parsing it as a code block
+        card_core = (
+            f'<div class="list-item {reveal_class} {item_class}" {reveal_style}>'
+            f'<div class="item-rank-container">'
+            f'<div class="item-rank {rank_class}">{rank}</div>'
+            f'{bump_html}'
+            f'</div>'
+            f'<div class="item-art">{art_html}</div>'
+            f'<div class="item-info">'
+            f'<div class="item-title">{title}</div>'
+            f'<div class="item-subtitle">{subtitle}</div>'
+            f'</div>'
+            f'<div class="item-stats">'
+            f'<div class="stat">'
+            f'<div class="stat-value">{streams}</div>'
+            f'<div class="stat-label">{stat1_label}</div>'
+            f'</div>'
+            f'<div class="stat">'
+            f'<div class="stat-value green">{hours}</div>'
+            f'<div class="stat-label">{stat2_label}</div>'
+            f'</div>'
+            f'</div>'
+            f'{"<div class=\'item-arrow\'>→</div>" if can_navigate else ""}'
+            f'</div>'
+        )
 
         if can_navigate:
-            p_view = st.query_params.get("view")
-            p_id = st.query_params.get("id")
-            p_preset = st.query_params.get("preset")
-            p_start = st.query_params.get("start")
-            p_end = st.query_params.get("end")
-            p_user = st.query_params.get("user")
+            p_view, p_id, p_preset = st.query_params.get("view"), st.query_params.get("id"), st.query_params.get("preset")
+            p_start, p_end, p_user = st.query_params.get("start"), st.query_params.get("end"), st.query_params.get("user")
 
             href = f"?tab={current_tab}&view={link_type}&id={item_id}"
-            if p_view and p_id:  href += f"&pview={p_view}&pid={p_id}"
-            if p_preset:  href += f"&preset={p_preset}"
-            if p_start:  href += f"&start={p_start}"
-            if p_end:  href += f"&end={p_end}"
+            if p_view and p_id: href += f"&pview={p_view}&pid={p_id}"
+            if p_preset: href += f"&preset={p_preset}"
+            if p_start: href += f"&start={p_start}"
+            if p_end: href += f"&end={p_end}"
             if p_user: href += f"&user={p_user}"
 
-            if has_rating:
-                item_wrap_key = f"itemwrap_{key_prefix}{link_type}_{item_id}"
-                crate_key = f"crate_{key_prefix}{link_type}_{item_id}_{user_id}"
-                
-                # --- Callback για το Bump ---
-                def _do_bump(t=link_type, i=item_id):
-                    if t == "song": R.bump_song(user_id, i)
-                    else: R.bump_album(user_id, i)
-                    st.toast(f"Pushed to Top! 🚀", icon="⬆️")
-                # -----------------------------
-
-                st.markdown(f"""
-                <style>
-                /* CSS για το Bump Button */
-                .item-rank-container {{ position: relative; display: flex; align-items: center; justify-content: center; width: 40px; }}
-                .st-key-{bump_key} {{ position: absolute !important; left: -10px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.2s; z-index: 20; }}
-                .st-key-{item_wrap_key}:hover .st-key-{bump_key} {{ opacity: 1; }}
-                .st-key-{bump_key} button {{ background: rgba(29,185,84,0.15) !important; border: 1px solid {GREEN} !important; border-radius: 50% !important; width: 26px !important; height: 26px !important; padding: 0 !important; color: {GREEN} !important; display: flex !important; align-items: center !important; justify-content: center !important; transition: all 0.2s !important; }}
-                .st-key-{bump_key} button:hover {{ background: {GREEN} !important; color: #000 !important; transform: scale(1.1) !important; }}
-                .st-key-{item_wrap_key}:hover .item-rank {{ opacity: 0.1; }}
-                
-                .st-key-{item_wrap_key} {{ 
-                    margin-bottom: 0.6rem; 
-                    transition: transform 0.22s ease !important;
-                }}
-                .st-key-{item_wrap_key} a.custom-link {{ margin-bottom: 0 !important; }}
-                .st-key-{item_wrap_key}:hover {{
-                    transform: translateX(6px) !important;
-                }}
-                .st-key-{item_wrap_key} .list-item,
-                .st-key-{item_wrap_key} a.custom-link:hover .list-item,
-                .st-key-{item_wrap_key} .st-key-{crate_key},
-                .st-key-{item_wrap_key} .st-key-{crate_key}:hover {{
-                    transform: none !important;
-                }}
-                .st-key-{item_wrap_key}:hover .list-item {{
-                    background: {CARD_HOVER} !important;
-                    border-color: {BORDER_HL} !important;
-                    box-shadow: none !important;
-                }}
-                .st-key-{item_wrap_key}:hover .st-key-{crate_key} {{
-                    background: #262626 !important;
-                    border-color: {BORDER_HL} !important;
-                    box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important;
-                }}
-                .st-key-{item_wrap_key}:hover .item-art {{ transform: scale(1.07) !important; }}
-                .st-key-{item_wrap_key}:hover .item-arrow {{ transform: translateX(4px) !important; color: {GREEN} !important; }}
-                </style>
-                """, unsafe_allow_html=True)
-
-                with st.container(key=item_wrap_key):
-                    # Βάζουμε το κουμπί bump πριν την κάρτα
-                    with st.container(key=bump_key):
-                        st.button("↑", key=f"btn_{bump_key}", on_click=_do_bump, help="Push to Top")
-                    
-                    st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
-                    R.render_compact_star_rating(link_type, item_id, user_id, rating_scale, key_prefix=key_prefix)
-            else:
-                st.markdown(f'<a href="{href}" class="custom-link" target="_self">{card_html}</a>', unsafe_allow_html=True)
+            card_html = f'<a href="{href}" class="custom-link" target="_self">{card_core}</a>'
         else:
-            st.markdown(card_html, unsafe_allow_html=True)
+            card_html = card_core
+
+        star_html = ""
+        if has_rating:
+            star_html = R.compact_star_html(link_type, item_id, user_id, rating_scale, key_prefix=key_prefix)
+
+        html_rows.append(f'<div class="list-item-wrapper">{card_html}{star_html}</div>')
+
+    if html_rows:
+        st.markdown("\n".join(html_rows), unsafe_allow_html=True)
 
 def render_kpi_grid(kpis: list[dict]):
     cols = st.columns(len(kpis))

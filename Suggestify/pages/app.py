@@ -16,7 +16,7 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 from config import *
-from db import get_engine, run_query, get_date_bounds, get_release_year_bounds
+from db import get_engine, run_query, run_rating_query, get_date_bounds, get_release_year_bounds
 from charts import themed, chart_trend, chart_multi_trend, chart_heatmap, chart_bar, chart_year_bar, chart_donut
 from ui import (counter_span, inject_counter_script, load_css, inject_custom_css, get_rank_class, 
                 get_item_icon, build_filtered_href, render_list_v2, render_kpi_grid, 
@@ -45,7 +45,7 @@ if st.session_state.quick_rate_mode:
 else:
     st.query_params.pop("qr", None)
     
-R = init_ratings_module(get_engine, run_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
+R = init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
     header_df = run_query(f"""
@@ -288,6 +288,34 @@ st.query_params["user"] = str(selected_user_id)
 qr_kwargs = dict(quick_rate=st.session_state.quick_rate_mode, R=R, 
                  user_id=selected_user_id, rating_scale=10)
 
+# --- Action Handlers for HTML star/bump links ---
+_action_params = st.query_params
+if "rate_type" in _action_params and "rate_id" in _action_params and "rate_val" in _action_params:
+    r_type = _action_params["rate_type"]
+    r_id = _action_params["rate_id"]
+    r_val = float(_action_params["rate_val"])
+
+    ok = R.set_song_rating(selected_user_id, r_id, r_val) if r_type == "song" \
+        else R.set_album_rating(selected_user_id, r_id, r_val)
+
+    if ok:
+        st.toast(f"Rated {r_val:g}/10 ✓" if r_val > 0 else "Rating cleared", icon="⭐")
+
+    del st.query_params["rate_type"]
+    del st.query_params["rate_id"]
+    del st.query_params["rate_val"]
+    st.rerun()
+
+if "bump" in _action_params:
+    try:
+        b_type, b_id, b_action = _action_params["bump"].split(":")
+        R.move_item(selected_user_id, b_type, b_id, b_action)
+    except Exception:
+        st.toast("⚠️ Couldn't reorder item", icon="⚠️")
+
+    del st.query_params["bump"]
+    st.rerun()
+    
 if "start_date" not in st.session_state:
     st.session_state.start_date = get_parsed_date(params.get("start"), min_date)
     st.session_state.end_date = get_parsed_date(params.get("end"), max_date)
