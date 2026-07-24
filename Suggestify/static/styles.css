@@ -249,11 +249,10 @@ section.main > div.block-container {
 
 /* ─── FILTER BAR (User / Period / From / To) ───
    Its own row underneath the tab navigation, so nothing gets squeezed. */
-/* ─── FILTER BAR (User / Period / From / To) ───
-   Its own row underneath the tab navigation, so nothing gets squeezed. */
 .st-key-filter_bar_row {
-    margin-bottom: -1.5rem !important; /* Κλείνει το τεράστιο κενό κάτω από τη μπάρα */
+    margin-bottom: 0rem !important; /* Το επαναφέρουμε στο 0 για να μην καβαλάει το επόμενο div */
 }
+
 .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
     align-items: flex-start; /* ΑΛΛΑΓΗ: Αποτρέπει το input να καβαλάει το label */
     flex-wrap: wrap;
@@ -477,6 +476,7 @@ a.custom-link:hover .item-arrow {
     border: 1px solid VAR_GREEN;
     border-radius: 20px;
     padding: 2rem;
+    margin-top: 1rem !important; /* ΠΡΟΣΘΗΚΗ: Δίνει αέρα πάνω από το banner */
     margin-bottom: 2rem;
     position: relative;
     overflow: hidden;

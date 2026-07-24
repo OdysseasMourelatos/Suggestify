@@ -162,7 +162,7 @@ def hidden_rate_worker():
 
 hidden_rate_worker()
 
-def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
+def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None, redirect_info: dict = None):
     header_df = run_query(f"""
         SELECT COUNT(*) AS streams, ROUND(COALESCE(SUM(ms_played), 0) / 3600000.0, 2) AS hours,
                COUNT(DISTINCT song_id) AS unique_songs
@@ -187,6 +187,18 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
     )
 
     c1, c2, c3 = st.columns(3)
+    redirect_filters = redirect_info or {}
+
+    redirect_date_range = None
+    if "year" in redirect_filters:
+        y = int(redirect_filters["year"])
+        if "month" in redirect_filters:
+            m = int(redirect_filters["month"])
+            month_start = datetime.date(y, m, 1)
+            month_end = (pd.Timestamp(y, m, 1) + pd.offsets.MonthEnd(1)).date()
+            redirect_date_range = (month_start, month_end)
+        else:
+            redirect_date_range = (datetime.date(y, 1, 1), datetime.date(y, 12, 31))
 
     with c1:
         st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
@@ -208,35 +220,29 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             GROUP BY so.id, so.title, ta.all_artists, so.image_url
             ORDER BY streams DESC LIMIT 10
         """, {**F, **extra_params})
+        
         if not df_tracks.empty:
             R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
             render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
             
-            redirect_filters = {}
-            if "month_val" in extra_params: redirect_filters["month"] = int(extra_params["month_val"])
-            if "hour_val" in extra_params: redirect_filters["hour"] = int(extra_params["hour_val"])
-
-            redirect_date_range = None
-            if "year" in extra_params:
-                y = int(extra_params["year"])
-                if "month_val" in extra_params:
-                    m = int(extra_params["month_val"])
-                    month_start = datetime.date(y, m, 1)
-                    month_end = (pd.Timestamp(y, m, 1) + pd.offsets.MonthEnd(1)).date()
-                    redirect_date_range = (month_start, month_end)
-                else:
-                    redirect_date_range = (datetime.date(y, 1, 1), datetime.date(y, 12, 31))
-
             if redirect_filters or redirect_date_range:
                 if st.button("See Full List →", key=f"seefull_tracks_{type_label}_{title}_{extra_params}", use_container_width=True):
                     curr_user = st.query_params.get("user")
                     st.query_params.clear()
                     st.query_params["tab"] = "tracks"
                     if curr_user: st.query_params["user"] = curr_user
+                    
                     if "month" in redirect_filters:
                         st.session_state["filter_month_tracks"] = MONTH_NAMES[redirect_filters["month"]]
+                    elif "season" in redirect_filters:
+                        s_key = redirect_filters["season"]
+                        st.session_state["filter_month_tracks"] = f"{s_key} {SEASON_META[s_key]['icon']}"
                     if "hour" in redirect_filters:
                         st.session_state["filter_hour_tracks"] = f"{redirect_filters['hour']:02d}:00"
+                    elif "tod" in redirect_filters:
+                        tod_key = redirect_filters["tod"]
+                        st.session_state["filter_hour_tracks"] = f"{tod_key} ({TOD_META[tod_key]['range']})"
+                        
                     if redirect_date_range:
                         st.session_state.start_date = redirect_date_range[0]
                         st.session_state.end_date = redirect_date_range[1]
@@ -262,21 +268,29 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             GROUP BY a.id, a.name, a.image_url
             ORDER BY streams DESC LIMIT 10
         """, {**F, **extra_params})
+        
         if not df_artists.empty:
             df_artists["sub"] = "Artist"
             render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
             
-            # ---> ΝΕΟ REDIRECT ΓΙΑ ARTISTS <---
             if redirect_filters or redirect_date_range:
                 if st.button("See Full List →", key=f"seefull_artists_{type_label}_{title}_{extra_params}", use_container_width=True):
                     curr_user = st.query_params.get("user")
                     st.query_params.clear()
                     st.query_params["tab"] = "artists"
                     if curr_user: st.query_params["user"] = curr_user
+                    
                     if "month" in redirect_filters:
                         st.session_state["filter_month_artists"] = MONTH_NAMES[redirect_filters["month"]]
+                    elif "season" in redirect_filters:
+                        s_key = redirect_filters["season"]
+                        st.session_state["filter_month_artists"] = f"{s_key} {SEASON_META[s_key]['icon']}"  
                     if "hour" in redirect_filters:
                         st.session_state["filter_hour_artists"] = f"{redirect_filters['hour']:02d}:00"
+                    elif "tod" in redirect_filters:
+                        tod_key = redirect_filters["tod"]
+                        st.session_state["filter_hour_artists"] = f"{tod_key} ({TOD_META[tod_key]['range']})"
+                        
                     if redirect_date_range:
                         st.session_state.start_date = redirect_date_range[0]
                         st.session_state.end_date = redirect_date_range[1]
@@ -304,22 +318,30 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             GROUP BY al.id, al.title
             ORDER BY streams DESC LIMIT 10
         """, {**F, **extra_params})
+        
         if not df_albums.empty:
             df_albums["sub"] = "Album"
             R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
             render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album", **qr_kwargs)
             
-            # ---> ΝΕΟ REDIRECT ΓΙΑ ALBUMS <---
             if redirect_filters or redirect_date_range:
                 if st.button("See Full List →", key=f"seefull_albums_{type_label}_{title}_{extra_params}", use_container_width=True):
                     curr_user = st.query_params.get("user")
                     st.query_params.clear()
                     st.query_params["tab"] = "albums"
                     if curr_user: st.query_params["user"] = curr_user
+                    
                     if "month" in redirect_filters:
                         st.session_state["filter_month_albums"] = MONTH_NAMES[redirect_filters["month"]]
+                    elif "season" in redirect_filters:
+                        s_key = redirect_filters["season"]
+                        st.session_state["filter_month_albums"] = f"{s_key} {SEASON_META[s_key]['icon']}"
                     if "hour" in redirect_filters:
                         st.session_state["filter_hour_albums"] = f"{redirect_filters['hour']:02d}:00"
+                    elif "tod" in redirect_filters:
+                        tod_key = redirect_filters["tod"]
+                        st.session_state["filter_hour_albums"] = f"{tod_key} ({TOD_META[tod_key]['range']})"
+                        
                     if redirect_date_range:
                         st.session_state.start_date = redirect_date_range[0]
                         st.session_state.end_date = redirect_date_range[1]
@@ -330,8 +352,8 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
                     st.rerun()
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
+            
+    # Chart code below remains identical
     st.markdown("<br>", unsafe_allow_html=True)
     ch1, ch2, ch3 = st.columns(3)
     
@@ -643,8 +665,7 @@ MONTH_NAMES = {
     7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
 }
 
-MONTH_FILTER_OPTIONS = ["All Months"] + list(MONTH_NAMES.values())
-HOUR_FILTER_OPTIONS = ["All Hours"] + [f"{h:02d}:00" for h in range(24)]
+MONTH_FILTER_OPTIONS = ["All Months"] + [f"{k} {v['icon']}" for k, v in SEASON_META.items()] + list(MONTH_NAMES.values())
 
 SEASON_META = {
     "Winter": {"icon": "❄️", "color": "#4FC3F7", "months": (12, 1, 2),
@@ -667,6 +688,9 @@ TOD_META = {
     "Evening":   {"icon": "🌆", "range": "5PM–9PM",   "color": "#FF7043", "hours": list(range(17, 21)),
                   "image": "https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=400&q=80&auto=format&fit=crop"},
 }
+
+# New option list including TOD ranges
+HOUR_FILTER_OPTIONS = ["All Hours"] + [f"{k} ({v['range']})" for k, v in TOD_META.items()] + [f"{h:02d}:00" for h in range(24)]
 
 if detail_type and detail_id:
 
@@ -1334,21 +1358,24 @@ if detail_type and detail_id:
                 month_list = ",".join(str(m) for m in months)
                 cond = f"EXTRACT(MONTH FROM s.played_at) IN ({month_list})"
                 extra_params = {}
+                redirect_info = {"season": safe_id} # <--- ΠΡΟΣΘΗΚΗ
                 subtitle = f"Everything you played during {safe_id.lower()}"
             else:
                 month_num = next(m for m in months if MONTH_NAMES[m] == selected_month)
                 cond = "EXTRACT(MONTH FROM s.played_at) = :month_val"
                 extra_params = {"month_val": month_num}
+                redirect_info = {"month": month_num}
                 subtitle = f"Everything you played in {selected_month}"
 
             render_dimension_detail(
                 extra_where=cond,
                 extra_params=extra_params,
+                redirect_info=redirect_info,
                 type_label="Season", title=safe_id,
                 subtitle=subtitle,
                 icon=meta["icon"],
                 image_url=meta.get("image")
-            )
+            )        
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>Unknown season</div>', unsafe_allow_html=True)
 
@@ -1369,16 +1396,19 @@ if detail_type and detail_id:
                 else:
                     cond = f"EXTRACT(HOUR FROM s.played_at) BETWEEN {hours_in_range[0]} AND {hours_in_range[-1]}"
                 extra_params = {}
+                redirect_info = {"tod": safe_id}
                 subtitle = f"Streams during {meta['range']}"
             else:
                 hour_val = int(selected_hour.split(":")[0])
                 cond = "EXTRACT(HOUR FROM s.played_at) = :hour_val"
                 extra_params = {"hour_val": hour_val}
+                redirect_info = {"hour": hour_val}
                 subtitle = f"Streams at {selected_hour}"
 
             render_dimension_detail(
                 extra_where=cond,
                 extra_params=extra_params,
+                redirect_info=redirect_info,
                 type_label="Time of Day", title=safe_id,
                 subtitle=subtitle,
                 icon=meta["icon"],
@@ -1400,16 +1430,19 @@ if detail_type and detail_id:
                 if selected_month == "All Year":
                     cond = "EXTRACT(YEAR FROM s.played_at) = :year"
                     extra_params = {"year": year_val}
+                    redirect_info = {"year": year_val}
                     subtitle = "Your year in review"
                 else:
                     month_num = next(k for k, v in MONTH_NAMES.items() if v == selected_month)
                     cond = "EXTRACT(YEAR FROM s.played_at) = :year AND EXTRACT(MONTH FROM s.played_at) = :month_val"
                     extra_params = {"year": year_val, "month_val": month_num}
+                    redirect_info = {"year": year_val, "month": month_num}
                     subtitle = f"{selected_month} {year_val}"
 
                 render_dimension_detail(
                     extra_where=cond,
                     extra_params=extra_params,
+                    redirect_info=redirect_info,
                     type_label="Year", title=str(year_val),
                     subtitle=subtitle, icon="📆"
                 )
@@ -1531,13 +1564,31 @@ elif current_tab == "tracks":
 
     extra_conds = ""
     if filter_month != "All Months":
-        month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
-        extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
-        query_params["f_month"] = month_num
+        if "Winter" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (12, 1, 2)"
+        elif "Spring" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (3, 4, 5)"
+        elif "Summer" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (6, 7, 8)"
+        elif "Autumn" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (9, 10, 11)"
+        else:
+            month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
+            query_params["f_month"] = month_num
     if filter_hour != "All Hours":
-        hour_num = int(filter_hour.split(":")[0])
-        extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
-        query_params["f_hour"] = hour_num
+        if "Night" in filter_hour:
+            extra_conds += " AND (EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5)"
+        elif "Morning" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 5 AND 11"
+        elif "Afternoon" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 12 AND 16"
+        elif "Evening" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 17 AND 20"
+        else:
+            hour_num = int(filter_hour.split(":")[0])
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
+            query_params["f_hour"] = hour_num
     if filter_ryear != "All Release Years":
         extra_conds += " AND EXTRACT(YEAR FROM so.release_date) = :f_ryear"
         query_params["f_ryear"] = int(filter_ryear)
@@ -1639,13 +1690,31 @@ elif current_tab == "artists":
 
     extra_conds = ""
     if filter_month != "All Months":
-        month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
-        extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
-        query_params["f_month"] = month_num
+        if "Winter" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (12, 1, 2)"
+        elif "Spring" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (3, 4, 5)"
+        elif "Summer" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (6, 7, 8)"
+        elif "Autumn" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (9, 10, 11)"
+        else:
+            month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
+            query_params["f_month"] = month_num
     if filter_hour != "All Hours":
-        hour_num = int(filter_hour.split(":")[0])
-        extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
-        query_params["f_hour"] = hour_num
+        if "Night" in filter_hour:
+            extra_conds += " AND (EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5)"
+        elif "Morning" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 5 AND 11"
+        elif "Afternoon" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 12 AND 16"
+        elif "Evening" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 17 AND 20"
+        else:
+            hour_num = int(filter_hour.split(":")[0])
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
+            query_params["f_hour"] = hour_num
 
     active_filter_chips = []
     if filter_month != "All Months": active_filter_chips.append(f"📅 {filter_month}")
@@ -1732,13 +1801,32 @@ elif current_tab == "albums":
 
     extra_conds = ""
     if filter_month != "All Months":
-        month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
-        extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
-        query_params["f_month"] = month_num
+        if "Winter" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (12, 1, 2)"
+        elif "Spring" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (3, 4, 5)"
+        elif "Summer" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (6, 7, 8)"
+        elif "Autumn" in filter_month:
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) IN (9, 10, 11)"
+        else:
+            month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
+            extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
+            query_params["f_month"] = month_num
+            
     if filter_hour != "All Hours":
-        hour_num = int(filter_hour.split(":")[0])
-        extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
-        query_params["f_hour"] = hour_num
+        if "Night" in filter_hour:
+            extra_conds += " AND (EXTRACT(HOUR FROM s.played_at) >= 21 OR EXTRACT(HOUR FROM s.played_at) < 5)"
+        elif "Morning" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 5 AND 11"
+        elif "Afternoon" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 12 AND 16"
+        elif "Evening" in filter_hour:
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) BETWEEN 17 AND 20"
+        else:
+            hour_num = int(filter_hour.split(":")[0])
+            extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
+            query_params["f_hour"] = hour_num
     if filter_ryear != "All Release Years":
         extra_conds += " AND EXTRACT(YEAR FROM al.release_date) = :f_ryear"
         query_params["f_ryear"] = int(filter_ryear)
