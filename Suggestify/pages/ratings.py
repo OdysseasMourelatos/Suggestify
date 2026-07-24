@@ -24,10 +24,23 @@ STAR = "★"
 MIN_N_FOR_SKEW = 3
 MIN_N_FOR_TREND_WINDOW = 3
 
-def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER, build_href_fn=None):
+def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER,
+                         build_href_fn=None, get_rating_cache_gen=None, bump_rating_cache_gen=None):
     CARD = CARD or "rgba(255,255,255,0.04)"
     BORDER = BORDER or "rgba(255,255,255,0.08)"
-    
+
+    _raw_run_rating_query = run_rating_query
+
+    def run_rating_query(sql: str, params: dict | None = None):
+        params = params or {}
+        uid = params.get("user_id")
+        gen = get_rating_cache_gen(uid) if (get_rating_cache_gen and uid is not None) else 0
+        return _raw_run_rating_query(sql, params, _cache_gen=gen)
+
+    def _invalidate_rating_cache(user_id: int) -> None:
+        if bump_rating_cache_gen:
+            bump_rating_cache_gen(user_id)
+            
     # ==============================================================
     # SQL
     # ==============================================================
@@ -63,13 +76,13 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     def set_song_rating(user_id: int, song_id, rating: float) -> bool:
         ok = _execute(_DELETE_SONG, {"user_id": user_id, "song_id": song_id}) if rating <= 0 \
             else _execute(_UPSERT_SONG, {"user_id": user_id, "song_id": song_id, "rating": rating})
-        if ok: run_rating_query.clear()
+        if ok: _invalidate_rating_cache(user_id)
         return ok
 
     def set_album_rating(user_id: int, album_id, rating: float) -> bool:
         ok = _execute(_DELETE_ALBUM, {"user_id": user_id, "album_id": album_id}) if rating <= 0 \
             else _execute(_UPSERT_ALBUM, {"user_id": user_id, "album_id": album_id, "rating": rating})
-        if ok: run_rating_query.clear()
+        if ok: _invalidate_rating_cache(user_id)
         return ok
 
     # === Ο ΑΠΟΛΥΤΟΣ ΑΛΓΟΡΙΘΜΟΣ ΤΑΞΙΝΟΜΗΣΗΣ (PURE SQL = ΑΣΤΡΑΠΙΑΙΟΣ) ===
@@ -118,7 +131,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                     conn.execute(text(sql_swap), {"ts": new_me, "uid": user_id, "sid": item_id})
                     conn.execute(text(sql_swap), {"ts": new_target, "uid": user_id, "sid": target_id})
 
-        run_rating_query.clear()
+        _invalidate_rating_cache(user_id)
         return True
 
     def get_song_rating(user_id: int, song_id) -> float:
@@ -693,20 +706,44 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             unsafe_allow_html=True
         )
 
+        search_key = f"search_full_ratings_{kind_key}"
+        sort_key = f"sort_full_ratings_{kind_key}"
+        limit_key = f"limit_full_ratings_{kind_key}"
+        qp_q, qp_sort, qp_limit = f"rf_q_{kind_key}", f"rf_sort_{kind_key}", f"rf_limit_{kind_key}"
+
+        if search_key not in st.session_state:
+            st.session_state[search_key] = st.query_params.get(qp_q, "")
+        if sort_key not in st.session_state:
+            v = st.query_params.get(qp_sort, "Highest Rated")
+            st.session_state[sort_key] = v if v in ("Highest Rated", "Recently Rated") else "Highest Rated"
+        if limit_key not in st.session_state:
+            try:
+                v = int(st.query_params.get(qp_limit, 50))
+                st.session_state[limit_key] = v if v in (50, 100, 200, 500) else 50
+            except (TypeError, ValueError):
+                st.session_state[limit_key] = 50
+
+        def _sync_full_ratings_params():
+            st.query_params[qp_q] = st.session_state[search_key]
+            st.query_params[qp_sort] = st.session_state[sort_key]
+            st.query_params[qp_limit] = str(st.session_state[limit_key])
+
         col_search, col_sort, col_limit = st.columns([3, 1, 1])
         search_term = col_search.text_input(
             f"🔍 Search rated {label.lower()}...",
             placeholder=f"e.g. search a {'song or artist' if kind_key == 'song' else 'album'}...",
-            label_visibility="collapsed", key=f"search_full_ratings_{kind_key}",
+            label_visibility="collapsed", key=search_key,
+            on_change=_sync_full_ratings_params,
         )
         sort_by = col_sort.selectbox(
-            "Sort", ["Highest Rated", "Recently Rated"], index=0,
-            label_visibility="collapsed", key=f"sort_full_ratings_{kind_key}",
+            "Sort", ["Highest Rated", "Recently Rated"],
+            label_visibility="collapsed", key=sort_key,
+            on_change=_sync_full_ratings_params,
         )
-        
         display_limit = col_limit.selectbox(
-            "Limit", [50, 100, 200, 500], index=0,
-            label_visibility="collapsed", key=f"limit_full_ratings_{kind_key}",
+            "Limit", [50, 100, 200, 500],
+            label_visibility="collapsed", key=limit_key,
+            on_change=_sync_full_ratings_params,
         )
         
         limit_val = int(display_limit) if display_limit != "All" else None
@@ -828,7 +865,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                     render_list_v2(
                         hof_df, "song_title", "main_artist", "rating", "updated_at",
                         id_col="song_id", link_type="song", rank_col="global_rank",
-                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.06, # Εδω μπηκε το Animation Limit
+                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
                         stat1_label="Rating", stat1_fmt=_fmt_rating,
                         stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
                     )
@@ -837,7 +874,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                     render_list_v2(
                         hof_df, "album_title", "subtitle", "rating", "updated_at",
                         id_col="album_id", link_type="album", rank_col="global_rank",
-                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.06, # Εδω μπηκε το Animation Limit
+                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
                         stat1_label="Rating", stat1_fmt=_fmt_rating,
                         stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
                     )
@@ -887,6 +924,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                     render_list_v2(
                         eff_df, "song_title", "main_artist", "rating", "efficiency",
                         id_col="song_id", link_type="song", rank_col="global_rank",
+                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
                         stat1_label="Rating", stat1_fmt=_fmt_rating,
                         stat2_label="Value Density", stat2_fmt=lambda v: f"{float(v):.2f}",
                         quick_rate=st.session_state.get("quick_rate_mode", False),

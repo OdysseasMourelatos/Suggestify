@@ -20,9 +20,11 @@ def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
         return pd.read_sql(text(sql), conn, params=params or {})
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def run_rating_query(sql: str, params: dict | None = None) -> pd.DataFrame:
-    """Separate cache bucket for rating-dependent queries, so clearing it
-    after a rate/bump action doesn't wipe the KPI/chart/date-bounds cache too."""
+def run_rating_query(sql: str, params: dict | None = None, _cache_gen: int = 0) -> pd.DataFrame:
+    """Separate cache bucket for rating-dependent queries. `_cache_gen` is not
+    sent to the DB — it only participates in st.cache_data's hash key, so
+    bump_rating_cache_gen(user_id) invalidates just that user's cached rows
+    instead of wiping every user's cache."""
     with get_engine().connect() as conn:
         return pd.read_sql(text(sql), conn, params=params or {})
 
@@ -39,3 +41,14 @@ def get_release_year_bounds() -> tuple[int, int]:
     if df.empty or pd.isnull(df["mn"].iloc[0]):
         return 1960, datetime.date.today().year
     return int(df["mn"].iloc[0]), int(df["mx"].iloc[0])
+
+@st.cache_resource
+def _rating_cache_generations() -> dict:
+    return {}
+
+def get_rating_cache_gen(user_id: int) -> int:
+    return _rating_cache_generations().get(user_id, 0)
+
+def bump_rating_cache_gen(user_id: int) -> None:
+    gens = _rating_cache_generations()
+    gens[user_id] = gens.get(user_id, 0) + 1

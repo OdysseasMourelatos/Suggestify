@@ -17,7 +17,8 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 from config import *
-from db import get_engine, run_query, run_rating_query, get_date_bounds, get_release_year_bounds
+from db import (get_engine, run_query, run_rating_query, get_date_bounds, get_release_year_bounds,
+                 get_rating_cache_gen, bump_rating_cache_gen)
 from charts import themed, chart_trend, chart_multi_trend, chart_heatmap, chart_bar, chart_year_bar, chart_donut
 from ui import (counter_span, inject_counter_script, load_css, inject_custom_css, get_rank_class, 
                 get_item_icon, build_filtered_href, render_list_v2, render_kpi_grid, 
@@ -112,15 +113,19 @@ def get_qr_global_state():
 qr_global = get_qr_global_state()
 
 if "quick_rate_mode" not in st.session_state:
-    st.session_state.quick_rate_mode = qr_global["mode"]
+    url_qr = st.query_params.get("qr")
+    if url_qr is not None:
+        st.session_state.quick_rate_mode = (url_qr == "1")
+    else:
+        st.session_state.quick_rate_mode = qr_global["mode"]
 
 if st.session_state.quick_rate_mode:
     st.query_params["qr"] = "1"
 else:
     st.query_params.pop("qr", None)
     
-R = init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
-
+R = init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER,
+                         get_rating_cache_gen=get_rating_cache_gen, bump_rating_cache_gen=bump_rating_cache_gen)
 @st.fragment
 def hidden_rate_worker():
     st.markdown("""
