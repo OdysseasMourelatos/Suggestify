@@ -1,4 +1,5 @@
 from __future__ import annotations
+from turtle import color
 
 import streamlit as st
 import pandas as pd
@@ -131,9 +132,8 @@ def inject_custom_css():
     div[data-testid="stButton"] button[kind="secondary"]:hover {{ background: rgba(29,185,84,0.08) !important; color: {GREEN} !important; transform: translateY(-1px) !important; border-color: rgba(29,185,84,0.3) !important; }}
     div[data-testid="stButton"] button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px rgba(29,185,84,0.3) !important; }}
 
-    div[data-testid="stTextInput"] input, div[data-baseweb="select"] > div, div[data-testid="stDateInput"] input {{ transition: border-color 0.2s ease, box-shadow 0.2s ease !important; }}
-    div[data-testid="stTextInput"] input:focus, div[data-testid="stDateInput"] input:focus {{ border-color: {GREEN} !important; box-shadow: 0 0 0 2px {GREEN_XLO} !important; }}
-
+    div[data-testid="stTextInput"] input:focus {{ border-color: {GREEN} !important; box-shadow: 0 0 0 2px {GREEN_XLO} !important; }}
+    div[data-testid="stDateInput"] div[data-baseweb="input"]:focus-within {{border-color: {GREEN} !important; box-shadow: 0 0 0 2px {GREEN_XLO} !important;}}
     .custom-link {{ text-decoration: none !important; display: block; }}
 
     .season-card {{ position: relative; overflow: visible !important; text-align: center; }}
@@ -186,7 +186,7 @@ def inject_custom_css():
     .list-item-wrapper a.custom-link {{ margin-bottom: 0 !important; }}
     .list-item-wrapper:hover {{ transform: translateX(6px); }}
     .list-item-wrapper .list-item {{ transition: none !important; }}
-    .list-item-wrapper:hover .list-item {{ background: {CARD_HOVER} !important; border-color: {BORDER_HL} !important; box-shadow: none !important; }}
+    .list-item-wrapper:hover .list-item {{ transform: none !important; background: {CARD_HOVER} !important; border-color: {BORDER_HL} !important; box-shadow: none !important; }}
     .list-item-wrapper:hover .crate-stars {{ background: #262626 !important; border-color: {BORDER_HL} !important; box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important; }}
     .list-item-wrapper:hover .item-art {{ transform: scale(1.07) !important; }}
     .list-item-wrapper:hover .item-arrow {{ transform: translateX(4px) !important; color: {GREEN} !important; }}
@@ -194,12 +194,11 @@ def inject_custom_css():
     .item-rank-container {{ position: relative; display: flex; align-items: center; justify-content: center; width: 40px; }}
 
     .bump-container {{
-        position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
+        position: absolute; left: -20px; top: 50%; transform: translateY(-50%);
         opacity: 0; transition: opacity 0.2s ease; z-index: 20;
         display: flex; flex-direction: column; gap: 2px;
     }}
     .list-item-wrapper:hover .bump-container {{ opacity: 1; }}
-    .list-item-wrapper:hover .item-rank {{ opacity: 0.05; }}
 
     .bump-link {{
         display: flex; align-items: center; justify-content: center;
