@@ -249,8 +249,13 @@ section.main > div.block-container {
 
 /* ─── FILTER BAR (User / Period / From / To) ───
    Its own row underneath the tab navigation, so nothing gets squeezed. */
+/* ─── FILTER BAR (User / Period / From / To) ───
+   Its own row underneath the tab navigation, so nothing gets squeezed. */
+.st-key-filter_bar_row {
+    margin-bottom: -1.5rem !important; /* Κλείνει το τεράστιο κενό κάτω από τη μπάρα */
+}
 .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
-    align-items: flex-end;
+    align-items: flex-start; /* ΑΛΛΑΓΗ: Αποτρέπει το input να καβαλάει το label */
     flex-wrap: wrap;
     gap: 0.85rem;
     padding: 0.4rem 0 1rem; 
@@ -259,14 +264,21 @@ section.main > div.block-container {
 .st-key-filter_bar_row [data-testid="column"] {
     min-width: 150px;
 }
+.st-key-filter_bar_row div[data-testid="stVerticalBlock"] > div {
+    gap: 0.1rem !important; /* Κρατάει σωστή απόσταση label-input */
+}
 .filter-label {
     font-size: 0.68rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: VAR_TEXT_DIM;
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.2rem;
     white-space: nowrap;
+    display: block; /* Υποχρεώνει το label να πιάσει όλο το πλάτος */
+}
+div[data-testid="stDateInput"] {
+    margin-top: 0.2rem !important; /* Ευθυγραμμίζει τα κουτιά ημερομηνίας με τα selectboxes */
 }
 
 /* ─── KPI CARDS — Glass Effect ─── */
@@ -700,7 +712,6 @@ div[data-testid="stPopoverBody"] button {
     }
 
     /* ─── FILTER BAR: clean 2x2 grid, Spotify-style, nothing clipped ─── */
-    /* ─── FILTER BAR (User / Period / From / To) ─── */
     .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
         align-items: flex-end;
         gap: 0.75rem !important;

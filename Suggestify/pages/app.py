@@ -265,6 +265,26 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         if not df_artists.empty:
             df_artists["sub"] = "Artist"
             render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
+            
+            # ---> ΝΕΟ REDIRECT ΓΙΑ ARTISTS <---
+            if redirect_filters or redirect_date_range:
+                if st.button("See Full List →", key=f"seefull_artists_{type_label}_{title}_{extra_params}", use_container_width=True):
+                    curr_user = st.query_params.get("user")
+                    st.query_params.clear()
+                    st.query_params["tab"] = "artists"
+                    if curr_user: st.query_params["user"] = curr_user
+                    if "month" in redirect_filters:
+                        st.session_state["filter_month_artists"] = MONTH_NAMES[redirect_filters["month"]]
+                    if "hour" in redirect_filters:
+                        st.session_state["filter_hour_artists"] = f"{redirect_filters['hour']:02d}:00"
+                    if redirect_date_range:
+                        st.session_state.start_date = redirect_date_range[0]
+                        st.session_state.end_date = redirect_date_range[1]
+                        st.session_state.date_preset = None
+                        st.query_params["preset"] = "manual"
+                        st.query_params["start"] = redirect_date_range[0].isoformat()
+                        st.query_params["end"] = redirect_date_range[1].isoformat()
+                    st.rerun()
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
 
@@ -288,6 +308,26 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             df_albums["sub"] = "Album"
             R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
             render_list_v2(df_albums, "album_title", "sub", "streams", "hours_played", "album_id", "album", **qr_kwargs)
+            
+            # ---> ΝΕΟ REDIRECT ΓΙΑ ALBUMS <---
+            if redirect_filters or redirect_date_range:
+                if st.button("See Full List →", key=f"seefull_albums_{type_label}_{title}_{extra_params}", use_container_width=True):
+                    curr_user = st.query_params.get("user")
+                    st.query_params.clear()
+                    st.query_params["tab"] = "albums"
+                    if curr_user: st.query_params["user"] = curr_user
+                    if "month" in redirect_filters:
+                        st.session_state["filter_month_albums"] = MONTH_NAMES[redirect_filters["month"]]
+                    if "hour" in redirect_filters:
+                        st.session_state["filter_hour_albums"] = f"{redirect_filters['hour']:02d}:00"
+                    if redirect_date_range:
+                        st.session_state.start_date = redirect_date_range[0]
+                        st.session_state.end_date = redirect_date_range[1]
+                        st.session_state.date_preset = None
+                        st.query_params["preset"] = "manual"
+                        st.query_params["start"] = redirect_date_range[0].isoformat()
+                        st.query_params["end"] = redirect_date_range[1].isoformat()
+                    st.rerun()
         else:
             st.markdown('<div class="empty-state"><div class="icon">📭</div>No albums found</div>', unsafe_allow_html=True)
 
@@ -1585,8 +1625,36 @@ elif current_tab == "artists":
     sort_by = col_sort.selectbox("Sort", ["Streams", "Hours"], index=0, label_visibility="collapsed", key="sort_artists")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
 
+    # --- ΠΡΟΣΘΗΚΗ ΦΙΛΤΡΩΝ ---
+    col_month, col_hour = st.columns(2)
+    with col_month:
+        st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
+        filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_artists")
+    with col_hour:
+        st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
+        filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_artists")
+
     query_params = {**F, "limit": display_limit}
     order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"
+
+    extra_conds = ""
+    if filter_month != "All Months":
+        month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
+        extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
+        query_params["f_month"] = month_num
+    if filter_hour != "All Hours":
+        hour_num = int(filter_hour.split(":")[0])
+        extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
+        query_params["f_hour"] = hour_num
+
+    active_filter_chips = []
+    if filter_month != "All Months": active_filter_chips.append(f"📅 {filter_month}")
+    if filter_hour != "All Hours": active_filter_chips.append(f"🕐 {filter_hour}")
+    if active_filter_chips:
+        st.markdown(
+            f'<div style="color:{TEXT_MID}; font-size:0.85rem; margin: 4px 0 12px;">Filtering by: {" · ".join(active_filter_chips)}</div>',
+            unsafe_allow_html=True
+        )
 
     if search_term:
         query_params["search"] = f"%{search_term}%"
@@ -1600,6 +1668,7 @@ elif current_tab == "artists":
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
               AND a.name ILIKE :search
+              {extra_conds}
             GROUP BY a.id, a.name, a.image_url
             ORDER BY {order_col} DESC
             LIMIT :limit;
@@ -1623,6 +1692,7 @@ elif current_tab == "artists":
         JOIN artists a ON a.id = sa.artist_id
         WHERE s.played_at::date BETWEEN :start_date AND :end_date
           AND s.user_id = :user_id
+          {extra_conds}
         GROUP BY a.id, a.name, a.image_url
         ORDER BY {order_col} DESC LIMIT :limit;
     """, query_params)
@@ -1634,8 +1704,6 @@ elif current_tab == "artists":
                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
-
-
 elif current_tab == "albums":
     st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
 
@@ -1644,8 +1712,46 @@ elif current_tab == "albums":
     sort_by = col_sort.selectbox("Sort", ["Streams", "Hours"], index=0, label_visibility="collapsed", key="sort_albums")
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
 
+    # --- ΠΡΟΣΘΗΚΗ ΦΙΛΤΡΩΝ ---
+    ry_min, ry_max = get_release_year_bounds()
+    release_year_options = ["All Release Years"] + [str(y) for y in range(ry_max, ry_min - 1, -1)]
+
+    col_month, col_hour, col_ryear = st.columns(3)
+    with col_month:
+        st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
+        filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_albums")
+    with col_hour:
+        st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
+        filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_albums")
+    with col_ryear:
+        st.markdown('<div class="filter-label">🗓️ Release Year</div>', unsafe_allow_html=True)
+        filter_ryear = st.selectbox("Release Year", release_year_options, label_visibility="collapsed", key="filter_release_year_albums")
+
     query_params = {**F, "limit": display_limit}
     order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"
+
+    extra_conds = ""
+    if filter_month != "All Months":
+        month_num = next(k for k, v in MONTH_NAMES.items() if v == filter_month)
+        extra_conds += " AND EXTRACT(MONTH FROM s.played_at) = :f_month"
+        query_params["f_month"] = month_num
+    if filter_hour != "All Hours":
+        hour_num = int(filter_hour.split(":")[0])
+        extra_conds += " AND EXTRACT(HOUR FROM s.played_at) = :f_hour"
+        query_params["f_hour"] = hour_num
+    if filter_ryear != "All Release Years":
+        extra_conds += " AND EXTRACT(YEAR FROM al.release_date) = :f_ryear"
+        query_params["f_ryear"] = int(filter_ryear)
+
+    active_filter_chips = []
+    if filter_month != "All Months": active_filter_chips.append(f"📅 {filter_month}")
+    if filter_hour != "All Hours": active_filter_chips.append(f"🕐 {filter_hour}")
+    if filter_ryear != "All Release Years": active_filter_chips.append(f"🗓️ Released {filter_ryear}")
+    if active_filter_chips:
+        st.markdown(
+            f'<div style="color:{TEXT_MID}; font-size:0.85rem; margin: 4px 0 12px;">Filtering by: {" · ".join(active_filter_chips)}</div>',
+            unsafe_allow_html=True
+        )
 
     base_query = """
         WITH TrueAlbumArtists AS (
@@ -1679,6 +1785,7 @@ elif current_tab == "albums":
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
               AND (al.title ILIKE :search OR aa.artist_name ILIKE :search)
+              {extra_conds}
             GROUP BY al.id, al.title, aa.artist_name
             ORDER BY {order_col} DESC
             LIMIT :limit;
@@ -1705,6 +1812,7 @@ elif current_tab == "albums":
             LEFT JOIN TrueAlbumArtists aa ON aa.album_id = al.id
             WHERE s.played_at::date BETWEEN :start_date AND :end_date
               AND s.user_id = :user_id
+              {extra_conds}
             GROUP BY al.id, al.title, aa.artist_name
             ORDER BY {order_col} DESC LIMIT :limit;
         """, query_params)
@@ -1716,7 +1824,7 @@ elif current_tab == "albums":
                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">💿</div>No albums found</div>', unsafe_allow_html=True)
-            
+
 elif current_tab == "genres":
     st.markdown('<div class="section-header"><span class="icon">🎸</span>Top Genres</div>', unsafe_allow_html=True)
 
