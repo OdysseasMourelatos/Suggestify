@@ -72,64 +72,51 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         if ok: run_rating_query.clear()
         return ok
 
-    # === Ο ΑΠΟΛΥΤΟΣ ΑΛΓΟΡΙΘΜΟΣ ΤΑΞΙΝΟΜΗΣΗΣ (FOOLPROOF ΔΙΑΧΕΙΡΙΣΗ ΧΡΟΝΟΥ) ===
+    # === Ο ΑΠΟΛΥΤΟΣ ΑΛΓΟΡΙΘΜΟΣ ΤΑΞΙΝΟΜΗΣΗΣ (PURE SQL = ΑΣΤΡΑΠΙΑΙΟΣ) ===
     def move_item(user_id: int, item_type: str, item_id: str, action: str) -> bool:
         import datetime
-        df = _all_rated_songs(user_id) if item_type == "song" else _all_rated_albums(user_id)
-        if df.empty: return False
-
         id_col = f"{item_type}_id"
         table = "song_ratings" if item_type == "song" else "album_ratings"
-
-        current_idx_list = df.index[df[id_col].astype(str) == str(item_id)].tolist()
-        if not current_idx_list: return False
-        
-        my_rating = float(df.iloc[current_idx_list[0]]['rating'])
-        
-        # Απομονώνουμε ΜΟΝΟ τα items που έχουν την ίδια βαθμολογία (το ίδιο Tier)
-        df_tier = df[df['rating'] == my_rating].reset_index(drop=True)
-        if len(df_tier) <= 1: return True
-        
-        tier_idx = df_tier.index[df_tier[id_col].astype(str) == str(item_id)].tolist()[0]
         
         with get_engine().begin() as conn:
+            # 1. Βρίσκουμε τον χρόνο (updated_at) και το rating του item
+            sql_me = f"SELECT rating, updated_at FROM {table} WHERE user_id = :uid AND {id_col} = :me_id"
+            me_row = conn.execute(text(sql_me), {"uid": user_id, "me_id": item_id}).fetchone()
+            if not me_row: return False
+            me_rating, me_ts = float(me_row[0]), me_row[1]
+
             if action == "top":
-                if tier_idx == 0: return True
-                # Το βάζει στην κορυφή
-                sql = f"UPDATE {table} SET updated_at = now() WHERE user_id = :uid AND {id_col} = :me_id"
-                conn.execute(text(sql), {"uid": user_id, "me_id": item_id})
+                sql_upd = f"UPDATE {table} SET updated_at = now() WHERE user_id = :uid AND {id_col} = :me_id"
+                conn.execute(text(sql_upd), {"uid": user_id, "me_id": item_id})
                 
             elif action in ["up", "down"]:
                 if action == "up":
-                    if tier_idx == 0: return True
-                    target_id = str(df_tier.iloc[tier_idx - 1][id_col])
+                    sql_target = f"""
+                        SELECT {id_col}, updated_at FROM {table} 
+                        WHERE user_id = :uid AND rating = :rating AND updated_at > :me_ts
+                        ORDER BY updated_at ASC LIMIT 1
+                    """
                 else:
-                    if tier_idx == len(df_tier) - 1: return True
-                    target_id = str(df_tier.iloc[tier_idx + 1][id_col])
-                    
-                # Παίρνουμε τα native datetime objects κατευθείαν από τη βάση (μηδενικό timezone bug)
-                sql_get = f"SELECT {id_col}, updated_at FROM {table} WHERE user_id = :uid AND {id_col} IN (:id1, :id2)"
-                res = conn.execute(text(sql_get), {"uid": user_id, "id1": item_id, "id2": target_id}).fetchall()
+                    sql_target = f"""
+                        SELECT {id_col}, updated_at FROM {table} 
+                        WHERE user_id = :uid AND rating = :rating AND updated_at < :me_ts
+                        ORDER BY updated_at DESC LIMIT 1
+                    """
                 
-                if len(res) == 2:
-                    ts_map = {str(r[0]): r[1] for r in res}
-                    ts_me = ts_map[str(item_id)]
-                    ts_target = ts_map[str(target_id)]
-                    
+                target_row = conn.execute(text(sql_target), {"uid": user_id, "rating": me_rating, "me_ts": me_ts}).fetchone()
+                
+                if target_row:
+                    target_id, target_ts = target_row[0], target_row[1]
                     if action == "up":
-                        # Το επιλεγμένο μας item παίρνει τον χρόνο του Target + 1 millisecond
-                        new_me = ts_target + datetime.timedelta(milliseconds=1)
-                        # To Target παίρνει τον παλιό χρόνο του Me - 1 millisecond
-                        new_target = ts_me - datetime.timedelta(milliseconds=1)
+                        new_me = target_ts + datetime.timedelta(milliseconds=1)
+                        new_target = me_ts - datetime.timedelta(milliseconds=1)
                     else:
-                        # Το επιλεγμένο μας item παίρνει τον χρόνο του Target - 1 millisecond
-                        new_me = ts_target - datetime.timedelta(milliseconds=1)
-                        # To Target παίρνει τον παλιό χρόνο του Me + 1 millisecond
-                        new_target = ts_me + datetime.timedelta(milliseconds=1)
-
-                    sql_upd = f"UPDATE {table} SET updated_at = :ts WHERE user_id = :uid AND {id_col} = :sid"
-                    conn.execute(text(sql_upd), {"uid": user_id, "sid": item_id, "ts": new_me})
-                    conn.execute(text(sql_upd), {"uid": user_id, "sid": target_id, "ts": new_target})
+                        new_me = target_ts - datetime.timedelta(milliseconds=1)
+                        new_target = me_ts + datetime.timedelta(milliseconds=1)
+                    
+                    sql_swap = f"UPDATE {table} SET updated_at = :ts WHERE user_id = :uid AND {id_col} = :sid"
+                    conn.execute(text(sql_swap), {"ts": new_me, "uid": user_id, "sid": item_id})
+                    conn.execute(text(sql_swap), {"ts": new_target, "uid": user_id, "sid": target_id})
 
         run_rating_query.clear()
         return True
@@ -168,16 +155,9 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             st.session_state[f"rating_val_{item_type}_{i}_{user_id}"] = float(found.get(i, 0.0))
             
     # ==============================================================
-    # STATIC STAR BAR (For Chips, Hall of Fame rows, and the live preview)
+    # STATIC STAR BAR
     # ==============================================================
     _STAR_PATH = "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-
-    _STAR_SVG_DATAURI = (
-        "data:image/svg+xml," + quote(
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-            f'<path d="{_STAR_PATH}"/></svg>'
-        )
-    )
 
     def _seed_ratings_from_df(item_type: str, df: pd.DataFrame, id_col: str, user_id: int) -> None:
         if df.empty or "rating" not in df.columns:
@@ -390,63 +370,24 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         return st.session_state[state_key]
 
     # ==============================================================
-    # DASHBOARD QUERIES
+    # DASHBOARD QUERIES (HYPER-OPTIMIZED WITH CTEs)
     # ==============================================================
     def _distribution(user_id: int, kind: str) -> pd.DataFrame:
-        if kind == "song":
-            sql = """
-                WITH unique_ratings AS (
-                    SELECT DISTINCT ON (sr.song_id) sr.rating
-                    FROM song_ratings sr
-                    JOIN songs s ON s.id = sr.song_id
-                    WHERE sr.user_id = :user_id
-                    ORDER BY sr.song_id
-                )
-                SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n 
-                FROM unique_ratings
-                GROUP BY 1 ORDER BY 1;
-            """
-        else:
-            sql = """
-                WITH unique_ratings AS (
-                    SELECT DISTINCT ON (ar.album_id) ar.rating
-                    FROM album_ratings ar
-                    JOIN albums a ON a.id = ar.album_id
-                    WHERE ar.user_id = :user_id
-                    ORDER BY ar.album_id
-                )
-                SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n 
-                FROM unique_ratings
-                GROUP BY 1 ORDER BY 1;
-            """
+        table = "song_ratings" if kind == "song" else "album_ratings"
+        sql = f"""
+            SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n 
+            FROM {table}
+            WHERE user_id = :user_id
+            GROUP BY 1 ORDER BY 1;
+        """
         df = run_rating_query(sql, {"user_id": user_id})
         buckets = [round(i * RATING_STEP, 1) for i in range(1, int(RATING_MAX / RATING_STEP) + 1)]
         full = pd.DataFrame({"rating": buckets})
         return full.merge(df, on="rating", how="left").fillna(0)
     
     def _rating_stats(user_id: int, kind: str) -> dict:
-        if kind == "song":
-            sql = """
-                WITH unique_ratings AS (
-                    SELECT DISTINCT ON (sr.song_id) sr.rating, sr.updated_at
-                    FROM song_ratings sr
-                    JOIN songs s ON s.id = sr.song_id
-                    WHERE sr.user_id = :user_id
-                    ORDER BY sr.song_id
-                )
-                SELECT rating, updated_at FROM unique_ratings;
-            """
-        else:
-            sql = """
-                WITH unique_ratings AS (
-                    SELECT DISTINCT ON (ar.album_id) ar.rating, ar.updated_at
-                    FROM album_ratings ar
-                    JOIN albums a ON a.id = ar.album_id
-                    WHERE ar.user_id = :user_id
-                    ORDER BY ar.album_id
-                )
-                SELECT rating, updated_at FROM unique_ratings;
-            """
+        table = "song_ratings" if kind == "song" else "album_ratings"
+        sql = f"SELECT rating, updated_at FROM {table} WHERE user_id = :user_id;"
         df = run_rating_query(sql, {"user_id": user_id})
 
         empty = {
@@ -491,114 +432,80 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         }
 
     def _rating_trend_over_time(user_id: int, kind: str) -> pd.DataFrame:
-        if kind == "song":
-            sql = """
-                WITH unique_ratings AS (
-                    SELECT DISTINCT ON (sr.song_id) sr.rating, sr.updated_at
-                    FROM song_ratings sr
-                    JOIN songs s ON s.id = sr.song_id
-                    WHERE sr.user_id = :user_id
-                    ORDER BY sr.song_id
-                )
-                SELECT DATE_TRUNC('month', updated_at) AS period,
-                       AVG(rating) AS avg_rating, COUNT(*) AS n
-                FROM unique_ratings
-                GROUP BY 1 ORDER BY 1;
-            """
-        else:
-            sql = """
-                WITH unique_ratings AS (
-                    SELECT DISTINCT ON (ar.album_id) ar.rating, ar.updated_at
-                    FROM album_ratings ar
-                    JOIN albums a ON a.id = ar.album_id
-                    WHERE ar.user_id = :user_id
-                    ORDER BY ar.album_id
-                )
-                SELECT DATE_TRUNC('month', updated_at) AS period,
-                       AVG(rating) AS avg_rating, COUNT(*) AS n
-                FROM unique_ratings
-                GROUP BY 1 ORDER BY 1;
-            """
+        table = "song_ratings" if kind == "song" else "album_ratings"
+        sql = f"""
+            SELECT DATE_TRUNC('month', updated_at) AS period,
+                   AVG(rating) AS avg_rating, COUNT(*) AS n
+            FROM {table}
+            WHERE user_id = :user_id
+            GROUP BY 1 ORDER BY 1;
+        """
         return run_rating_query(sql, {"user_id": user_id})
 
-    def _hall_of_fame_songs(user_id: int, limit: int = 10) -> pd.DataFrame:
-        return run_rating_query("""
-            SELECT * FROM (
-                SELECT DISTINCT ON (so.id)
-                    so.id AS song_id, so.title AS song_title,
-                    COALESCE(a.name, 'Unknown') AS main_artist,
-                    so.image_url, sr.rating, sr.updated_at
-                FROM song_ratings sr
-                JOIN songs so ON so.id = sr.song_id
-                LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-                LEFT JOIN artists a ON a.id = sa.artist_id
-                WHERE sr.user_id = :user_id
-                ORDER BY so.id, sa.is_feature ASC NULLS LAST
-            ) sub
-            ORDER BY rating DESC, updated_at DESC
-            LIMIT :limit;
-        """, {"user_id": user_id, "limit": limit}).reset_index(drop=True)
-
-    def _hall_of_fame_albums(user_id: int, limit: int = 10) -> pd.DataFrame:
-        return run_rating_query("""
-            WITH top_albums AS (
-                SELECT DISTINCT ON (ar.album_id) ar.album_id, ar.rating, ar.updated_at
-                FROM album_ratings ar
-                WHERE ar.user_id = :user_id
-                ORDER BY ar.album_id, ar.updated_at DESC
+    # ---> FULL LIST QUERIES WITH SQL LIMIT & SORTING (ZERO OVERHEAD) <---
+    def _all_rated_songs(user_id: int, search: str = None, limit: int = None, sort_by: str = "Highest Rated") -> pd.DataFrame:
+        params = {"user_id": user_id}
+        order_sql = "ORDER BY updated_at DESC" if sort_by == "Recently Rated" else "ORDER BY rating DESC, updated_at DESC"
+        limit_sql = "LIMIT :limit" if limit else ""
+        if limit: params["limit"] = limit
+        
+        sql = f"""
+            WITH base_ratings AS (
+                SELECT song_id, rating, updated_at
+                FROM song_ratings
+                WHERE user_id = :user_id
+        """
+        if search:
+            sql += " AND song_id IN (SELECT id FROM songs WHERE title ILIKE :search) "
+            params["search"] = f"%{search}%"
+            
+        sql += f"""
+                {order_sql} {limit_sql}
+            ),
+            TrackArtists AS (
+                SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS main_artist
+                FROM song_artists sa
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE sa.song_id IN (SELECT song_id FROM base_ratings)
+                GROUP BY sa.song_id
             )
-            SELECT ta.album_id, al.title AS album_title,
-                   (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = ta.album_id) AS image_url,
-                   ta.rating, ta.updated_at
-            FROM top_albums ta
-            JOIN albums al ON al.id = ta.album_id
-            ORDER BY ta.rating DESC, ta.updated_at DESC
-            LIMIT :limit;
-        """, {"user_id": user_id, "limit": limit}).reset_index(drop=True)
-
-    def _all_rated_songs(user_id: int, search: str = None) -> pd.DataFrame:
-        """Every rated song, unpaginated — backs the 'See Full Ranking' page."""
-        sql = """
-            SELECT DISTINCT ON (so.id)
-                   so.id AS song_id, so.title AS song_title,
-                   COALESCE(a.name, 'Unknown') AS main_artist,
-                   so.image_url, sr.rating, sr.updated_at
-            FROM song_ratings sr
-            JOIN songs so ON so.id = sr.song_id
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            LEFT JOIN artists a ON a.id = sa.artist_id
-            WHERE sr.user_id = :user_id
+            SELECT br.song_id, so.title AS song_title,
+                   COALESCE(ta.main_artist, 'Unknown') AS main_artist,
+                   so.image_url, br.rating, br.updated_at
+            FROM base_ratings br
+            JOIN songs so ON so.id = br.song_id
+            LEFT JOIN TrackArtists ta ON ta.song_id = br.song_id
+            {order_sql};
         """
-        params = {"user_id": user_id}
-        if search:
-            sql += " AND (so.title ILIKE :search OR a.name ILIKE :search)"
-            params["search"] = f"%{search}%"
-        sql += " ORDER BY so.id, sa.is_feature ASC NULLS LAST"
-        df = run_rating_query(sql, params)
-        if df.empty:
-            return df
-        return df.sort_values(["rating", "updated_at"], ascending=[False, False]).reset_index(drop=True)
+        return run_rating_query(sql, params).reset_index(drop=True)
 
-    def _all_rated_albums(user_id: int, search: str = None) -> pd.DataFrame:
-        """Every rated album, unpaginated — backs the 'See Full Ranking' page."""
-        sql = """
-            SELECT DISTINCT ON (al.id)
-                   al.id AS album_id, al.title AS album_title,
-                   (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = al.id) AS image_url,
-                   ar.rating, ar.updated_at
-            FROM album_ratings ar
-            JOIN albums al ON al.id = ar.album_id
-            WHERE ar.user_id = :user_id
-        """
+    def _all_rated_albums(user_id: int, search: str = None, limit: int = None, sort_by: str = "Highest Rated") -> pd.DataFrame:
         params = {"user_id": user_id}
+        order_sql = "ORDER BY updated_at DESC" if sort_by == "Recently Rated" else "ORDER BY rating DESC, updated_at DESC"
+        limit_sql = "LIMIT :limit" if limit else ""
+        if limit: params["limit"] = limit
+        
+        sql = f"""
+            WITH base_ratings AS (
+                SELECT album_id, rating, updated_at
+                FROM album_ratings
+                WHERE user_id = :user_id
+        """
         if search:
-            sql += " AND al.title ILIKE :search"
+            sql += " AND album_id IN (SELECT id FROM albums WHERE title ILIKE :search) "
             params["search"] = f"%{search}%"
-        sql += " ORDER BY al.id"
-        df = run_rating_query(sql, params)
-        if df.empty:
-            return df
-        return df.sort_values(["rating", "updated_at"], ascending=[False, False]).reset_index(drop=True)
+            
+        sql += f"""
+                {order_sql} {limit_sql}
+            )
+            SELECT br.album_id, al.title AS album_title,
+                   (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = br.album_id) AS image_url,
+                   br.rating, br.updated_at
+            FROM base_ratings br
+            JOIN albums al ON al.id = br.album_id
+            {order_sql};
+        """
+        return run_rating_query(sql, params).reset_index(drop=True)
 
     def _cross_analysis_songs(user_id: int, F: dict) -> pd.DataFrame:
         return run_rating_query("""
@@ -607,18 +514,22 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                 FROM streams
                 WHERE played_at::date BETWEEN :start_date AND :end_date AND user_id = :user_id
                 GROUP BY song_id
+            ),
+            TrackArtists AS (
+                SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS main_artist
+                FROM song_artists sa
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE sa.song_id IN (SELECT song_id FROM song_ratings WHERE user_id = :user_id)
+                GROUP BY sa.song_id
             )
-            SELECT DISTINCT ON (so.id)
-                   so.id AS song_id, so.title AS song_title,
-                   COALESCE(a.name, 'Unknown') AS main_artist, so.image_url,
-                   sr.rating, COALESCE(sc.streams, 0) AS streams
+            SELECT sr.song_id, so.title AS song_title,
+                   COALESCE(ta.main_artist, 'Unknown') AS main_artist,
+                   so.image_url, sr.rating, COALESCE(sc.streams, 0) AS streams
             FROM song_ratings sr
             JOIN songs so ON so.id = sr.song_id
-            LEFT JOIN stream_counts sc ON sc.song_id = so.id
-            LEFT JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
-            LEFT JOIN artists a ON a.id = sa.artist_id
-            WHERE sr.user_id = :user_id
-            ORDER BY so.id, sa.is_feature ASC NULLS LAST
+            LEFT JOIN stream_counts sc ON sc.song_id = sr.song_id
+            LEFT JOIN TrackArtists ta ON ta.song_id = sr.song_id
+            WHERE sr.user_id = :user_id;
         """, {**F, "user_id": user_id})
 
     def _engagement_metrics(df: pd.DataFrame) -> dict:
@@ -797,9 +708,11 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             "Limit", [50, 100, 200, 500], index=0,
             label_visibility="collapsed", key=f"limit_full_ratings_{kind_key}",
         )
+        
+        limit_val = int(display_limit) if display_limit != "All" else None
 
-        df = (_all_rated_songs(user_id, search_term) if kind_key == "song"
-              else _all_rated_albums(user_id, search_term))
+        df = (_all_rated_songs(user_id, search_term, limit=limit_val, sort_by=sort_by) if kind_key == "song"
+              else _all_rated_albums(user_id, search_term, limit=limit_val, sort_by=sort_by))
 
         if df.empty:
             st.markdown(
@@ -808,13 +721,6 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             )
             return
 
-        if sort_by == "Recently Rated":
-            df = df.sort_values("updated_at", ascending=False).reset_index(drop=True)
-
-        if display_limit != "All":
-            df = df.head(int(display_limit))
-
-        df = df.reset_index(drop=True)
         df["global_rank"] = df.index + 1
 
         qr = dict(
@@ -827,7 +733,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             render_list_v2(
                 df, "song_title", "main_artist", "rating", "updated_at",
                 id_col="song_id", link_type="song", rank_col="global_rank",
-                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
+                reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04, # Εδω μπηκε το Animation Limit
                 stat1_label="Rating", stat1_fmt=_fmt_rating,
                 stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
                 **qr,
@@ -837,7 +743,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             render_list_v2(
                 df, "album_title", "subtitle", "rating", "updated_at",
                 id_col="album_id", link_type="album", rank_col="global_rank",
-                reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
+                reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04, # Εδω μπηκε το Animation Limit
                 stat1_label="Rating", stat1_fmt=_fmt_rating,
                 stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
                 **qr,
@@ -906,7 +812,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
             
             with st.spinner("Loading your top rated..."):
-                hof_df = _hall_of_fame_songs(user_id) if kind_key == "song" else _hall_of_fame_albums(user_id)
+                hof_df = _all_rated_songs(user_id, limit=10) if kind_key == "song" else _all_rated_albums(user_id, limit=10)
             
             if hof_df.empty:
                 st.markdown('<div class="empty-state"><div class="icon">📭</div>Nothing rated yet</div>', unsafe_allow_html=True)
@@ -922,6 +828,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                     render_list_v2(
                         hof_df, "song_title", "main_artist", "rating", "updated_at",
                         id_col="song_id", link_type="song", rank_col="global_rank",
+                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.06, # Εδω μπηκε το Animation Limit
                         stat1_label="Rating", stat1_fmt=_fmt_rating,
                         stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
                     )
@@ -930,6 +837,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                     render_list_v2(
                         hof_df, "album_title", "subtitle", "rating", "updated_at",
                         id_col="album_id", link_type="album", rank_col="global_rank",
+                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.06, # Εδω μπηκε το Animation Limit
                         stat1_label="Rating", stat1_fmt=_fmt_rating,
                         stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
                     )

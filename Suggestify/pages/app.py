@@ -244,9 +244,9 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
                         st.session_state["filter_hour_tracks"] = f"{tod_key} ({TOD_META[tod_key]['range']})"
                         
                     if redirect_date_range:
-                        st.session_state.start_date = redirect_date_range[0]
-                        st.session_state.end_date = redirect_date_range[1]
-                        st.session_state.date_preset = None
+                        st.session_state["pending_start_date"] = redirect_date_range[0]
+                        st.session_state["pending_end_date"] = redirect_date_range[1]
+                        st.session_state["pending_date_preset"] = None  # <--- ΔΙΟΡΘΩΘΗΚΕ
                         st.query_params["preset"] = "manual"
                         st.query_params["start"] = redirect_date_range[0].isoformat()
                         st.query_params["end"] = redirect_date_range[1].isoformat()
@@ -292,9 +292,9 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
                         st.session_state["filter_hour_artists"] = f"{tod_key} ({TOD_META[tod_key]['range']})"
                         
                     if redirect_date_range:
-                        st.session_state.start_date = redirect_date_range[0]
-                        st.session_state.end_date = redirect_date_range[1]
-                        st.session_state.date_preset = None
+                        st.session_state["pending_start_date"] = redirect_date_range[0]
+                        st.session_state["pending_end_date"] = redirect_date_range[1]
+                        st.session_state["pending_date_preset"] = None  # <--- ΔΙΟΡΘΩΘΗΚΕ
                         st.query_params["preset"] = "manual"
                         st.query_params["start"] = redirect_date_range[0].isoformat()
                         st.query_params["end"] = redirect_date_range[1].isoformat()
@@ -343,9 +343,9 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
                         st.session_state["filter_hour_albums"] = f"{tod_key} ({TOD_META[tod_key]['range']})"
                         
                     if redirect_date_range:
-                        st.session_state.start_date = redirect_date_range[0]
-                        st.session_state.end_date = redirect_date_range[1]
-                        st.session_state.date_preset = None
+                        st.session_state["pending_start_date"] = redirect_date_range[0]
+                        st.session_state["pending_end_date"] = redirect_date_range[1]
+                        st.session_state["pending_date_preset"] = None  # <--- ΔΙΟΡΘΩΘΗΚΕ
                         st.query_params["preset"] = "manual"
                         st.query_params["start"] = redirect_date_range[0].isoformat()
                         st.query_params["end"] = redirect_date_range[1].isoformat()
@@ -478,12 +478,19 @@ if "bump" in _action_params:
     del st.query_params["bump"]
     st.rerun()
     
+# Handle pending redirect dates safely before widgets instantiate
+if "pending_start_date" in st.session_state:
+    st.session_state.start_date = st.session_state.pop("pending_start_date")
+    st.session_state.end_date = st.session_state.pop("pending_end_date")
+    if "pending_date_preset" in st.session_state:
+        st.session_state.date_preset = st.session_state.pop("pending_date_preset")
+
 if "start_date" not in st.session_state:
     st.session_state.start_date = get_parsed_date(params.get("start"), min_date)
     st.session_state.end_date = get_parsed_date(params.get("end"), max_date)
     url_preset = params.get("preset", "all")
     st.session_state.date_preset = url_preset if url_preset in ["all", "wrapped", "month", "week"] else None
-
+    
 def update_dates_from_preset():
     sel = st.session_state.date_preset
     if sel == "all":
