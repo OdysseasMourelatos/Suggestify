@@ -88,8 +88,7 @@ def inject_rating_script():
 
                 // ΤΟ ΠΡΑΓΜΑΤΙΚΟ FIX: το input πρέπει να μπορεί να πάρει focus (δεν είναι πια display:none)
                 // ώστε το blur() παρακάτω να παράγει πραγματικό blur event -> commit στο Streamlit.
-                input.focus();
-
+                input.focus({ preventScroll: true });
                 setTimeout(function() {
                     input.dispatchEvent(new parentWin.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
                     input.dispatchEvent(new parentWin.KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
