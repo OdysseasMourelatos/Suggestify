@@ -229,33 +229,25 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             f'</div></div>'
         )
 
-    # ==============================================================
-    # PURE HTML QUICK-RATE
-    # ==============================================================
     def compact_star_html(item_type: str, item_id, user_id: int, scale: int = 10, key_prefix: str = "") -> str:
         assert item_type in ("song", "album")
         current = float(_current(item_type, item_id, user_id))
-        base_qs = build_base_qs()
 
         cells = []
         for i in range(1, 11):
             fill_pct = max(0.0, min(1.0, current - (i - 1))) * 100
-            
-            # Clear rating if user clicks the star that represents their current ceiling.
-            target_val = 0 if math.ceil(current) == i else i
-            href = f"{base_qs}&rate_type={item_type}&rate_id={item_id}&rate_val={target_val}"
-            
             cells.append(
-                f'<a href="{href}" target="_self" class="star-cell" '
-                f'style="--fill:{fill_pct:.0f}%" title="{i}/10"></a>'
+                f'<div class="star-cell" style="--fill:{fill_pct:.0f}%" title="{i}/10"></div>'
             )
-        return f'<div class="crate-stars">{"".join(cells)}</div>'
+        return (
+            f'<div class="crate-stars" data-type="{item_type}" data-id="{item_id}" '
+            f'data-uid="{user_id}" data-current="{current}">{"".join(cells)}</div>'
+        )
     
     _qr_R = SimpleNamespace(
         compact_star_html=compact_star_html,
         move_item=move_item
     )
-
     # ==============================================================
     # FULL DETAIL-PAGE WIDGET (FRAGMENT)
     # ==============================================================
@@ -549,17 +541,18 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
 
     def _hall_of_fame_albums(user_id: int, limit: int = 10) -> pd.DataFrame:
         return run_rating_query("""
-            SELECT * FROM (
-                SELECT DISTINCT ON (al.id)
-                    al.id AS album_id, al.title AS album_title,
-                    (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = al.id) AS image_url,
-                    ar.rating, ar.updated_at
+            WITH top_albums AS (
+                SELECT DISTINCT ON (ar.album_id) ar.album_id, ar.rating, ar.updated_at
                 FROM album_ratings ar
-                JOIN albums al ON al.id = ar.album_id
                 WHERE ar.user_id = :user_id
-                ORDER BY al.id
-            ) sub
-            ORDER BY rating DESC, updated_at DESC
+                ORDER BY ar.album_id, ar.updated_at DESC
+            )
+            SELECT ta.album_id, al.title AS album_title,
+                   (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = ta.album_id) AS image_url,
+                   ta.rating, ta.updated_at
+            FROM top_albums ta
+            JOIN albums al ON al.id = ta.album_id
+            ORDER BY ta.rating DESC, ta.updated_at DESC
             LIMIT :limit;
         """, {"user_id": user_id, "limit": limit}).reset_index(drop=True)
 
@@ -911,7 +904,10 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         @st.fragment
         def _render_hof_fragment():
             st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
-            hof_df = _hall_of_fame_songs(user_id) if kind_key == "song" else _hall_of_fame_albums(user_id)
+            
+            with st.spinner("Loading your top rated..."):
+                hof_df = _hall_of_fame_songs(user_id) if kind_key == "song" else _hall_of_fame_albums(user_id)
+            
             if hof_df.empty:
                 st.markdown('<div class="empty-state"><div class="icon">📭</div>Nothing rated yet</div>', unsafe_allow_html=True)
             else:

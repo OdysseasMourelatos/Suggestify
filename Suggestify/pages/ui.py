@@ -223,6 +223,7 @@ def inject_custom_css():
     .star-cell {{
         display: block; width: 18px; height: 18px; margin: 0 auto;
         position: relative; transition: transform 0.12s ease;
+        cursor: pointer;
     }}
     .star-cell::before {{
         content: ""; position: absolute; inset: 0;
@@ -268,7 +269,7 @@ def build_filtered_href(view_type: str, id_val: str) -> str:
 
 def build_base_qs() -> str:
     """Query-string prefix carrying forward all current params except action params (rate_*, bump)."""
-    always_exclude = {"rate_type", "rate_id", "rate_val", "bump"}
+    always_exclude = {"rate_type", "rate_id", "rate_val", "bump", "rate"} # <-- Προσθήκη του "rate" εδώ
     params = st.query_params
     tab = params.get("tab", "overview")
     qs = f"?tab={tab}"

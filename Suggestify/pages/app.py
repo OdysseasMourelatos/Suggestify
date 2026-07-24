@@ -7,6 +7,7 @@ import sys
 from html import escape
 import plotly.graph_objects as go
 from friends_match import render_friends_match_tab
+import streamlit.components.v1 as components
 
 warnings.filterwarnings("ignore")
 
@@ -30,6 +31,80 @@ load_css()
 inject_counter_script()
 inject_custom_css()
 
+def inject_rating_script():
+    components.html("""
+    <script>
+    (function() {
+        const parentWin = window.parent;
+        const doc = parentWin.document;
+        
+        if (doc.__ratingDelegated) return;
+        doc.__ratingDelegated = true;
+
+        doc.addEventListener('click', function(e) {
+            const star = e.target.closest('.star-cell');
+            if (!star) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const container = star.closest('.crate-stars');
+            if (!container) return;
+
+            const stars = Array.from(container.querySelectorAll('.star-cell'));
+            const idx = stars.indexOf(star);
+            const type = container.dataset.type;
+            const id = container.dataset.id;
+            const uid = container.dataset.uid;
+            const current = parseFloat(container.dataset.current || '0');
+            const val = (Math.ceil(current) === (idx + 1)) ? 0 : (idx + 1);
+
+            // Άμεσο οπτικό feedback
+            stars.forEach(function(s, i) {
+                const fill = Math.max(0, Math.min(1, val - i)) * 100;
+                s.style.setProperty('--fill', fill + '%');
+            });
+            container.dataset.current = val;
+
+            function trySubmit(retries) {
+                const input = doc.querySelector('input[aria-label="hidden_rate_input"]');
+
+                // Fragment rerun μπορεί στιγμιαία να έχει ξαναφτιάξει το DOM node —
+                // κάνουμε retry αντί να τα παρατάμε σιωπηλά.
+                if (!input) {
+                    if (retries > 0) {
+                        setTimeout(function() { trySubmit(retries - 1); }, 60);
+                    } else {
+                        console.error("Suggestify: Hidden input not found after retries");
+                    }
+                    return;
+                }
+
+                const setter = Object.getOwnPropertyDescriptor(parentWin.HTMLInputElement.prototype, 'value').set;
+                setter.call(input, type + ':' + id + ':' + val + ':' + uid + ':' + Date.now());
+
+                // Τα events πρέπει να δημιουργηθούν από το parent window (React 17+ iframe fix)
+                input.dispatchEvent(new parentWin.Event('input', { bubbles: true }));
+                input.dispatchEvent(new parentWin.Event('change', { bubbles: true }));
+
+                // ΤΟ ΠΡΑΓΜΑΤΙΚΟ FIX: το input πρέπει να μπορεί να πάρει focus (δεν είναι πια display:none)
+                // ώστε το blur() παρακάτω να παράγει πραγματικό blur event -> commit στο Streamlit.
+                input.focus();
+
+                setTimeout(function() {
+                    input.dispatchEvent(new parentWin.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                    input.dispatchEvent(new parentWin.KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                    input.blur();
+                }, 30);
+            }
+
+            trySubmit(5);
+        });
+    })();
+    </script>
+    """, height=0)
+
+inject_rating_script()
+
 # Η μνήμη του server που "πεθαίνει" μόλις κάνεις restart το app (streamlit run app.py)
 @st.cache_resource
 def get_qr_global_state():
@@ -46,6 +121,47 @@ else:
     st.query_params.pop("qr", None)
     
 R = init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
+
+@st.fragment
+def hidden_rate_worker():
+    st.markdown("""
+        <style>
+        div[data-testid="stTextInput"]:has(input[aria-label="hidden_rate_input"]) {
+            position: fixed !important;
+            top: -1000px !important;
+            left: -1000px !important;
+            width: 1px !important;
+            height: 1px !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            opacity: 0.01 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    def on_rate_change():
+        val = st.session_state.get("hidden_rate_state")
+        if val:
+            parts = val.split(":")
+            if len(parts) >= 4:
+                r_type, r_id, r_val = parts[0], parts[1], float(parts[2])
+                r_uid = int(parts[3])
+                
+                ok = False
+                if r_type == "song":
+                    ok = R.set_song_rating(r_uid, r_id, r_val)
+                else:
+                    ok = R.set_album_rating(r_uid, r_id, r_val)
+                    
+                if ok:
+                    st.session_state[f"rating_val_{r_type}_{r_id}_{r_uid}"] = r_val
+                    msg = f"Rated {r_val:g}/10 ✓" if r_val > 0 else "Rating cleared"
+                    st.toast(msg, icon="⭐")
+
+    st.text_input("hidden_rate_input", key="hidden_rate_state", label_visibility="collapsed", on_change=on_rate_change)
+
+hidden_rate_worker()
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None):
     header_df = run_query(f"""
@@ -290,21 +406,6 @@ qr_kwargs = dict(quick_rate=st.session_state.quick_rate_mode, R=R,
 
 # --- Action Handlers for HTML star/bump links ---
 _action_params = st.query_params
-if "rate_type" in _action_params and "rate_id" in _action_params and "rate_val" in _action_params:
-    r_type = _action_params["rate_type"]
-    r_id = _action_params["rate_id"]
-    r_val = float(_action_params["rate_val"])
-
-    ok = R.set_song_rating(selected_user_id, r_id, r_val) if r_type == "song" \
-        else R.set_album_rating(selected_user_id, r_id, r_val)
-
-    if ok:
-        st.toast(f"Rated {r_val:g}/10 ✓" if r_val > 0 else "Rating cleared", icon="⭐")
-
-    del st.query_params["rate_type"]
-    del st.query_params["rate_id"]
-    del st.query_params["rate_val"]
-    st.rerun()
 
 if "bump" in _action_params:
     try:
