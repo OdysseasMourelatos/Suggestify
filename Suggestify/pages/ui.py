@@ -128,6 +128,18 @@ def inject_custom_css():
     .wrapped-banner {{ animation: fadeSlideUp 0.5s ease both; }}
     .empty-state {{ animation: fadeIn 0.4s ease both; }}
 
+    /* ─── Zoom-safety: never let the top bar wrap or get shoved around ─── */
+    .navbar, .st-key-share_row {{
+        position: relative !important;
+        z-index: 100 !important;
+    }}
+    div[data-testid="stHorizontalBlock"]:has(.st-key-quick_rate_toggle) {{
+        flex-wrap: nowrap !important;
+    }}
+    .st-key-tab_nav_row {{
+        z-index: 40 !important; /* stays below the top bar, never overlaps it */
+    }}
+    
     div[data-testid="stButton"] button {{ transition: all 0.2s ease !important; }}
     div[data-testid="stButton"] button[kind="secondary"]:hover {{ background: rgba(29,185,84,0.08) !important; color: {GREEN} !important; transform: translateY(-1px) !important; border-color: rgba(29,185,84,0.3) !important; }}
     div[data-testid="stButton"] button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px rgba(29,185,84,0.3) !important; }}

@@ -544,38 +544,94 @@ with col_share:
 
     with st.container(key="share_row"):
         st.markdown(f"""
-        <style>
-        .st-key-share_row {{ margin-top: 15px; }}
-        .st-key-share_row div[data-testid="stHorizontalBlock"] {{
-            justify-content: flex-end !important;
-            align-items: center !important;
-            gap: 10px !important;
-            flex-wrap: nowrap !important;
-        }}
-        .st-key-share_row div[data-testid="column"] {{
-            width: auto !important;
-            flex: 0 0 auto !important;
-        }}
-        .st-key-quick_rate_toggle button {{
-            border-radius: 999px !important;
-            font-weight: 700 !important;
-            font-size: 0.8rem !important;
-            padding: 0.45rem 1.1rem !important;
-            transition: all 0.2s ease !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="secondary"] {{
-            background: rgba(255,255,255,0.04) !important;
-            border: 1px solid rgba(255,255,255,0.1) !important;
-            color: {TEXT_MID} !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="primary"] {{
-            background: #E53935 !important;
-            border: 1px solid #E53935 !important;
-            color: #fff !important;
-            box-shadow: 0 4px 14px rgba(229,57,53,0.35) !important;
-        }}
-        </style>
-        """, unsafe_allow_html=True)
+            <style>
+            .st-key-share_row {{ margin-top: 15px; }}
+            .st-key-share_row div[data-testid="stHorizontalBlock"] {{
+                justify-content: flex-end !important;
+                align-items: center !important;
+                gap: 10px !important;
+                flex-wrap: nowrap !important;
+            }}
+            .st-key-share_row div[data-testid="column"] {{
+                width: auto !important;
+                flex: 0 0 auto !important;
+                min-width: max-content !important;
+            }}
+
+            /* ─── Rating toggle: pill with a live status dot ─── */
+            .st-key-quick_rate_toggle button {{
+                position: relative !important;
+                border-radius: 999px !important;
+                font-weight: 700 !important;
+                font-size: 0.8rem !important;
+                padding: 0.5rem 1.2rem 0.5rem 2.1rem !important;
+                white-space: nowrap !important;
+                transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
+                letter-spacing: 0.01em !important;
+            }}
+            /* status dot, drawn with box-shadow so it sits inside the button padding */
+            .st-key-quick_rate_toggle button::before {{
+                content: '';
+                position: absolute;
+                left: 1.05rem; top: 50%;
+                width: 7px; height: 7px;
+                border-radius: 50%;
+                transform: translateY(-50%);
+            }}
+            .st-key-quick_rate_toggle button[kind="secondary"] {{
+                background: rgba(255,255,255,0.04) !important;
+                border: 1px solid rgba(255,255,255,0.12) !important;
+                color: {TEXT_MID} !important;
+            }}
+            .st-key-quick_rate_toggle button[kind="secondary"]::before {{
+                background: {TEXT_DIM};
+            }}
+            .st-key-quick_rate_toggle button[kind="secondary"]:hover {{
+                border-color: rgba(255,255,255,0.25) !important;
+                color: {TEXT} !important;
+                transform: translateY(-1px) !important;
+            }}
+            .st-key-quick_rate_toggle button[kind="primary"] {{
+                background: linear-gradient(135deg, #E53935, #C62828) !important;
+                border: 1px solid #FF6659 !important;
+                color: #fff !important;
+                box-shadow: 0 4px 16px rgba(229,57,53,0.4) !important;
+            }}
+            .st-key-quick_rate_toggle button[kind="primary"]::before {{
+                background: #fff;
+                box-shadow: 0 0 8px #fff, 0 0 3px #fff;
+                animation: ratingPulse 1.6s ease-in-out infinite;
+            }}
+            .st-key-quick_rate_toggle button[kind="primary"]:hover {{
+                transform: translateY(-1px) !important;
+                box-shadow: 0 6px 22px rgba(229,57,53,0.55) !important;
+            }}
+            @keyframes ratingPulse {{
+                0%, 100% {{ opacity: 1; transform: translateY(-50%) scale(1); }}
+                50% {{ opacity: 0.5; transform: translateY(-50%) scale(0.75); }}
+            }}
+
+            /* ─── Share Stats: outlined glass button matching the app's accent ─── */
+            .st-key-share_row div[data-testid="stHorizontalBlock"] > div:last-child button {{
+                border-radius: 999px !important;
+                font-weight: 700 !important;
+                font-size: 0.8rem !important;
+                padding: 0.5rem 1.2rem !important;
+                white-space: nowrap !important;
+                background: rgba(29,185,84,0.06) !important;
+                border: 1px solid rgba(29,185,84,0.25) !important;
+                color: {GREEN} !important;
+                transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
+            }}
+            .st-key-share_row div[data-testid="stHorizontalBlock"] > div:last-child button:hover {{
+                background: rgba(29,185,84,0.16) !important;
+                border-color: {GREEN} !important;
+                color: #fff !important;
+                transform: translateY(-1px) !important;
+                box-shadow: 0 4px 16px rgba(29,185,84,0.3) !important;
+            }}
+            </style>
+            """, unsafe_allow_html=True)
 
         col_a, col_b = st.columns(2)
 
@@ -1058,8 +1114,8 @@ if detail_type and detail_id:
                 df_h = run_query("""
                     SELECT EXTRACT(HOUR FROM s.played_at)::INT AS hour, COUNT(*) AS stream_count
                     FROM streams s
-                    JOIN songs so ON so.id = s.song_id
-                    WHERE so.album_id = :aid 
+                    JOIN song_artists sa ON sa.song_id = s.song_id
+                    WHERE sa.artist_id = :aid 
                       AND s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
                     GROUP BY 1 ORDER BY 1;

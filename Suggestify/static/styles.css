@@ -606,7 +606,7 @@ div[data-testid="stPopoverBody"] button {
 /* ========================================================
    MOBILE RESPONSIVE FIXES (Bulletproof)
    ======================================================== */
-@media (max-width: 768px) {
+@media (max-width: 48em) {
     /* Δίνουμε όλο τον χώρο της οθόνης, μειώνουμε τα τεράστια κενά αριστερά-δεξιά */
     .block-container {
         padding: 1rem 0.5rem 4rem !important; 
@@ -810,7 +810,7 @@ div[data-testid="stPopoverBody"] button {
 }
 
 /* Extra-small phones (iPhone SE etc.) — drop to single column filters */
-@media (max-width: 380px) {
+@media (max-width: 23.75em) {
     .st-key-filter_bar_row [data-testid="column"] {
         flex: 1 1 100% !important;
         min-width: 100% !important;
@@ -819,45 +819,30 @@ div[data-testid="stPopoverBody"] button {
 }
 
 /* ═══════════════════════════════════════════════
-   FLOATING DOCK TAB BAR (Bottom of screen)
+   DESKTOP DEFAULT: TAB BAR (Normal Inline Row)
    ═══════════════════════════════════════════════ */
 .st-key-tab_nav_row {
-    position: fixed !important;
-    bottom: 2rem !important; /* Κολλημένο στο κάτω μέρος της οθόνης */
-    top: auto !important;    /* Ακυρώνει τυχόν άνω margins του Streamlit */
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    z-index: 99999 !important;
-    
-    /* Premium Glassmorphism Dock */
-    background: rgba(18, 18, 18, 0.65) !important;
-    backdrop-filter: blur(30px) saturate(200%) !important;
-    -webkit-backdrop-filter: blur(30px) saturate(200%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0.75rem 0 0.5rem !important;
+    background: rgba(18, 18, 18, 0.5) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
     border-radius: 999px !important;
     padding: 0.4rem 0.5rem !important;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255,255,255,0.05) !important;
-    
-    width: max-content !important;
-    margin: 0 !important;
 }
 
-/* Συμπιέζουμε τις στήλες του Streamlit για να αγκαλιάσουν τα κουμπιά */
 .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
     gap: 0.25rem !important;
-    width: max-content !important;
+    width: 100% !important;
     flex-wrap: nowrap !important;
-    align-items: center !important;
 }
 
 .st-key-tab_nav_row [data-testid="column"] {
-    width: auto !important;
-    flex: 0 0 auto !important;
+    flex: 1 1 0 !important;
     min-width: 0 !important;
     padding: 0 !important;
 }
 
-/* Εμφάνιση Κουμπιών (Pills) μέσα στο Dock */
 .st-key-tab_nav_row div[data-testid="stButton"] button {
     background: transparent !important;
     border: none !important;
@@ -865,9 +850,8 @@ div[data-testid="stPopoverBody"] button {
     color: VAR_TEXT_MID !important;
     font-weight: 600 !important;
     font-size: 0.88rem !important;
-    padding: 0.4rem 1.25rem !important;
-    min-height: 2.4rem !important;
-    line-height: 1 !important;
+    padding: 0.4rem 0.75rem !important;
+    width: 100% !important;
     transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
     box-shadow: none !important;
 }
@@ -875,10 +859,8 @@ div[data-testid="stPopoverBody"] button {
 .st-key-tab_nav_row div[data-testid="stButton"] button:hover {
     background: rgba(255, 255, 255, 0.08) !important;
     color: VAR_TEXT !important;
-    transform: scale(1.05) !important;
 }
 
-/* Active Tab — Πράσινο & Φωτεινό */
 .st-key-tab_nav_row div[data-testid="stButton"] button[kind="primary"] {
     background: VAR_GREEN !important;
     color: #000 !important;
@@ -886,13 +868,56 @@ div[data-testid="stPopoverBody"] button {
     box-shadow: 0 4px 15px VAR_GREEN_GLOW !important;
 }
 
-.st-key-tab_nav_row div[data-testid="stButton"] button[kind="primary"]:hover {
-    transform: scale(1.05) !important;
-    box-shadow: 0 6px 20px VAR_GREEN_GLOW !important;
-}
+/* ========================================================
+   MOBILE OVERRIDES (Floating Dock + Popover menu)
+   ======================================================== */
+@media (max-width: 48em) {
+    /* Μετατροπή της μπάρας σε Floating Dock στο κάτω μέρος */
+    .st-key-tab_nav_row {
+        position: fixed !important;
+        bottom: 2rem !important;
+        top: auto !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        z-index: 99999 !important;
+        
+        background: rgba(18, 18, 18, 0.65) !important;
+        backdrop-filter: blur(30px) saturate(200%) !important;
+        -webkit-backdrop-filter: blur(30px) saturate(200%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 999px !important;
+        padding: 0.4rem 0.5rem !important;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+        
+        width: max-content !important;
+        margin: 0 !important;
+    }
 
-/* Mobile Floating Menu Override */
-@media (max-width: 768px) {
+    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
+        width: max-content !important;
+        align-items: center !important;
+    }
+
+    .st-key-tab_nav_row [data-testid="column"] {
+        width: auto !important;
+        flex: 0 0 auto !important;
+    }
+
+    .st-key-tab_nav_row div[data-testid="stButton"] button {
+        width: auto !important;
+        padding: 0.4rem 1.25rem !important;
+        min-height: 2.4rem !important;
+    }
+
+    .st-key-tab_nav_row div[data-testid="stButton"] button:hover {
+        transform: scale(1.05) !important;
+    }
+
+    .st-key-tab_nav_row div[data-testid="stButton"] button[kind="primary"]:hover {
+        box-shadow: 0 6px 20px VAR_GREEN_GLOW !important;
+    }
+
+    /* Mobile Floating Menu (Όταν τα tabs είναι πολλά και μπαίνουν στο dropdown) */
     .st-key-tab_nav_mobile {
         position: fixed !important;
         bottom: 2rem !important;
