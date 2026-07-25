@@ -301,18 +301,17 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         subtitle = escape(str(row[sub_col]))[:50]
         streams = _fmt1(row[streams_col])
         hours = _fmt2(row[hours_col])
-        can_navigate = link_type and id_col and id_col in row.index
-
-        item_id = str(row[id_col]) if can_navigate else f"idx_{i}"
-
         can_up, can_down = False, False
-        if can_navigate and has_rating_col:
-            my_rating = float(row['rating'])
-            if i > 0 and float(df.iloc[i-1]['rating']) == my_rating:
-                can_up = True
-            if i < len(df) - 1 and float(df.iloc[i+1]['rating']) == my_rating:
-                can_down = True
-
+        can_navigate = link_type and id_col and id_col in row.index
+        
+        if can_navigate:
+            raw_id = row[id_col]
+            # Προστασία: Αν το Pandas έχει κάνει cast το ID σε float (πχ 123.0),
+            # κρατάμε αυστηρά τον ακέραιο
+            item_id = str(int(raw_id)) if isinstance(raw_id, float) and raw_id.is_integer() else str(raw_id)
+        else:
+            item_id = f"idx_{i}"
+            
         image_url = row.get(image_col) if image_col in row else None
         if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
             radius = "50%" if link_type == "artist" else "8px"

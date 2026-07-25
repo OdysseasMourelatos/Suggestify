@@ -20,11 +20,7 @@ def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:
         return pd.read_sql(text(sql), conn, params=params or {})
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def run_rating_query(sql: str, params: dict | None = None, _cache_gen: int = 0) -> pd.DataFrame:
-    """Separate cache bucket for rating-dependent queries. `_cache_gen` is not
-    sent to the DB — it only participates in st.cache_data's hash key, so
-    bump_rating_cache_gen(user_id) invalidates just that user's cached rows
-    instead of wiping every user's cache."""
+def run_rating_query(sql: str, params: dict | None = None, cache_gen: int = 0) -> pd.DataFrame:
     with get_engine().connect() as conn:
         return pd.read_sql(text(sql), conn, params=params or {})
 

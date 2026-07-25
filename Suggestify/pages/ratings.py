@@ -35,7 +35,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         params = params or {}
         uid = params.get("user_id")
         gen = get_rating_cache_gen(uid) if (get_rating_cache_gen and uid is not None) else 0
-        return _raw_run_rating_query(sql, params, _cache_gen=gen)
+        return _raw_run_rating_query(sql, params, cache_gen=gen)
 
     def _invalidate_rating_cache(user_id: int) -> None:
         if bump_rating_cache_gen:
@@ -175,10 +175,17 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     def _seed_ratings_from_df(item_type: str, df: pd.DataFrame, id_col: str, user_id: int) -> None:
         if df.empty or "rating" not in df.columns:
             return
-        for _, r in df[[id_col, "rating"]].drop_duplicates(subset=[id_col]).iterrows():
-            key = f"rating_val_{item_type}_{r[id_col]}_{user_id}"
+            
+        unique_df = df.drop_duplicates(subset=[id_col])
+        
+        # Το zip() διαβάζει απευθείας τα columns χωρίς type casting (τα int μένουν int).
+        for i_id, r_val in zip(unique_df[id_col], unique_df["rating"]):
+            # Για απόλυτη ασφάλεια, αν έρθει ποτέ 123.0, το καθαρίζουμε.
+            clean_id = str(i_id).split('.')[0]
+            key = f"rating_val_{item_type}_{clean_id}_{user_id}"
+            
             if key not in st.session_state:
-                st.session_state[key] = float(r["rating"])
+                st.session_state[key] = float(r_val)
             
     def _px(size: str) -> float:
         try:
