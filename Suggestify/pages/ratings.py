@@ -61,6 +61,30 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     _GET_SONG = "SELECT rating FROM song_ratings WHERE user_id = :user_id AND song_id = :song_id;"
     _GET_ALBUM = "SELECT rating FROM album_ratings WHERE user_id = :user_id AND album_id = :album_id;"
 
+    _GET_SONG_REVIEW = "SELECT review FROM song_ratings WHERE user_id = :user_id AND song_id = :song_id;"
+    _GET_ALBUM_REVIEW = "SELECT review FROM album_ratings WHERE user_id = :user_id AND album_id = :album_id;"
+    
+    # Το review μπορεί να αποθηκευτεί ΜΟΝΟ αν υπάρχει ήδη rating (rating > 0)
+    _SET_SONG_REVIEW = "UPDATE song_ratings SET review = :review, updated_at = now() WHERE user_id = :user_id AND song_id = :song_id;"
+    _SET_ALBUM_REVIEW = "UPDATE album_ratings SET review = :review, updated_at = now() WHERE user_id = :user_id AND album_id = :album_id;"
+
+    def get_song_review(user_id: int, song_id) -> str:
+        df = run_rating_query(_GET_SONG_REVIEW, {"user_id": user_id, "song_id": song_id})
+        return str(df.iloc[0]["review"]) if not df.empty and pd.notnull(df.iloc[0]["review"]) else ""
+
+    def get_album_review(user_id: int, album_id) -> str:
+        df = run_rating_query(_GET_ALBUM_REVIEW, {"user_id": user_id, "album_id": album_id})
+        return str(df.iloc[0]["review"]) if not df.empty and pd.notnull(df.iloc[0]["review"]) else ""
+
+    def set_song_review(user_id: int, song_id, review: str) -> bool:
+        ok = _execute(_SET_SONG_REVIEW, {"user_id": user_id, "song_id": song_id, "review": review})
+        if ok: _invalidate_rating_cache(user_id)
+        return ok
+
+    def set_album_review(user_id: int, album_id, review: str) -> bool:
+        ok = _execute(_SET_ALBUM_REVIEW, {"user_id": user_id, "album_id": album_id, "review": review})
+        if ok: _invalidate_rating_cache(user_id)
+        return ok
     # ==============================================================
     # WRITE PATH
     # ==============================================================
@@ -272,39 +296,127 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
 
         with st.container(key=wrap_key):
             st.markdown(f"""
-            <style>
-            .st-key-{wrap_key} {{
-                background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: {pad};
-                margin: 10px 0 6px;
-            }}
-            .st-key-{wrap_key} div[data-testid="stSlider"] {{
-                max-width: 460px !important;
-                margin: 4px auto 0 !important;
-            }}
-            .st-key-{wrap_key} div[data-testid="stSlider"] label {{ display:none; }}
-            .st-key-{wrap_key} div[data-testid="stTickBar"] {{ display: none !important; }}
-            .st-key-{wrap_key} button {{
-                background: transparent !important;
-                border: 1px solid rgba(255,255,255,0.15) !important;
-                color: {TEXT_MID} !important;
-                font-size: 0.75rem !important;
-                padding: 0.2rem 0 !important;
-                margin: {"10px" if compact else "18px"} auto 0 !important;
-                max-width: 120px !important;
-                display: block !important;
-                transition: all 0.2s ease !important;
-                border-radius: 999px !important;
-            }}
-            .st-key-{wrap_key} button:hover {{
-                color: #FF7043 !important;
-                border-color: #FF704355 !important;
-                background: rgba(255,112,67,0.05) !important;
-            }}
-            </style>
-            """, unsafe_allow_html=True)
+                <style>
+                .st-key-{wrap_key} {{
+                    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
+                    border: 1px solid rgba(255,255,255,0.08);
+                    border-radius: 16px;
+                    padding: {pad};
+                    margin: 10px 0 6px;
+                }}
+                .st-key-{wrap_key} div[data-testid="stSlider"] {{
+                    max-width: 460px !important;
+                    margin: 4px auto 0 !important;
+                }}
+                .st-key-{wrap_key} div[data-testid="stSlider"] label {{ display:none; }}
+                .st-key-{wrap_key} div[data-testid="stTickBar"] {{ display: none !important; }}
+                
+                /* Center the button pair as a compact block, matching the slider's width */
+                .st-key-btnrow_{widget_key} {{
+                    max-width: 460px !important;
+                    margin: 10px auto 0 !important;
+                }}
+                .st-key-btnrow_{widget_key} div[data-testid="stHorizontalBlock"] {{
+                    gap: 10px !important;
+                }}
+                /* ─── Action row (Clear Rating / Add Review) ─── */
+                .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] button[kind="secondary"] {{
+                    background: rgba(255,255,255,0.03) !important;
+                    border: 1px solid rgba(255,255,255,0.12) !important;
+                    color: {TEXT_MID} !important;
+                    font-size: 0.75rem !important;
+                    font-weight: 700 !important;
+                    letter-spacing: 0.01em !important;
+                    padding: 0.55rem 0 !important;
+                    margin-top: 10px !important;
+                    border-radius: 10px !important;
+                    transition: all 0.2s cubic-bezier(0.16,1,0.3,1) !important;
+                    box-shadow: none !important;
+                }}
+                .st-key-{wrap_key} div[data-testid="stHorizontalBlock"] button[kind="secondary"]:hover {{
+                    transform: translateY(-1px) !important;
+                }}
+
+                /* Clear Rating — neutral at rest, true red on hover */
+                .st-key-btnrow_{widget_key} .st-key-clear_{widget_key} button[kind="secondary"] {{
+                    color: {TEXT_MID} !important;
+                    border-color: rgba(255,255,255,0.12) !important;
+                    background: rgba(255,255,255,0.03) !important;
+                }}
+                .st-key-btnrow_{widget_key} .st-key-clear_{widget_key} button[kind="secondary"]:hover {{
+                    color: #FF5252 !important;
+                    border-color: rgba(244,67,54,0.5) !important;
+                    background: rgba(244,67,54,0.10) !important;
+                    box-shadow: 0 4px 14px rgba(244,67,54,0.2) !important;
+                    transform: translateY(-1px) !important;
+                }}
+
+                /* Add Review — green accent to mark it as the "positive" action */
+                .st-key-btnrow_{widget_key} div[data-testid="stPopover"] > div > button[kind="secondary"] {{
+                    color: {GREEN} !important;
+                    border-color: rgba(29,185,84,0.28) !important;
+                    background: rgba(29,185,84,0.05) !important;
+                }}
+                .st-key-btnrow_{widget_key} div[data-testid="stPopover"] > div > button[kind="secondary"]:hover {{
+                    color: #fff !important;
+                    border-color: {GREEN} !important;
+                    background: rgba(29,185,84,0.18) !important;
+                    box-shadow: 0 4px 16px rgba(29,185,84,0.28) !important;
+                    transform: translateY(-1px) !important;
+                }}
+
+                /* ─── Review popover content ─── */
+                div[data-testid="stPopoverBody"] {{
+                    background: linear-gradient(165deg, #181818, #101010) !important;
+                    border: 1px solid rgba(255,255,255,0.1) !important;
+                    border-radius: 18px !important;
+                    padding: 1.1rem !important;
+                    min-width: 320px !important;
+                    box-shadow: 0 24px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04) !important;
+                }}
+                .review-popover-header {{
+                    display: flex; align-items: center; gap: 8px;
+                    font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+                    letter-spacing: 0.08em; color: {TEXT_DIM};
+                    margin-bottom: 10px;
+                }}
+                .review-popover-header .dot {{
+                    width: 6px; height: 6px; border-radius: 50%;
+                    background: {GREEN}; box-shadow: 0 0 8px {GREEN};
+                }}
+                .st-key-txt_{widget_key} label {{ display: none !important; }}
+                .st-key-txt_{widget_key} textarea {{
+                    background: rgba(255,255,255,0.035) !important;
+                    border: 1px solid rgba(255,255,255,0.1) !important;
+                    border-radius: 12px !important;
+                    color: {TEXT} !important;
+                    font-size: 0.88rem !important;
+                    line-height: 1.5 !important;
+                    padding: 0.8rem !important;
+                    transition: all 0.2s ease !important;
+                }}
+                .st-key-txt_{widget_key} textarea::placeholder {{ color: {TEXT_DIM} !important; }}
+                .st-key-txt_{widget_key} textarea:focus {{
+                    border-color: {GREEN} !important;
+                    box-shadow: 0 0 0 3px rgba(29,185,84,0.12) !important;
+                }}
+                .st-key-save_rev_{widget_key} button {{
+                    border-radius: 10px !important;
+                    font-weight: 700 !important;
+                    font-size: 0.85rem !important;
+                    background: {GREEN} !important;
+                    color: #000 !important;
+                    border: none !important;
+                    margin-top: 10px !important;
+                    box-shadow: 0 4px 14px rgba(29,185,84,0.3) !important;
+                    transition: all 0.2s ease !important;
+                }}
+                .st-key-save_rev_{widget_key} button:hover {{
+                    transform: translateY(-1px) !important;
+                    box-shadow: 0 6px 20px rgba(29,185,84,0.42) !important;
+                }}
+                </style>
+                """, unsafe_allow_html=True)
 
             head_l, head_r = st.columns([3, 2])
             with head_l:
@@ -335,13 +447,38 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                 key=widget_key, on_change=_on_change, label_visibility="collapsed",
             )
 
+            # === ΕΔΩ ΜΠΑΙΝΕΙ Η ΔΙΟΡΘΩΣΗ ΚΑΙ ΤΟ ΠΛΑΙΣΙΟ ΤΟΥ REVIEW ===
             if current > 0:
-                if st.button("Clear Rating", key=f"clear_{widget_key}"):
-                    if _setter(item_type)(user_id, item_id, 0.0):
-                        st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = 0.0
-                        st.session_state[widget_key] = 0.0
-                        st.rerun(scope="fragment")
+                with st.container(key=f"btnrow_{widget_key}"):
+                    btn_col1, btn_col2 = st.columns(2)
 
+                    with btn_col1:
+                        if st.button("✕ Clear Rating", key=f"clear_{widget_key}", use_container_width=True):
+                            if _setter(item_type)(user_id, item_id, 0.0):
+                                st.session_state[f"rating_val_{item_type}_{item_id}_{user_id}"] = 0.0
+                                if widget_key in st.session_state:
+                                    del st.session_state[widget_key]
+                                st.rerun(scope="fragment")
+
+                    with btn_col2:
+                        with st.popover("📝 Add Review", use_container_width=True):
+                            st.markdown(
+                                '<div class="review-popover-header"><span class="dot"></span>Your Review</div>',
+                                unsafe_allow_html=True
+                            )
+                            rev_getter = get_song_review if item_type == "song" else get_album_review
+                            rev_setter = set_song_review if item_type == "song" else set_album_review
+
+                            curr_rev = rev_getter(user_id, item_id)
+                            new_rev = st.text_area(
+                                "Write your thoughts...", value=curr_rev, height=120,
+                                key=f"txt_{widget_key}", placeholder="What stood out to you?",
+                                label_visibility="collapsed",
+                            )
+
+                            if st.button("💾 Save Review", key=f"save_rev_{widget_key}", use_container_width=True):
+                                if rev_setter(user_id, item_id, new_rev):
+                                    st.toast("Review saved successfully!", icon="✅")
     # ==============================================================
     # FANCY SEGMENTED TOGGLE
     # ==============================================================

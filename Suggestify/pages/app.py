@@ -1219,7 +1219,118 @@ if detail_type and detail_id:
 
             chips_html += '</div>'
             st.markdown(chips_html, unsafe_allow_html=True)
+            
+            # === ΝΕΟ ΚΟΜΜΑΤΙ: Album Track Statistics ===
+            if st.session_state.quick_rate_mode:
+                track_ratings_df = run_rating_query("""
+                    SELECT r.rating 
+                    FROM song_ratings r
+                    JOIN songs s ON s.id = r.song_id
+                    WHERE s.album_id = :aid AND r.user_id = :uid AND r.rating > 0
+                """, {"aid": detail_id, "uid": selected_user_id})
+                
+                if not track_ratings_df.empty:
+                    ratings_series = track_ratings_df["rating"]
+                    n_rated = len(ratings_series)
+                    
+                    if n_rated > 0:
+                        mean_val = ratings_series.mean()
+                        median_val = ratings_series.median()
+                        std_val = ratings_series.std(ddof=1) if n_rated > 1 else 0.0
 
+                        sug_min = max(0.0, mean_val - std_val)
+                        sug_max = min(10.0, mean_val + std_val)
+                        suggested_str = f"{sug_min:.1f} – {sug_max:.1f}" if std_val > 0 else f"{mean_val:.1f}"
+
+                        def _stat_block(icon, label, value, highlight=False):
+                            cls = "album-stat-block highlight" if highlight else "album-stat-block"
+                            color = GREEN if highlight else TEXT
+                            return (
+                                f'<div class="{cls}">'
+                                f'<div class="album-stat-icon">{icon}</div>'
+                                f'<div class="album-stat-text">'
+                                f'<div class="album-stat-label">{label}</div>'
+                                f'<div class="album-stat-value" style="color:{color};">{value}</div>'
+                                f'</div>'
+                                f'</div>'
+                            )
+
+                        stats_css = f'''<style>
+                        .album-stats-bar {{
+                            display: flex;
+                            align-items: stretch;
+                            background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+                            border: 1px solid {BORDER};
+                            border-radius: 16px;
+                            padding: 2px;
+                            margin-bottom: 26px;
+                            position: relative;
+                            overflow: hidden;
+                            animation: fadeSlideUp 0.45s cubic-bezier(0.16,1,0.3,1) both;
+                        }}
+                        .album-stats-bar::before {{
+                            content: '';
+                            position: absolute; top: 0; left: 8%; right: 8%; height: 2px;
+                            background: linear-gradient(90deg, transparent, {GREEN}, transparent);
+                            opacity: 0.55;
+                        }}
+                        .album-stat-block {{
+                            flex: 1;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            gap: 10px;
+                            padding: 15px 10px;
+                            position: relative;
+                            transition: background 0.2s ease;
+                        }}
+                        .album-stat-block:hover {{ background: rgba(255,255,255,0.02); }}
+                        .album-stat-block + .album-stat-block::before {{
+                            content: '';
+                            position: absolute;
+                            left: 0; top: 22%; bottom: 22%;
+                            width: 1px;
+                            background: {BORDER};
+                        }}
+                        .album-stat-icon {{
+                            width: 30px; height: 30px; flex-shrink: 0;
+                            display: flex; align-items: center; justify-content: center;
+                            border-radius: 8px;
+                            background: rgba(255,255,255,0.05);
+                            font-size: 0.85rem;
+                        }}
+                        .album-stat-text {{ display: flex; flex-direction: column; gap: 2px; text-align: left; }}
+                        .album-stat-label {{
+                            font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+                            letter-spacing: 0.08em; color: {TEXT_DIM}; white-space: nowrap;
+                        }}
+                        .album-stat-value {{ font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }}
+                        .album-stat-block.highlight {{
+                            background: radial-gradient(ellipse at center, rgba(29,185,84,0.10), transparent 70%);
+                            border-radius: 13px;
+                        }}
+                        .album-stat-block.highlight .album-stat-icon {{ background: rgba(29,185,84,0.18); }}
+                        .album-stat-block.highlight .album-stat-label {{ color: {GREEN}; opacity: 0.85; }}
+                        @media (max-width: 768px) {{
+                            .album-stats-bar {{ flex-wrap: wrap; }}
+                            .album-stat-block {{ flex: 1 1 45%; padding: 10px 6px; }}
+                            .album-stat-block + .album-stat-block::before {{ display: none; }}
+                            .album-stat-value {{ font-size: 0.95rem; }}
+                        }}
+                        </style>'''
+
+                        stats_body = (
+                            '<div class="album-stats-bar">'
+                            + _stat_block("🎯", "Rated Tracks", n_rated)
+                            + _stat_block("📊", "Mean", f"{mean_val:.2f}")
+                            + _stat_block("📍", "Median", f"{median_val:.2f}")
+                            + _stat_block("📐", "Std Dev", f"± {std_val:.2f}")
+                            + _stat_block("⭐", "Suggested", suggested_str, highlight=True)
+                            + '</div>'
+                        )
+
+                        st.markdown(stats_css + stats_body, unsafe_allow_html=True)
+            
             c_left, c_right = st.columns([1.2, 1.0])
             
             with c_left:

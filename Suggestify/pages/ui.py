@@ -172,9 +172,10 @@ def inject_custom_css():
     .meta-chip-label {{ font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: {TEXT_DIM}; }}
     .meta-chip-value {{ font-size: 0.88rem; font-weight: 600; color: {TEXT}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
     a.meta-chip-link {{ text-decoration: none !important; }}
-    a.meta-chip-link:hover .meta-chip {{ border-color: {GREEN}; background: rgba(29,185,84,0.08); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(29,185,84,0.15); }}
-    a.meta-chip-link:hover .meta-chip-icon {{ background: rgba(29,185,84,0.25); }}
-    a.meta-chip-link:hover .meta-chip-value {{ color: {GREEN}; }}
+    .meta-chip:hover {{ border-color: {GREEN}; background: rgba(29,185,84,0.08); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(29,185,84,0.15); cursor: default; }}
+    .meta-chip:hover .meta-chip-icon {{ background: rgba(29,185,84,0.25); }}
+    .meta-chip:hover .meta-chip-value {{ color: {GREEN}; }}
+    a.meta-chip-link .meta-chip:hover {{ cursor: pointer; }}
     .explicit-badge {{ 
         background: rgba(255, 255, 255, 0.1); color: #fff; padding: 2px 6px; 
         border-radius: 4px; font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; margin-left: 8px;
