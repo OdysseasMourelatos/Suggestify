@@ -1,3 +1,4 @@
+from matplotlib import style
 import streamlit as st
 import pandas as pd
 import datetime
@@ -516,153 +517,222 @@ def update_dates_from_preset():
     st.query_params["end"] = st.session_state.end_date.isoformat()
 
 def mark_manual():
-    st.session_state.date_preset = None
+    # Αν πειράξει τις ημερομηνίες χειροκίνητα, γυρνάει αυτόματα το dropdown στο "Manual"
+    st.session_state.date_preset = "manual" 
     st.query_params["preset"] = "manual"
     st.query_params["start"] = st.session_state.start_date.isoformat()
     st.query_params["end"] = st.session_state.end_date.isoformat()
 
-preset_options = {"all": "♾️ All Time", "wrapped": "🎁 Wrapped", "month": "📅 Month", "week": "📅 Week"}
+# ΠΡΟΣΤΕΘΗΚΕ ΤΟ "⚙️ Manual" ΣΤΟ ΛΕΞΙΚΟ!
+preset_options = {"all": "♾️ All Time", "wrapped": "🎁 Wrapped", "month": "📅 Month", "week": "📅 Week", "manual": "⚙️ Manual"}
 
 view_state = get_current_view()
 current_tab = view_state["tab"]
 detail_type = view_state["type"]
 detail_id = view_state["id"]
 
-col_brand, col_share = st.columns([4, 1])
+# ====== ΑΡΧΗ ΤΟΥ ΝΕΟΥ ΚΩΔΙΚΑ ΓΙΑ ΤΗΝ ΠΑΝΩ ΜΠΑΡΑ ======
+with st.container(key="top_bar_wrapper"):
+    st.markdown(f"""
+        <style>
+        /* Κεντρικό flexbox της πάνω μπάρας */
+        div.st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] {{
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            justify-content: flex-start !important;
+            align-items: flex-end !important;
+            gap: 0.75rem !important; /* Φέρνει τα Φίλτρα και τα Κουμπιά πιο κοντά */
+        }}
 
-with col_brand:
-    st.markdown('''
-    <div class="navbar" style="padding: 0; margin-bottom: 0;">
-        <div class="nav-brand brand-title">
-            <span>🎧</span> Suggestify
+        /* Όλες οι στήλες παίρνουν αυτόματο πλάτος (ακυρώνουμε τα ποσοστά του Streamlit) */
+        div.st-key-top_bar_wrapper div[data-testid="column"] {{
+            flex: 0 0 auto !important;
+            width: auto !important;
+            min-width: 0 !important;
+        }}
+
+        /* Η spacer στήλη ρουφάει τον κενό χώρο, σπρώχνοντας τα υπόλοιπα δεξιά */
+        div.st-key-top_bar_wrapper div[data-testid="column"]:has(> div .st-key-top_bar_spacer) {{
+            flex: 1 1 auto !important;
+            width: auto !important;
+        }}
+
+        /* --- Υπο-διάταξη για τα φίλτρα (Manual Mode) --- */
+        .st-key-top_filter_row div[data-testid="stHorizontalBlock"] {{
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            align-items: flex-end !important;
+            gap: 0.4rem !important; /* Πολύ κοντά οι ημερομηνίες με το selectbox */
+        }}
+
+        /* Σταθερά πλάτη για να μην ζουλιούνται ΠΟΤΕ τα inputs */
+        .st-key-top_filter_row div[data-baseweb="select"] {{
+            width: 140px !important;
+            min-width: 140px !important;
+        }}
+        .st-key-top_filter_row div[data-testid="stDateInput"] {{
+            width: 125px !important;
+            min-width: 125px !important;
+        }}
+        .st-key-top_filter_row {{ margin-top: 0 !important; margin-bottom: 0.15rem !important; }}
+
+        /* Styling του label */
+        .top-filter-label {{
+            font-size: 0.65rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--dynamic-color);
+            opacity: 0.8;
+            margin-bottom: 0.25rem;
+            display: block;
+        }}
+
+        /* ─── Rating toggle: pill with a live status dot ─── */
+        .st-key-quick_rate_toggle button {{
+            position: relative !important;
+            border-radius: 999px !important;
+            font-weight: 700 !important;
+            font-size: 0.85rem !important;
+            padding: 0 1.2rem 0 2.2rem !important;
+            height: 44px !important;
+            display: flex !important;
+            align-items: center !important;
+            white-space: nowrap !important;
+            transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
+            letter-spacing: 0.01em !important;
+            box-sizing: border-box !important;
+        }}
+        .st-key-quick_rate_toggle button::before {{
+            content: '';
+            position: absolute;
+            left: 1.05rem; top: 50%;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            transform: translateY(-50%);
+        }}
+        .st-key-quick_rate_toggle button[kind="secondary"] {{
+            background: rgba(255,255,255,0.04) !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
+            color: {TEXT_MID} !important;
+        }}
+        .st-key-quick_rate_toggle button[kind="secondary"]::before {{
+            background: {TEXT_DIM};
+        }}
+        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{
+            border-color: rgba(255,255,255,0.25) !important;
+            color: {TEXT} !important;
+            transform: translateY(-1px) !important;
+        }}
+        .st-key-quick_rate_toggle button[kind="primary"] {{
+            background: linear-gradient(135deg, #E53935, #C62828) !important;
+            border: 1px solid #FF6659 !important;
+            color: #fff !important;
+            box-shadow: 0 4px 16px rgba(229,57,53,0.4) !important;
+        }}
+        .st-key-quick_rate_toggle button[kind="primary"]::before {{
+            background: #fff;
+            box-shadow: 0 0 8px #fff, 0 0 3px #fff;
+            animation: ratingPulse 1.6s ease-in-out infinite;
+        }}
+        .st-key-quick_rate_toggle button[kind="primary"]:hover {{
+            transform: translateY(-1px) !important;
+            box-shadow: 0 6px 22px rgba(229,57,53,0.55) !important;
+        }}
+        @keyframes ratingPulse {{
+            0%, 100% {{ opacity: 1; transform: translateY(-50%) scale(1); }}
+            50% {{ opacity: 0.5; transform: translateY(-50%) scale(0.75); }}
+        }}
+
+        /* ─── Share Stats button ─── */
+        div.st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child button {{
+            border-radius: 999px !important;
+            font-weight: 700 !important;
+            font-size: 0.85rem !important;
+            padding: 0 1.2rem !important;
+            height: 44px !important;
+            display: flex !important;
+            align-items: center !important;
+            white-space: nowrap !important;
+            background: rgba(29,185,84,0.06) !important;
+            border: 1px solid rgba(29,185,84,0.25) !important;
+            color: {GREEN} !important;
+            transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
+            box-sizing: border-box !important;
+        }}
+        div.st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child button:hover {{
+            background: rgba(29,185,84,0.16) !important;
+            border-color: {GREEN} !important;
+            color: #fff !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 16px rgba(29,185,84,0.3) !important;
+        }}
+        </style>
+    """, unsafe_allow_html=True)
+
+    col_brand, col_spacer, col_filters, col_share = st.columns([1.1, 4, 2.5, 1.8])
+
+    with col_brand:
+        st.markdown('''
+        <div class="navbar" style="padding: 0; margin-top: 15px; margin-bottom: 0;">
+            <div class="nav-brand brand-title">
+                <span>🎧</span> Suggestify
+            </div>
         </div>
-    </div>
-    ''', unsafe_allow_html=True)
+        ''', unsafe_allow_html=True)
 
-with col_share:
-    rating_mode_on = st.session_state.quick_rate_mode
+    with col_spacer:
+        st.markdown('<div class="st-key-top_bar_spacer"></div>', unsafe_allow_html=True)
 
-    with st.container(key="share_row"):
-        st.markdown(f"""
-            <style>
-            .st-key-share_row {{ margin-top: 15px; }}
-            .st-key-share_row div[data-testid="stHorizontalBlock"] {{
-                justify-content: flex-end !important;
-                align-items: center !important;
-                gap: 10px !important;
-                flex-wrap: nowrap !important;
-            }}
-            .st-key-share_row div[data-testid="column"] {{
-                width: auto !important;
-                flex: 0 0 auto !important;
-                min-width: max-content !important;
-            }}
+    with col_filters:
+        with st.container(key="top_filter_row"):
+            if st.session_state.date_preset == "manual":
+                # ΑΛΛΑΓΗ: Βάζουμε πρώτα τις Ημερομηνίες (αριστερά) και το Period στο τέλος (δεξιά)
+                f_start, f_end, f_preset = st.columns([1, 1, 1.2])
+                with f_start:
+                    st.markdown('<div class="top-filter-label">FROM</div>', unsafe_allow_html=True)
+                    st.date_input("From", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="start_date", on_change=mark_manual)
+                with f_end:
+                    st.markdown('<div class="top-filter-label">TO</div>', unsafe_allow_html=True)
+                    st.date_input("To", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="end_date", on_change=mark_manual)
+                with f_preset:
+                    st.markdown('<div class="top-filter-label">🗓️ PERIOD</div>', unsafe_allow_html=True)
+                    st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
+            else:
+                st.markdown('<div class="top-filter-label">🗓️ PERIOD</div>', unsafe_allow_html=True)
+                st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
 
-            /* ─── Rating toggle: pill with a live status dot ─── */
-            .st-key-quick_rate_toggle button {{
-                position: relative !important;
-                border-radius: 999px !important;
-                font-weight: 700 !important;
-                font-size: 0.8rem !important;
-                padding: 0.5rem 1.2rem 0.5rem 2.1rem !important;
-                white-space: nowrap !important;
-                transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
-                letter-spacing: 0.01em !important;
-            }}
-            /* status dot, drawn with box-shadow so it sits inside the button padding */
-            .st-key-quick_rate_toggle button::before {{
-                content: '';
-                position: absolute;
-                left: 1.05rem; top: 50%;
-                width: 7px; height: 7px;
-                border-radius: 50%;
-                transform: translateY(-50%);
-            }}
-            .st-key-quick_rate_toggle button[kind="secondary"] {{
-                background: rgba(255,255,255,0.04) !important;
-                border: 1px solid rgba(255,255,255,0.12) !important;
-                color: {TEXT_MID} !important;
-            }}
-            .st-key-quick_rate_toggle button[kind="secondary"]::before {{
-                background: {TEXT_DIM};
-            }}
-            .st-key-quick_rate_toggle button[kind="secondary"]:hover {{
-                border-color: rgba(255,255,255,0.25) !important;
-                color: {TEXT} !important;
-                transform: translateY(-1px) !important;
-            }}
-            .st-key-quick_rate_toggle button[kind="primary"] {{
-                background: linear-gradient(135deg, #E53935, #C62828) !important;
-                border: 1px solid #FF6659 !important;
-                color: #fff !important;
-                box-shadow: 0 4px 16px rgba(229,57,53,0.4) !important;
-            }}
-            .st-key-quick_rate_toggle button[kind="primary"]::before {{
-                background: #fff;
-                box-shadow: 0 0 8px #fff, 0 0 3px #fff;
-                animation: ratingPulse 1.6s ease-in-out infinite;
-            }}
-            .st-key-quick_rate_toggle button[kind="primary"]:hover {{
-                transform: translateY(-1px) !important;
-                box-shadow: 0 6px 22px rgba(229,57,53,0.55) !important;
-            }}
-            @keyframes ratingPulse {{
-                0%, 100% {{ opacity: 1; transform: translateY(-50%) scale(1); }}
-                50% {{ opacity: 0.5; transform: translateY(-50%) scale(0.75); }}
-            }}
+    with col_share:
+        rating_mode_on = st.session_state.quick_rate_mode
 
-            /* ─── Share Stats: outlined glass button matching the app's accent ─── */
-            .st-key-share_row div[data-testid="stHorizontalBlock"] > div:last-child button {{
-                border-radius: 999px !important;
-                font-weight: 700 !important;
-                font-size: 0.8rem !important;
-                padding: 0.5rem 1.2rem !important;
-                white-space: nowrap !important;
-                background: rgba(29,185,84,0.06) !important;
-                border: 1px solid rgba(29,185,84,0.25) !important;
-                color: {GREEN} !important;
-                transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
-            }}
-            .st-key-share_row div[data-testid="stHorizontalBlock"] > div:last-child button:hover {{
-                background: rgba(29,185,84,0.16) !important;
-                border-color: {GREEN} !important;
-                color: #fff !important;
-                transform: translateY(-1px) !important;
-                box-shadow: 0 4px 16px rgba(29,185,84,0.3) !important;
-            }}
-            </style>
-            """, unsafe_allow_html=True)
+        with st.container(key="share_row"):
+            col_a, col_b = st.columns(2)
 
-        col_a, col_b = st.columns(2)
+            with col_a:
+                with st.container(key="quick_rate_toggle"):
+                    rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
+                    if st.button(rating_label, key="quick_rate_btn",
+                                 type="primary" if rating_mode_on else "secondary"):
+                        
+                        new_mode = not st.session_state.quick_rate_mode
+                        st.session_state.quick_rate_mode = new_mode
+                        qr_global["mode"] = new_mode
 
-        # Καρφώνουμε το κουμπί του Rating ΜΟΝΙΜΑ στην αριστερή θέση (col_a)
-        with col_a:
-            with st.container(key="quick_rate_toggle"):
-                rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
-                if st.button(rating_label, key="quick_rate_btn",
-                             type="primary" if rating_mode_on else "secondary"):
-                    
-                    new_mode = not st.session_state.quick_rate_mode
-                    st.session_state.quick_rate_mode = new_mode
-                    
-                    # Αποθήκευση στη μνήμη του server (ώστε να επιβιώνει απ' τα links!)
-                    qr_global["mode"] = new_mode
-
-                    if new_mode:
-                        st.query_params["qr"] = "1"
-                    else:
-                        st.query_params.pop("qr", None)
-                    st.rerun()
-        # Καρφώνουμε το κουμπί του Share ΜΟΝΙΜΑ στη δεξιά θέση (col_b)
-        with col_b:
-            render_share_stats_button(
-                run_query=run_query,
-                user_id=selected_user_id,
-                username=selected_username,
-                min_date=min_date,
-                max_date=max_date,
-                label="📸 Share Stats"
-            )
+                        if new_mode:
+                            st.query_params["qr"] = "1"
+                        else:
+                            st.query_params.pop("qr", None)
+                        st.rerun()
+            with col_b:
+                render_share_stats_button(
+                    run_query=run_query,
+                    user_id=selected_user_id,
+                    username=selected_username,
+                    min_date=min_date,
+                    max_date=max_date,
+                    label="📸 Share Stats"
+                )
+                
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
     ("artists", "🎤 Artists"), ("albums", "💿 Albums"),
@@ -706,21 +776,6 @@ with st.container(key="tab_nav_mobile"):
             is_active = (current_tab == tab_id) and not detail_type
             if st.button(tab_label, key=f"nav_mobile_{tab_id}", type="primary" if is_active else "secondary", use_container_width=True):
                 navigate_to_tab(tab_id)
-
-with st.container(key="filter_bar_row"):
-    f_preset, f_start, f_end = st.columns([1.5, 1, 1])
-
-    with f_preset:
-        st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
-        st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], placeholder="⚙️ Manual", label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
-
-    with f_start:
-        st.markdown('<div class="filter-label">From</div>', unsafe_allow_html=True)
-        st.date_input("From", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="start_date", on_change=mark_manual)
-
-    with f_end:
-        st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
-        st.date_input("To", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="end_date", on_change=mark_manual)
 
 F = {
     "start_date": st.session_state.start_date, 

@@ -11,6 +11,11 @@ from types import SimpleNamespace
 from urllib.parse import quote
 import uuid
 
+import io
+import requests
+import colorsys
+from PIL import Image
+
 def counter_span(value: float, decimals: int = 0, prefix: str = "", suffix: str = "") -> str:
     return (
         f'<span class="count-up" data-target="{value}" data-decimals="{decimals}" '
@@ -80,6 +85,15 @@ def load_css():
 def inject_custom_css():
     st.markdown(f"""
     <style>
+    :root {{
+        /* Αρχικά Fallback CSS Variables (Spotify Green) 
+           Αυτά αντικαθίστανται δυναμικά από το εξώφυλλο του album/artist */
+        --dynamic-color: {GREEN};
+        --dynamic-color-dim: rgba(29, 185, 84, 0.35);
+        --dynamic-color-hover: rgba(29, 185, 84, 0.12);
+        --dynamic-color-glow: rgba(29, 185, 84, 0.45);
+    }}
+
     .block-container {{ padding: 1rem 2rem 6rem !important; max-width: 100% !important; }}
     .main .block-container {{ padding-top: 1rem !important; margin-top: -4.5rem !important; }}
     div[data-testid="stVerticalBlock"] {{ gap: 0.2rem !important; }}
@@ -101,24 +115,24 @@ def inject_custom_css():
     .count-up {{ display: inline-block; font-variant-numeric: tabular-nums; }}
 
     .list-item {{ transition: transform 0.22s ease, background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease; }}
-    .list-item:hover {{ transform: translateX(5px); background: rgba(255,255,255,0.045); border-color: rgba(29,185,84,0.35); box-shadow: 0 6px 22px rgba(0,0,0,0.28); }}
+    .list-item:hover {{ transform: translateX(5px); background: rgba(255,255,255,0.045); border-color: var(--dynamic-color-dim); box-shadow: 0 6px 22px rgba(0,0,0,0.28); }}
     .item-art {{ transition: transform 0.25s ease; }}
     .list-item:hover .item-art {{ transform: scale(1.07); }}
     .item-arrow {{ transition: transform 0.25s ease, color 0.25s ease; display: inline-block; }}
-    .list-item:hover .item-arrow {{ transform: translateX(5px); color: {GREEN}; }}
+    .list-item:hover .item-arrow {{ transform: translateX(5px); color: var(--dynamic-color); }}
     .stat-value {{ transition: color 0.2s ease; }}
     
     a.custom-link:has(.list-item-has-rating) {{ margin-bottom: 0 !important; }}
     .list-item-has-rating {{ border-radius: 14px 14px 0 0 !important; border-bottom: none !important; }}
 
     .kpi-card {{ transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease; animation: fadeSlideUp 0.5s ease both; }}
-    .kpi-card:hover {{ transform: translateY(-5px); box-shadow: 0 12px 30px rgba(29,185,84,0.14); border-color: rgba(29,185,84,0.3); }}
+    .kpi-card:hover {{ transform: translateY(-5px); box-shadow: 0 12px 30px var(--dynamic-color-hover); border-color: var(--dynamic-color-dim); }}
     .kpi-icon {{ transition: transform 0.3s ease; display: inline-block; }}
     .kpi-card:hover .kpi-icon {{ transform: scale(1.18) rotate(-4deg); }}
 
     .section-header {{ position: relative; animation: fadeIn 0.4s ease both; }}
     .chart-container {{ animation: fadeSlideUp 0.45s ease both; transition: border-color 0.25s ease, box-shadow 0.25s ease; }}
-    .chart-container:hover {{ border-color: rgba(29,185,84,0.18); }}
+    .chart-container:hover {{ border-color: var(--dynamic-color-hover); }}
     .detail-header {{ animation: fadeSlideUp 0.4s ease both; }}
     .detail-art {{ transition: transform 0.3s ease; }}
     .detail-header:hover .detail-art {{ transform: scale(1.03); }}
@@ -128,7 +142,7 @@ def inject_custom_css():
     .wrapped-banner {{ animation: fadeSlideUp 0.5s ease both; }}
     .empty-state {{ animation: fadeIn 0.4s ease both; }}
 
-    /* ─── Zoom-safety: never let the top bar wrap or get shoved around ─── */
+    /* ─── Zoom-safety ─── */
     .navbar, .st-key-share_row {{
         position: relative !important;
         z-index: 100 !important;
@@ -137,24 +151,24 @@ def inject_custom_css():
         flex-wrap: nowrap !important;
     }}
     .st-key-tab_nav_row {{
-        z-index: 40 !important; /* stays below the top bar, never overlaps it */
+        z-index: 40 !important;
     }}
     
     div[data-testid="stButton"] button {{ transition: all 0.2s ease !important; }}
-    div[data-testid="stButton"] button[kind="secondary"]:hover {{ background: rgba(29,185,84,0.08) !important; color: {GREEN} !important; transform: translateY(-1px) !important; border-color: rgba(29,185,84,0.3) !important; }}
-    div[data-testid="stButton"] button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px rgba(29,185,84,0.3) !important; }}
+    div[data-testid="stButton"] button[kind="secondary"]:hover {{ background: var(--dynamic-color-hover) !important; color: var(--dynamic-color) !important; transform: translateY(-1px) !important; border-color: var(--dynamic-color-dim) !important; }}
+    div[data-testid="stButton"] button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px var(--dynamic-color-glow) !important; }}
 
-    div[data-testid="stTextInput"] input:focus {{ border-color: {GREEN} !important; box-shadow: 0 0 0 2px {GREEN_XLO} !important; }}
-    div[data-testid="stDateInput"] div[data-baseweb="input"]:focus-within {{border-color: {GREEN} !important; box-shadow: 0 0 0 2px {GREEN_XLO} !important;}}
+    div[data-testid="stTextInput"] input:focus {{ border-color: var(--dynamic-color) !important; box-shadow: 0 0 0 2px var(--dynamic-color-hover) !important; }}
+    div[data-testid="stDateInput"] div[data-baseweb="input"]:focus-within {{border-color: var(--dynamic-color) !important; box-shadow: 0 0 0 2px var(--dynamic-color-hover) !important;}}
     .custom-link {{ text-decoration: none !important; display: block; }}
 
     .season-card {{ position: relative; overflow: visible !important; text-align: center; }}
     .season-badge {{
         position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
-        background: linear-gradient(135deg, {GREEN}, {GREEN_DIM});
+        background: linear-gradient(135deg, var(--dynamic-color), var(--dynamic-color-dim));
         color: #000; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em;
         padding: 3px 10px; border-radius: 999px; white-space: nowrap;
-        box-shadow: 0 4px 14px rgba(29,185,84,0.45);
+        box-shadow: 0 4px 14px var(--dynamic-color-glow);
         animation: fadeSlideUp 0.5s ease both;
     }}
     .tod-card {{
@@ -162,7 +176,7 @@ def inject_custom_css():
         padding: 16px 14px; text-align: center; animation: fadeSlideUp 0.5s ease both;
         transition: transform 0.25s ease, border-color 0.25s ease;
     }}
-    .tod-card:hover {{ transform: translateY(-4px); border-color: rgba(29,185,84,0.3); }}
+    .tod-card:hover {{ transform: translateY(-4px); border-color: var(--dynamic-color-dim); }}
     .tod-icon {{ font-size: 1.6rem; margin-bottom: 4px; }}
     .tod-icon-img {{ width: 44px; height: 44px; border-radius: 10px; object-fit: cover; margin: 0 auto 6px; display: block; }}
     .season-icon-img {{ width: 56px; height: 56px; border-radius: 12px; object-fit: cover; margin: 0 auto; display: block; }}
@@ -178,20 +192,22 @@ def inject_custom_css():
     }}
     .meta-chip-icon {{
         width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center;
-        justify-content: center; border-radius: 9px; background: rgba(29,185,84,0.1); font-size: 1rem;
+        justify-content: center; border-radius: 9px; background: rgba(255,255,255,0.05); font-size: 1rem;
+        transition: background 0.25s ease;
     }}
     .meta-chip-text {{ display: flex; flex-direction: column; gap: 1px; min-width: 0; }}
     .meta-chip-label {{ font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: {TEXT_DIM}; }}
-    .meta-chip-value {{ font-size: 0.88rem; font-weight: 600; color: {TEXT}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+    .meta-chip-value {{ font-size: 0.88rem; font-weight: 600; color: {TEXT}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.25s ease; }}
     a.meta-chip-link {{ text-decoration: none !important; }}
-    .meta-chip:hover {{ border-color: {GREEN}; background: rgba(29,185,84,0.08); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(29,185,84,0.15); cursor: default; }}
-    .meta-chip:hover .meta-chip-icon {{ background: rgba(29,185,84,0.25); }}
-    .meta-chip:hover .meta-chip-value {{ color: {GREEN}; }}
+    .meta-chip:hover {{ border-color: var(--dynamic-color); background: var(--dynamic-color-hover); transform: translateY(-2px); box-shadow: 0 8px 20px var(--dynamic-color-hover); cursor: default; }}
+    .meta-chip:hover .meta-chip-icon {{ background: var(--dynamic-color-dim); }}
+    .meta-chip:hover .meta-chip-value {{ color: var(--dynamic-color); }}
     a.meta-chip-link .meta-chip:hover {{ cursor: pointer; }}
     .explicit-badge {{ 
         background: rgba(255, 255, 255, 0.1); color: #fff; padding: 2px 6px; 
         border-radius: 4px; font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; margin-left: 8px;
     }}
+
     /* =========================================================
        PURE HTML LIST ROWS: STARS, BUMP LINKS, HOVER STATES
        ========================================================= */
@@ -199,10 +215,10 @@ def inject_custom_css():
     .list-item-wrapper a.custom-link {{ margin-bottom: 0 !important; }}
     .list-item-wrapper:hover {{ transform: translateX(6px); }}
     .list-item-wrapper .list-item {{ transition: none !important; }}
-    .list-item-wrapper:hover .list-item {{ transform: none !important; background: {CARD_HOVER} !important; border-color: {BORDER_HL} !important; box-shadow: none !important; }}
-    .list-item-wrapper:hover .crate-stars {{ background: #262626 !important; border-color: {BORDER_HL} !important; box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important; }}
+    .list-item-wrapper:hover .list-item {{ transform: none !important; background: {CARD_HOVER} !important; border-color: var(--dynamic-color-dim) !important; box-shadow: none !important; }}
+    .list-item-wrapper:hover .crate-stars {{ background: #262626 !important; border-color: var(--dynamic-color-dim) !important; box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important; }}
     .list-item-wrapper:hover .item-art {{ transform: scale(1.07) !important; }}
-    .list-item-wrapper:hover .item-arrow {{ transform: translateX(4px) !important; color: {GREEN} !important; }}
+    .list-item-wrapper:hover .item-arrow {{ transform: translateX(4px) !important; color: var(--dynamic-color) !important; }}
 
     .item-rank-container {{ position: relative; display: flex; align-items: center; justify-content: center; width: 40px; }}
 
@@ -215,12 +231,12 @@ def inject_custom_css():
 
     .bump-link {{
         display: flex; align-items: center; justify-content: center;
-        width: 22px; height: 16px; background: rgba(29,185,84,0.12);
-        border: 1px solid {GREEN}; border-radius: 4px;
-        color: {GREEN}; font-size: 10px; line-height: 1; text-decoration: none !important;
+        width: 22px; height: 16px; background: var(--dynamic-color-hover);
+        border: 1px solid var(--dynamic-color); border-radius: 4px;
+        color: var(--dynamic-color); font-size: 10px; line-height: 1; text-decoration: none !important;
         transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
     }}
-    .bump-link:hover {{ background: {GREEN}; color: #000; transform: scale(1.15); }}
+    .bump-link:hover {{ background: var(--dynamic-color); color: #000; transform: scale(1.15); }}
 
     .crate-stars {{
         display: flex; align-items: center; justify-content: center; gap: 2px;
@@ -239,7 +255,7 @@ def inject_custom_css():
     }}
     .star-cell::before {{
         content: ""; position: absolute; inset: 0;
-        background: linear-gradient(90deg, {GREEN} var(--fill, 0%), rgba(255,255,255,0.22) var(--fill, 0%));
+        background: linear-gradient(90deg, var(--dynamic-color) var(--fill, 0%), rgba(255,255,255,0.22) var(--fill, 0%));
         -webkit-mask-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Cpath d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/%3E%3C/svg%3E');
         mask-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Cpath d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/%3E%3C/svg%3E');
         -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
@@ -247,7 +263,7 @@ def inject_custom_css():
         transition: background 0.12s ease;
     }}
     .star-cell:hover {{ transform: scale(1.22); }}
-    .star-cell:hover::before {{ background: rgba(29,185,84,0.8) !important; }}
+    .star-cell:hover::before {{ background: var(--dynamic-color) !important; }}
 
     @media (max-width: 768px) {{
         .crate-stars {{ padding: 6px 0.8rem 8px; }}
@@ -281,7 +297,7 @@ def build_filtered_href(view_type: str, id_val: str) -> str:
 
 def build_base_qs() -> str:
     """Query-string prefix carrying forward all current params except action params (rate_*, bump)."""
-    always_exclude = {"rate_type", "rate_id", "rate_val", "bump", "rate"} # <-- Προσθήκη του "rate" εδώ
+    always_exclude = {"rate_type", "rate_id", "rate_val", "bump", "rate"} 
     params = st.query_params
     tab = params.get("tab", "overview")
     qs = f"?tab={tab}"
@@ -319,8 +335,6 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         
         if can_navigate:
             raw_id = row[id_col]
-            # Προστασία: Αν το Pandas έχει κάνει cast το ID σε float (πχ 123.0),
-            # κρατάμε αυστηρά τον ακέραιο
             item_id = str(int(raw_id)) if isinstance(raw_id, float) and raw_id.is_integer() else str(raw_id)
         else:
             item_id = f"idx_{i}"
@@ -356,7 +370,6 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             if bump_buttons:
                 bump_html = f'<div class="bump-container">{bump_buttons}</div>'
 
-        # Flattened HTML to prevent Streamlit from parsing it as a code block
         card_core = (
             f'<div class="list-item {reveal_class} {item_class}" {reveal_style}>'
             f'<div class="item-rank-container">'
@@ -374,7 +387,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             f'<div class="stat-label">{stat1_label}</div>'
             f'</div>'
             f'<div class="stat">'
-            f'<div class="stat-value green">{hours}</div>'
+            f'<div class="stat-value" style="color: var(--dynamic-color);">{hours}</div>'
             f'<div class="stat-label">{stat2_label}</div>'
             f'</div>'
             f'</div>'
@@ -422,6 +435,45 @@ def render_kpi_grid(kpis: list[dict]):
         </div>
         ''', unsafe_allow_html=True)
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_dominant_color(image_url: str):
+    """Επιστρέφει το (R, G, B) του 'sweet spot' χρώματος για ένα εξώφυλλο."""
+    fallback = (29, 185, 84) # Το κλασικό Spotify Green
+    if not image_url or not isinstance(image_url, str) or not image_url.startswith("http"):
+        return fallback
+
+    try:
+        r = requests.get(image_url, timeout=3)
+        r.raise_for_status()
+        img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        
+        small = img.resize((32, 32))
+        paletted = small.quantize(colors=5, method=Image.MEDIANCUT)
+        palette = paletted.getpalette()
+        counts = sorted(paletted.getcolors(), reverse=True, key=lambda c: c[0])
+        
+        colors = [tuple(palette[idx * 3: idx * 3 + 3]) for count, idx in counts[:5]]
+        
+        def sat_val(c):
+            h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
+            return s * v
+            
+        ordered = sorted(colors, key=sat_val, reverse=True)
+        base = ordered[0]
+        h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in base))
+        
+        if s < 0.15:
+            return (140, 140, 140) # Όμορφο γκρι αν είναι ασπρόμαυρο
+        else:
+            # "Sweet Spot" για accents: ούτε νέον, ούτε θαμπό
+            s = min(max(s, 0.4), 0.85) 
+            v = min(max(v, 0.5), 0.95) 
+            return tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h, s, v))
+            
+    except Exception:
+        return fallback
+
+
 def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, stats: list[dict], image_url: str = None):
     stats_html = ""
     for s in stats:
@@ -429,6 +481,7 @@ def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, 
             value_html = counter_span(s["raw"], s.get("decimals", 0), s.get("prefix", ""), s.get("suffix", ""))
         else:
             value_html = s.get("value", "")
+            
         stats_html += (
             f'<div class="detail-stat"><div class="detail-stat-value">{value_html}</div>'
             f'<div class="detail-stat-label">{s["label"]}</div></div>'
@@ -436,21 +489,43 @@ def render_detail_header(type_label: str, title: str, subtitle: str, icon: str, 
 
     if image_url and pd.notnull(image_url) and str(image_url).startswith("http"):
         art_html = f'<img src="{image_url}" style="width:100%; height:100%; object-fit:cover;">'
+        dom_r, dom_g, dom_b = get_dominant_color(image_url)
     else:
         art_html = icon
+        dom_r, dom_g, dom_b = 29, 185, 84
+
+    # Υπολογισμός του σκοτεινού Background Gradient 
+    h, s, v = colorsys.rgb_to_hsv(dom_r/255, dom_g/255, dom_b/255)
+    bg_v = min(v, 0.35) # Βαρύ, σκοτεινό χρώμα για το φόντο
+    bg_r, bg_g, bg_b = (int(c * 255) for c in colorsys.hsv_to_rgb(h, s, bg_v))
+    dark_r, dark_g, dark_b = int(bg_r * 0.25), int(bg_g * 0.25), int(bg_b * 0.25)
+    
+    bg_gradient = f"linear-gradient(90deg, rgb({bg_r},{bg_g},{bg_b}) 0%, rgb({dark_r},{dark_g},{dark_b}) 100%)"
+
+    # Εφαρμογή των Global CSS Variables για όλη τη σελίδα (αστεράκια, hovers, buttons, arrows)
+    st.markdown(f'''
+    <style>
+        :root {{
+            --dynamic-color: rgb({dom_r}, {dom_g}, {dom_b});
+            --dynamic-color-dim: rgba({dom_r}, {dom_g}, {dom_b}, 0.35);
+            --dynamic-color-hover: rgba({dom_r}, {dom_g}, {dom_b}, 0.12);
+            --dynamic-color-glow: rgba({dom_r}, {dom_g}, {dom_b}, 0.45);
+        }}
+    </style>
+    ''', unsafe_allow_html=True)
 
     st.markdown(f'''
-    <div class="detail-header">
+    <div class="detail-header" style="background: {bg_gradient}; border: 1px solid rgba(255,255,255,0.04);">
         <div class="detail-art">{art_html}</div>
         <div class="detail-info">
-            <div class="detail-type">{type_label}</div>
+            <div class="detail-type" style="color: rgba(255,255,255,0.65);">{type_label}</div>
             <div class="detail-title">{escape(title)}</div>
-            <div class="detail-subtitle">{escape(subtitle)}</div>
+            <div class="detail-subtitle" style="color: rgba(255,255,255,0.65);">{escape(subtitle)}</div>
         </div>
         <div class="detail-stats">{stats_html}</div>
     </div>
     ''', unsafe_allow_html=True)
-
+    
 def render_season_cards(df: pd.DataFrame):
     data = {row["season"]: row for _, row in df.iterrows()} if not df.empty else {}
     max_streams = int(df["stream_count"].max()) if not df.empty else 0
@@ -528,7 +603,7 @@ def render_track_spotlight_card(col, label: str, icon: str, row, value_field: st
         f'<div class="tod-label">{label}</div>'
         f'<div class="tod-value" style="font-size:1.05rem;">{title}</div>'
         f'<div class="tod-sub">{artist}</div>'
-        f'<div class="tod-sub" style="color:{GREEN}; font-weight:600; margin-top:4px;">{value_display}</div>'
+        f'<div class="tod-sub" style="color: var(--dynamic-color); font-weight:600; margin-top:4px;">{value_display}</div>'
         f'</div>'
     )
     with col:

@@ -25,7 +25,7 @@ div[data-testid="stToolbar"] { display: none !important; }
 }
 .main .block-container {
     padding-top: 0 !important;
-    margin-top: -1.5rem !important; /* Τραβάει όλο το UI πάνω, τρώγοντας το νεκρό κενό */
+    margin-top: -2.4rem !important; /* was -1.5rem — pulls page up further now that the tab bar is inline */
 }
 
 /* ─── STREAMLIT ELEMENT SPACING FIXES ─── */
@@ -247,10 +247,9 @@ section.main > div.block-container {
     display: none;
 }
 
-/* ─── FILTER BAR (User / Period / From / To) ───
-   Its own row underneath the tab navigation, so nothing gets squeezed. */
 .st-key-filter_bar_row {
-    margin-bottom: 0rem !important; /* Το επαναφέρουμε στο 0 για να μην καβαλάει το επόμενο div */
+    margin-top: 1.1rem !important;
+    margin-bottom: 0rem !important;
 }
 
 .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
@@ -927,4 +926,13 @@ div[data-testid="stPopoverBody"] button {
         width: max-content !important;
         display: block !important;
     }
+}
+
+.st-key-filter_bar_row ~ div[data-testid="stVerticalBlock"] > div:first-child .section-header {
+    margin-top: 0.25rem !important;
+}
+
+/* Give "See Full List" buttons room to breathe above the last list row */
+.list-item-wrapper:last-of-type {
+    margin-bottom: 1rem !important;
 }
