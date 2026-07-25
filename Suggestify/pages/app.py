@@ -913,7 +913,12 @@ if detail_type and detail_id:
             c1, c2, c3 = st.columns([1.1, 1.1, 1])
             
             with c1:
-                st.markdown('<div class="section-header"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+                c1_hdr, c1_sort = st.columns([2.5, 1])
+                with c1_hdr:
+                    st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
+                with c1_sort:
+                    sort_art_tracks = st.selectbox("Sort", ["Streams", "Hours", "Rating"], index=0, label_visibility="collapsed", key=f"sort_art_tr_{detail_id}")
+
                 df_tracks = run_query("""
                     WITH TrackArtists AS (
                         SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
@@ -930,23 +935,55 @@ if detail_type and detail_id:
                     WHERE sa_filter.artist_id = :aid 
                       AND s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY so.id, so.title, ta.all_artists, so.image_url ORDER BY streams DESC LIMIT 10
+                    GROUP BY so.id, so.title, ta.all_artists, so.image_url
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
                     R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
-                    render_list_v2(df_tracks, "song_title", "sub", "streams", "hours_played", "song_id", "song", **qr_kwargs)
+                    
+                    if sort_art_tracks == "Rating":
+                        df_tracks["_mem_rating"] = df_tracks["song_id"].apply(
+                            lambda x: st.session_state.get(f"rating_val_song_{x}_{selected_user_id}", 0.0)
+                        )
+                        df_tracks = df_tracks.sort_values(by=["_mem_rating", "streams"], ascending=[False, False]).reset_index(drop=True)
+                    elif sort_art_tracks == "Hours":
+                        df_tracks = df_tracks.sort_values(by=["hours_played", "streams"], ascending=[False, False]).reset_index(drop=True)
+                    else:
+                        df_tracks = df_tracks.sort_values(by=["streams", "hours_played"], ascending=[False, False]).reset_index(drop=True)
+
+                    # Κρατάμε τα 10 πρώτα για να μην χαλάσει η εμφάνιση του Dashboard
+                    df_tracks_top = df_tracks.head(10)
+                    render_list_v2(df_tracks_top, "song_title", "sub", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                     
                     if st.button("See Full List →", key=f"btn_full_tracks_{detail_id}", use_container_width=True):
                         curr_user = st.query_params.get("user")
                         st.query_params.clear()
-                        st.query_params["tab"] = "tracks"
                         if curr_user: st.query_params["user"] = curr_user
-                        st.session_state["search_tracks"] = artist_name
+                        
+                        if sort_art_tracks == "Rating":
+                            # Πάμε στο Ratings Dashboard -> Full List για τραγούδια
+                            st.query_params["tab"] = "ratings"
+                            st.query_params["view"] = "ratings_full"
+                            st.query_params["id"] = "song"
+                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Ratings Full List
+                            st.session_state["search_full_ratings_song"] = artist_name
+                            st.session_state["sort_full_ratings_song"] = "Highest Rated"
+                        else:
+                            # Πάμε στο κλασικό Tracks Dashboard
+                            st.query_params["tab"] = "tracks"
+                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Tracks
+                            st.session_state["search_tracks"] = artist_name
+                            st.session_state["sort_tracks"] = sort_art_tracks
+                            
                         st.rerun()
 
             with c2:
-                st.markdown('<div class="section-header"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
+                c2_hdr, c2_sort = st.columns([2.5, 1])
+                with c2_hdr:
+                    st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
+                with c2_sort:
+                    sort_art_albums = st.selectbox("Sort", ["Streams", "Hours", "Rating"], index=0, label_visibility="collapsed", key=f"sort_art_al_{detail_id}")
+
                 df_albums = run_query("""
                     SELECT al.id AS album_id, COALESCE(al.title, 'Unknown Album') AS album_title,
                            MAX(so.image_url) AS image_url,
@@ -958,20 +995,48 @@ if detail_type and detail_id:
                     WHERE sa.artist_id = :aid 
                       AND s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY al.id, al.title ORDER BY streams DESC LIMIT 10
+                      AND al.id IS NOT NULL
+                    GROUP BY al.id, al.title
                 """, {"aid": detail_id, **F})
                 
                 if not df_albums.empty:
                     df_albums["subtitle"] = "Album"
                     R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
-                    render_list_v2(df_albums, "album_title", "subtitle", "streams", "hours_played", "album_id", "album", **qr_kwargs)
+
+                    if sort_art_albums == "Rating":
+                        df_albums["_mem_rating"] = df_albums["album_id"].apply(
+                            lambda x: st.session_state.get(f"rating_val_album_{x}_{selected_user_id}", 0.0)
+                        )
+                        df_albums = df_albums.sort_values(by=["_mem_rating", "streams"], ascending=[False, False]).reset_index(drop=True)
+                    elif sort_art_albums == "Hours":
+                        df_albums = df_albums.sort_values(by=["hours_played", "streams"], ascending=[False, False]).reset_index(drop=True)
+                    else:
+                        df_albums = df_albums.sort_values(by=["streams", "hours_played"], ascending=[False, False]).reset_index(drop=True)
+
+                    # Κρατάμε τα 10 πρώτα για το Dashboard
+                    df_albums_top = df_albums.head(10)
+                    render_list_v2(df_albums_top, "album_title", "subtitle", "streams", "hours_played", "album_id", "album", **qr_kwargs)
                     
                     if st.button("See Full List →", key=f"btn_full_albums_{detail_id}", use_container_width=True):
                         curr_user = st.query_params.get("user")
                         st.query_params.clear()
-                        st.query_params["tab"] = "albums"
                         if curr_user: st.query_params["user"] = curr_user
-                        st.session_state["search_albums"] = artist_name
+                        
+                        if sort_art_albums == "Rating":
+                            # Πάμε στο Ratings Dashboard -> Full List για albums
+                            st.query_params["tab"] = "ratings"
+                            st.query_params["view"] = "ratings_full"
+                            st.query_params["id"] = "album"
+                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Ratings Full List
+                            st.session_state["search_full_ratings_album"] = artist_name
+                            st.session_state["sort_full_ratings_album"] = "Highest Rated"
+                        else:
+                            # Πάμε στο κλασικό Albums Dashboard
+                            st.query_params["tab"] = "albums"
+                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Albums
+                            st.session_state["search_albums"] = artist_name
+                            st.session_state["sort_albums"] = sort_art_albums
+                            
                         st.rerun()
 
             with c3:
