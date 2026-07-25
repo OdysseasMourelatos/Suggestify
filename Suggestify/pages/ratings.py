@@ -476,7 +476,17 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                 WHERE user_id = :user_id
         """
         if search:
-            sql += " AND song_id IN (SELECT id FROM songs WHERE title ILIKE :search) "
+            sql += """ 
+                AND (
+                    song_id IN (SELECT id FROM songs WHERE title ILIKE :search)
+                    OR song_id IN (
+                        SELECT sa.song_id 
+                        FROM song_artists sa 
+                        JOIN artists a ON a.id = sa.artist_id 
+                        WHERE a.name ILIKE :search
+                    )
+                ) 
+            """
             params["search"] = f"%{search}%"
             
         sql += f"""
@@ -512,17 +522,44 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                 WHERE user_id = :user_id
         """
         if search:
-            sql += " AND album_id IN (SELECT id FROM albums WHERE title ILIKE :search) "
+            sql += """ 
+                AND (
+                    album_id IN (SELECT id FROM albums WHERE title ILIKE :search)
+                    OR album_id IN (
+                        SELECT so.album_id 
+                        FROM songs so
+                        JOIN song_artists sa ON sa.song_id = so.id
+                        JOIN artists a ON a.id = sa.artist_id
+                        WHERE a.name ILIKE :search AND so.album_id IS NOT NULL
+                    )
+                ) 
+            """
             params["search"] = f"%{search}%"
             
         sql += f"""
                 {order_sql} {limit_sql}
+            ),
+            TrueAlbumArtists AS (
+                SELECT album_id, STRING_AGG(name, ', ') as artist_name
+                FROM (
+                    SELECT so.album_id, a.name,
+                           RANK() OVER(PARTITION BY so.album_id ORDER BY COUNT(DISTINCT so.id) DESC) as rnk
+                    FROM songs so
+                    JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                    JOIN artists a ON a.id = sa.artist_id
+                    WHERE so.album_id IN (SELECT album_id FROM base_ratings)
+                    GROUP BY so.album_id, a.name
+                ) ranked
+                WHERE rnk = 1
+                GROUP BY album_id
             )
             SELECT br.album_id, al.title AS album_title,
+                   COALESCE(taa.artist_name, 'Unknown Artist') AS artist_name,
                    (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = br.album_id) AS image_url,
                    br.rating, br.updated_at
             FROM base_ratings br
             JOIN albums al ON al.id = br.album_id
+            LEFT JOIN TrueAlbumArtists taa ON taa.album_id = br.album_id
             {order_sql};
         """
         return run_rating_query(sql, params).reset_index(drop=True)
@@ -783,9 +820,8 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                 **qr,
             )
         else:
-            df["subtitle"] = "Album"
             render_list_v2(
-                df, "album_title", "subtitle", "rating", "updated_at",
+                df, "album_title", "artist_name", "rating", "updated_at",
                 id_col="album_id", link_type="album", rank_col="global_rank",
                 reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04, # Εδω μπηκε το Animation Limit
                 stat1_label="Rating", stat1_fmt=_fmt_rating,
@@ -877,9 +913,8 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                         stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
                     )
                 else:
-                    hof_df["subtitle"] = "Album"
                     render_list_v2(
-                        hof_df, "album_title", "subtitle", "rating", "updated_at",
+                        hof_df, "album_title", "artist_name", "rating", "updated_at",
                         id_col="album_id", link_type="album", rank_col="global_rank",
                         reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
                         stat1_label="Rating", stat1_fmt=_fmt_rating,

@@ -1158,7 +1158,12 @@ if detail_type and detail_id:
             c_left, c_right = st.columns([1.2, 1.0])
             
             with c_left:
-                st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
+                c_hdr, c_sort = st.columns([2.5, 1])
+                with c_hdr:
+                    st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Album Tracks</div>', unsafe_allow_html=True)
+                with c_sort:
+                    sort_album_tracks = st.selectbox("Sort", ["Streams", "Hours", "Rating"], index=0, label_visibility="collapsed", key=f"sort_al_{detail_id}")
+
                 df_tracks = run_query("""
                     WITH TrackArtists AS (
                         SELECT sa.song_id, STRING_AGG(a.name, ', ' ORDER BY sa.is_feature ASC) AS all_artists
@@ -1175,11 +1180,24 @@ if detail_type and detail_id:
                     WHERE so.album_id = :aid 
                       AND s.played_at::date BETWEEN :start_date AND :end_date
                       AND s.user_id = :user_id
-                    GROUP BY so.id, so.title, ta.all_artists, so.image_url ORDER BY streams DESC
+                    GROUP BY so.id, so.title, ta.all_artists, so.image_url
                 """, {"aid": detail_id, **F})
                 
                 if not df_tracks.empty:
+                    # Πρώτα φορτώνουμε τα ratings στη μνήμη αν δεν υπάρχουν
                     R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
+                    
+                    # Δυναμικό Sorting μέσω Pandas για να έχουμε τα απολύτως live δεδομένα
+                    if sort_album_tracks == "Rating":
+                        df_tracks["_mem_rating"] = df_tracks["song_id"].apply(
+                            lambda x: st.session_state.get(f"rating_val_song_{x}_{selected_user_id}", 0.0)
+                        )
+                        df_tracks = df_tracks.sort_values(by=["_mem_rating", "streams"], ascending=[False, False]).reset_index(drop=True)
+                    elif sort_album_tracks == "Hours":
+                        df_tracks = df_tracks.sort_values(by=["hours_played", "streams"], ascending=[False, False]).reset_index(drop=True)
+                    else:
+                        df_tracks = df_tracks.sort_values(by=["streams", "hours_played"], ascending=[False, False]).reset_index(drop=True)
+
                     render_list_v2(df_tracks, "song_title", "main_artist", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                 else:
                     st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
