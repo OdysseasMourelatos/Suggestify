@@ -966,9 +966,10 @@ if detail_type and detail_id:
                 image_url=row.get("image_url")
             )
             
-            c1, c2, c3 = st.columns([1.1, 1.1, 1])
+            # Αλλάζουμε το layout σε 2 στήλες για τις λίστες
+            c_tracks, c_albums = st.columns(2)
             
-            with c1:
+            with c_tracks:
                 c1_hdr, c1_sort = st.columns([2.5, 1])
                 with c1_hdr:
                     st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎵</span>Top Tracks</div>', unsafe_allow_html=True)
@@ -1007,7 +1008,6 @@ if detail_type and detail_id:
                     else:
                         df_tracks = df_tracks.sort_values(by=["streams", "hours_played"], ascending=[False, False]).reset_index(drop=True)
 
-                    # Κρατάμε τα 10 πρώτα για να μην χαλάσει η εμφάνιση του Dashboard
                     df_tracks_top = df_tracks.head(10)
                     render_list_v2(df_tracks_top, "song_title", "sub", "streams", "hours_played", "song_id", "song", **qr_kwargs)
                     
@@ -1017,23 +1017,18 @@ if detail_type and detail_id:
                         if curr_user: st.query_params["user"] = curr_user
                         
                         if sort_art_tracks == "Rating":
-                            # Πάμε στο Ratings Dashboard -> Full List για τραγούδια
                             st.query_params["tab"] = "ratings"
                             st.query_params["view"] = "ratings_full"
                             st.query_params["id"] = "song"
-                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Ratings Full List
                             st.session_state["search_full_ratings_song"] = artist_name
                             st.session_state["sort_full_ratings_song"] = "Highest Rated"
                         else:
-                            # Πάμε στο κλασικό Tracks Dashboard
                             st.query_params["tab"] = "tracks"
-                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Tracks
                             st.session_state["search_tracks"] = artist_name
                             st.session_state["sort_tracks"] = sort_art_tracks
-                            
                         st.rerun()
 
-            with c2:
+            with c_albums:
                 c2_hdr, c2_sort = st.columns([2.5, 1])
                 with c2_hdr:
                     st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">💿</span>Top Albums</div>', unsafe_allow_html=True)
@@ -1069,7 +1064,6 @@ if detail_type and detail_id:
                     else:
                         df_albums = df_albums.sort_values(by=["streams", "hours_played"], ascending=[False, False]).reset_index(drop=True)
 
-                    # Κρατάμε τα 10 πρώτα για το Dashboard
                     df_albums_top = df_albums.head(10)
                     render_list_v2(df_albums_top, "album_title", "subtitle", "streams", "hours_played", "album_id", "album", **qr_kwargs)
                     
@@ -1079,23 +1073,24 @@ if detail_type and detail_id:
                         if curr_user: st.query_params["user"] = curr_user
                         
                         if sort_art_albums == "Rating":
-                            # Πάμε στο Ratings Dashboard -> Full List για albums
                             st.query_params["tab"] = "ratings"
                             st.query_params["view"] = "ratings_full"
                             st.query_params["id"] = "album"
-                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Ratings Full List
                             st.session_state["search_full_ratings_album"] = artist_name
                             st.session_state["sort_full_ratings_album"] = "Highest Rated"
                         else:
-                            # Πάμε στο κλασικό Albums Dashboard
                             st.query_params["tab"] = "albums"
-                            # Προ-συμπληρώνουμε την αναζήτηση και το sort του Albums
                             st.session_state["search_albums"] = artist_name
                             st.session_state["sort_albums"] = sort_art_albums
-                            
                         st.rerun()
 
-            with c3:
+            # Προσθέτουμε λίγο κενό πριν τα διαγράμματα
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Δημιουργούμε 3 στήλες για τα γραφήματα κάτω από τις λίστες
+            ch1, ch2, ch3 = st.columns(3)
+            
+            with ch1:
                 st.markdown('<div class="chart-container"><div class="chart-title">📈 Timeline</div>', unsafe_allow_html=True)
                 df_t = run_query("""
                     SELECT DATE_TRUNC('month', played_at) AS period, COUNT(*) AS stream_count,
@@ -1110,6 +1105,7 @@ if detail_type and detail_id:
                     st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
                 st.markdown('</div>', unsafe_allow_html=True)
 
+            with ch2:
                 st.markdown('<div class="chart-container"><div class="chart-title">🕐 Peak Hours</div>', unsafe_allow_html=True)
                 df_h = run_query("""
                     SELECT EXTRACT(HOUR FROM s.played_at)::INT AS hour, COUNT(*) AS stream_count
@@ -1127,6 +1123,7 @@ if detail_type and detail_id:
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
+            with ch3:
                 st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
                 df_days = run_query("""
                     SELECT EXTRACT(ISODOW FROM s.played_at)::INT AS dow, COUNT(*) AS stream_count
