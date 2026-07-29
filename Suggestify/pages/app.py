@@ -302,51 +302,61 @@ def get_artist_stats_html(artist_id, user_id):
     if song_ids: R.preload_ratings(user_id, "song", song_ids)
     if album_ids: R.preload_ratings(user_id, "album", album_ids)
     
-    # 4. Συλλέγουμε όλες τις βαθμολογίες
-    ratings = []
-    for sid in song_ids:
-        val = st.session_state.get(f"rating_val_song_{sid}_{user_id}", 0.0)
-        if val > 0: ratings.append(val)
-        
-    for aid in album_ids:
-        val = st.session_state.get(f"rating_val_album_{aid}_{user_id}", 0.0)
-        if val > 0: ratings.append(val)
-        
-    n_rated = len(ratings)
+    # 4. Συλλέγουμε ΞΕΧΩΡΙΣΤΑ τις βαθμολογίες για Songs και Albums
+    song_ratings = [
+        st.session_state.get(f"rating_val_song_{sid}_{user_id}", 0.0) 
+        for sid in song_ids if st.session_state.get(f"rating_val_song_{sid}_{user_id}", 0.0) > 0
+    ]
     
-    if n_rated > 0:
-        arr = np.array(ratings)
-        mean_val = f"{arr.mean():.2f}"
-        median_val = f"{np.median(arr):.2f}"
-        std_val_raw = float(np.std(arr, ddof=1)) if n_rated > 1 else 0.0
-        std_val = f"± {std_val_raw:.2f}"
-        
-        sug_min = max(0.0, arr.mean() - std_val_raw)
-        sug_max = min(10.0, arr.mean() + std_val_raw)
-        suggested_str = f"{sug_min:.1f} – {sug_max:.1f}" if std_val_raw > 0 else f"{arr.mean():.1f}"
-    else:
-        mean_val = "—"
-        median_val = "—"
-        std_val = "—"
-        suggested_str = "—"
+    album_ratings = [
+        st.session_state.get(f"rating_val_album_{aid}_{user_id}", 0.0) 
+        for aid in album_ids if st.session_state.get(f"rating_val_album_{aid}_{user_id}", 0.0) > 0
+    ]
 
-    def _stat_block(icon, label, value, highlight=False):
-        is_active_highlight = highlight and n_rated > 0
-        cls = "album-stat-block highlight" if is_active_highlight else "album-stat-block"
-        color = GREEN if is_active_highlight else (TEXT if n_rated > 0 else TEXT_DIM)
+    # Helper για τη δημιουργία της μπάρας
+    def _build_stats_row(ratings_list, label_title, icon_str, is_last=False):
+        n_rated = len(ratings_list)
+        if n_rated > 0:
+            arr = np.array(ratings_list)
+            mean_val = f"{arr.mean():.2f}"
+            median_val = f"{np.median(arr):.2f}"
+            std_val_raw = float(np.std(arr, ddof=1)) if n_rated > 1 else 0.0
+            std_val = f"± {std_val_raw:.2f}"
+            
+            sug_min = max(0.0, arr.mean() - std_val_raw)
+            sug_max = min(10.0, arr.mean() + std_val_raw)
+            suggested_str = f"{sug_min:.1f} – {sug_max:.1f}" if std_val_raw > 0 else f"{arr.mean():.1f}"
+        else:
+            mean_val, median_val, std_val, suggested_str = "—", "—", "—", "—"
+
+        def _stat_block(icon, label, value, highlight=False):
+            is_active_highlight = highlight and n_rated > 0
+            cls = "album-stat-block highlight" if is_active_highlight else "album-stat-block"
+            color = GREEN if is_active_highlight else (TEXT if n_rated > 0 else TEXT_DIM)
+            return (
+                f'<div class="{cls}">'
+                f'<div class="album-stat-icon">{icon}</div>'
+                f'<div class="album-stat-text">'
+                f'<div class="album-stat-label">{label}</div>'
+                f'<div class="album-stat-value" style="color:{color};">{value}</div>'
+                f'</div>'
+                f'</div>'
+            )
+
+        margin_bottom = "26px" if is_last else "12px"
         return (
-            f'<div class="{cls}">'
-            f'<div class="album-stat-icon">{icon}</div>'
-            f'<div class="album-stat-text">'
-            f'<div class="album-stat-label">{label}</div>'
-            f'<div class="album-stat-value" style="color:{color};">{value}</div>'
-            f'</div>'
-            f'</div>'
+            f'<div class="album-stats-bar" style="margin-bottom: {margin_bottom};">'
+            + _stat_block(icon_str, f"Rated {label_title}", n_rated)
+            + _stat_block("📊", "Mean", mean_val)
+            + _stat_block("📍", "Median", median_val)
+            + _stat_block("📐", "Std Dev", std_val)
+            + _stat_block("⭐", "Suggested", suggested_str, highlight=True)
+            + '</div>'
         )
 
-    # Η CSS είναι η ίδια που χρησιμοποιούμε και στα Albums
+    # Η CSS είναι η ίδια (αφαιρέσαμε το hardcoded margin-bottom για να το ελέγχουμε δυναμικά)
     stats_css = f'''<style>
-    .album-stats-bar {{ display: flex; align-items: stretch; background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01)); border: 1px solid {BORDER}; border-radius: 16px; padding: 2px; margin-bottom: 26px; position: relative; overflow: hidden; animation: fadeSlideUp 0.45s cubic-bezier(0.16,1,0.3,1) both; }}
+    .album-stats-bar {{ display: flex; align-items: stretch; background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01)); border: 1px solid {BORDER}; border-radius: 16px; padding: 2px; position: relative; overflow: hidden; animation: fadeSlideUp 0.45s cubic-bezier(0.16,1,0.3,1) both; }}
     .album-stats-bar::before {{ content: ''; position: absolute; top: 0; left: 8%; right: 8%; height: 2px; background: linear-gradient(90deg, transparent, {GREEN}, transparent); opacity: 0.55; }}
     .album-stat-block {{ flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 15px 10px; position: relative; transition: background 0.2s ease; }}
     .album-stat-block:hover {{ background: rgba(255,255,255,0.02); }}
@@ -361,16 +371,11 @@ def get_artist_stats_html(artist_id, user_id):
     @media (max-width: 768px) {{ .album-stats-bar {{ flex-wrap: wrap; }} .album-stat-block {{ flex: 1 1 45%; padding: 10px 6px; }} .album-stat-block + .album-stat-block::before {{ display: none; }} .album-stat-value {{ font-size: 0.95rem; }} }}
     </style>'''
 
-    stats_body = (
-        '<div class="album-stats-bar">'
-        + _stat_block("🎯", "Rated Work", n_rated)
-        + _stat_block("📊", "Mean", mean_val)
-        + _stat_block("📍", "Median", median_val)
-        + _stat_block("📐", "Std Dev", std_val)
-        + _stat_block("⭐", "Suggested", suggested_str, highlight=True)
-        + '</div>'
-    )
-    return stats_css + stats_body
+    html_out = stats_css
+    html_out += _build_stats_row(song_ratings, "Tracks", "🎵", is_last=False)
+    html_out += _build_stats_row(album_ratings, "Albums", "💿", is_last=True)
+    
+    return html_out
 
 @st.fragment
 def hidden_rate_worker():
@@ -1904,7 +1909,7 @@ if detail_type and detail_id:
         except ValueError:
             pass
     elif detail_type == "ratings_full":
-            kind_key = detail_id if detail_id in ("song", "album") else "song"
+            kind_key = detail_id if detail_id in ("song", "album", "artist") else "song"
             R.render_full_ratings_list(selected_user_id, kind_key)
 elif current_tab == "overview":
 

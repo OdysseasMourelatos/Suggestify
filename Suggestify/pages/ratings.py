@@ -577,7 +577,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     # DASHBOARD QUERIES (HYPER-OPTIMIZED WITH CTEs)
     # ==============================================================
     def _distribution(user_id: int, kind: str) -> pd.DataFrame:
-        table = "song_ratings" if kind == "song" else "album_ratings"
+        table = "song_ratings" if kind == "song" else ("album_ratings" if kind == "album" else "artist_ratings")
         sql = f"""
             SELECT ROUND(rating * 2) / 2.0 AS rating, COUNT(*) AS n 
             FROM {table}
@@ -590,7 +590,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         return full.merge(df, on="rating", how="left").fillna(0)
     
     def _rating_stats(user_id: int, kind: str) -> dict:
-        table = "song_ratings" if kind == "song" else "album_ratings"
+        table = "song_ratings" if kind == "song" else ("album_ratings" if kind == "album" else "artist_ratings")
         sql = f"SELECT rating, updated_at FROM {table} WHERE user_id = :user_id;"
         df = run_rating_query(sql, {"user_id": user_id})
 
@@ -636,7 +636,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         }
 
     def _rating_trend_over_time(user_id: int, kind: str) -> pd.DataFrame:
-        table = "song_ratings" if kind == "song" else "album_ratings"
+        table = "song_ratings" if kind == "song" else ("album_ratings" if kind == "album" else "artist_ratings")
         sql = f"""
             SELECT DATE_TRUNC('month', updated_at) AS period,
                    AVG(rating) AS avg_rating, COUNT(*) AS n
@@ -748,6 +748,35 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         """
         return run_rating_query(sql, params).reset_index(drop=True)
 
+    def _all_rated_artists(user_id: int, search: str = None, limit: int = None, sort_by: str = "Highest Rated") -> pd.DataFrame:
+        params = {"user_id": user_id}
+        order_sql = "ORDER BY updated_at DESC" if sort_by == "Recently Rated" else "ORDER BY rating DESC, sort_weight DESC, updated_at DESC"
+        limit_sql = "LIMIT :limit" if limit else ""
+        if limit: params["limit"] = limit
+        
+        sql = f"""
+            WITH base_ratings AS (
+                SELECT artist_id, rating, sort_weight, updated_at
+                FROM artist_ratings
+                WHERE user_id = :user_id
+        """
+        if search:
+            sql += """ 
+                AND artist_id IN (SELECT id FROM artists WHERE name ILIKE :search)
+            """
+            params["search"] = f"%{search}%"
+            
+        sql += f"""
+                {order_sql} {limit_sql}
+            )
+            SELECT br.artist_id, a.name AS artist_name, a.image_url,
+                   br.rating, br.sort_weight, br.updated_at
+            FROM base_ratings br
+            JOIN artists a ON a.id = br.artist_id
+            {order_sql};
+        """
+        return run_rating_query(sql, params).reset_index(drop=True)
+    
     def _cross_analysis_songs(user_id: int, F: dict) -> pd.DataFrame:
         return run_rating_query("""
             WITH stream_counts AS (
@@ -926,8 +955,8 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     # FULL RANKED LIST PAGE ("See Full Ranking" destination)
     # ==============================================================
     def render_full_ratings_list(user_id: int, kind_key: str):
-        assert kind_key in ("song", "album")
-        label = "Songs" if kind_key == "song" else "Albums"
+        assert kind_key in ("song", "album", "artist")
+        label = "Songs" if kind_key == "song" else ("Albums" if kind_key == "album" else "Artists")
 
         st.markdown(
             f'<div class="section-header" style="margin-top:0;"><span class="icon">🏆</span>All Rated {label}</div>',
@@ -976,8 +1005,12 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         
         limit_val = int(display_limit) if display_limit != "All" else None
 
-        df = (_all_rated_songs(user_id, search_term, limit=limit_val, sort_by=sort_by) if kind_key == "song"
-              else _all_rated_albums(user_id, search_term, limit=limit_val, sort_by=sort_by))
+        if kind_key == "song":
+            df = _all_rated_songs(user_id, search_term, limit=limit_val, sort_by=sort_by)
+        elif kind_key == "album":
+            df = _all_rated_albums(user_id, search_term, limit=limit_val, sort_by=sort_by)
+        else:
+            df = _all_rated_artists(user_id, search_term, limit=limit_val, sort_by=sort_by)
 
         if df.empty:
             st.markdown(
@@ -994,20 +1027,32 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         )
         
         _seed_ratings_from_df(kind_key, df, f"{kind_key}_id", user_id)
+        
+        # --- ΝΕΟ: Render list για τον Artist
         if kind_key == "song":
             render_list_v2(
                 df, "song_title", "main_artist", "rating", "updated_at",
                 id_col="song_id", link_type="song", rank_col="global_rank",
-                reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04, # Εδω μπηκε το Animation Limit
+                reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04,
+                stat1_label="Rating", stat1_fmt=_fmt_rating,
+                stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
+                **qr,
+            )
+        elif kind_key == "album":
+            render_list_v2(
+                df, "album_title", "artist_name", "rating", "updated_at",
+                id_col="album_id", link_type="album", rank_col="global_rank",
+                reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04,
                 stat1_label="Rating", stat1_fmt=_fmt_rating,
                 stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
                 **qr,
             )
         else:
+            df["subtitle"] = "Artist"
             render_list_v2(
-                df, "album_title", "artist_name", "rating", "updated_at",
-                id_col="album_id", link_type="album", rank_col="global_rank",
-                reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04, # Εδω μπηκε το Animation Limit
+                df, "artist_name", "subtitle", "rating", "updated_at",
+                id_col="artist_id", link_type="artist", rank_col="global_rank",
+                reveal_top_n=limit_val or 50, reveal_delay_base=0.05, reveal_delay_step=0.04,
                 stat1_label="Rating", stat1_fmt=_fmt_rating,
                 stat2_label="Rated On", stat2_fmt=_fmt_rated_date,
                 **qr,
@@ -1017,8 +1062,9 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     # DASHBOARD RENDER
     # ==============================================================
     def render_ratings_dashboard(user_id: int, F: dict):
-        kind = _segmented_toggle("ratings_scope", ["Songs", "Albums"])
-        kind_key = "song" if kind == "Songs" else "album"
+        # --- ΝΕΟ: Προσθήκη "Artists" στο Toggle
+        kind = _segmented_toggle("ratings_scope", ["Songs", "Albums", "Artists"])
+        kind_key = "song" if kind == "Songs" else ("album" if kind == "Albums" else "artist")
 
         stats = _rating_stats(user_id, kind_key)
         if stats["total"] == 0:
@@ -1076,7 +1122,10 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             st.markdown('<div class="section-header" style="margin-top:16px;"><span class="icon">🏆</span>Hall of Fame</div>', unsafe_allow_html=True)
             
             with st.spinner("Loading your top rated..."):
-                hof_df = _all_rated_songs(user_id, limit=10) if kind_key == "song" else _all_rated_albums(user_id, limit=10)
+                # --- ΝΕΟ: Fetch data για artists
+                if kind_key == "song": hof_df = _all_rated_songs(user_id, limit=10)
+                elif kind_key == "album": hof_df = _all_rated_albums(user_id, limit=10)
+                else: hof_df = _all_rated_artists(user_id, limit=10)
             
             if hof_df.empty:
                 st.markdown('<div class="empty-state"><div class="icon">📭</div>Nothing rated yet</div>', unsafe_allow_html=True)
@@ -1088,6 +1137,8 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                     R=_qr_R, user_id=user_id, rating_scale=int(RATING_MAX),
                 )
                 _seed_ratings_from_df(kind_key, hof_df, f"{kind_key}_id", user_id)
+                
+                # --- ΝΕΟ: Render HOF για artists
                 if kind_key == "song":
                     render_list_v2(
                         hof_df, "song_title", "main_artist", "rating", "updated_at",
@@ -1096,7 +1147,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                         stat1_label="Rating", stat1_fmt=_fmt_rating,
                         stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
                     )
-                else:
+                elif kind_key == "album":
                     render_list_v2(
                         hof_df, "album_title", "artist_name", "rating", "updated_at",
                         id_col="album_id", link_type="album", rank_col="global_rank",
@@ -1104,6 +1155,16 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                         stat1_label="Rating", stat1_fmt=_fmt_rating,
                         stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
                     )
+                else:
+                    hof_df["subtitle"] = "Artist"
+                    render_list_v2(
+                        hof_df, "artist_name", "subtitle", "rating", "updated_at",
+                        id_col="artist_id", link_type="artist", rank_col="global_rank",
+                        reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.05,
+                        stat1_label="Rating", stat1_fmt=_fmt_rating,
+                        stat2_label="Rated On", stat2_fmt=_fmt_rated_date, **qr,
+                    )
+                    
             full_href = build_filtered_href("ratings_full", kind_key)
             st.markdown(
                 f'<a href="{full_href}" target="_self" style="text-decoration:none;">'
