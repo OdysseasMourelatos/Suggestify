@@ -572,7 +572,8 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         
         if not df_artists.empty:
             df_artists["sub"] = "Artist"
-            render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
+            R.preload_ratings(selected_user_id, "artist", df_artists["artist_id"].tolist())
+            render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist", **qr_kwargs)
             
             if redirect_filters or redirect_date_range:
                 if st.button("See Full List →", key=f"seefull_artists_{type_label}_{title}_{extra_params}", use_container_width=True):
@@ -1778,7 +1779,9 @@ if detail_type and detail_id:
                 """, {"genre": detail_id, **F})
                 if not df_artists.empty:
                     df_artists["sub"] = "Artist"
-                    render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist")
+                    # --- ΠΡΟΣΘΗΚΗ: Φορτώνουμε τα ratings και περνάμε τα qr_kwargs ---
+                    R.preload_ratings(selected_user_id, "artist", df_artists["artist_id"].tolist())
+                    render_list_v2(df_artists, "artist_name", "sub", "streams", "hours_played", "artist_id", "artist", **qr_kwargs)
                 else:
                     st.markdown('<div class="empty-state"><div class="icon">📭</div>No artists found</div>', unsafe_allow_html=True)
 
