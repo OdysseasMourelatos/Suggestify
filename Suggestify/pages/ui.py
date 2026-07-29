@@ -358,18 +358,42 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
         bump_html = ""
         show_arrows = rank <= 50
         if can_navigate and has_rating_col and has_rating and show_arrows:
-            top_href = f"{base_qs}&bump={link_type}:{item_id}:top"
-            up_href = f"{base_qs}&bump={link_type}:{item_id}:up"
-            down_href = f"{base_qs}&bump={link_type}:{item_id}:down"
-            bump_buttons = ""
-            if can_up:
-                bump_buttons += f'<a href="{top_href}" target="_self" class="bump-link" title="Push to Top">⇈</a>'
-                bump_buttons += f'<a href="{up_href}" target="_self" class="bump-link" title="Move Up 1">▲</a>'
-            if can_down:
-                bump_buttons += f'<a href="{down_href}" target="_self" class="bump-link" title="Move Down 1">▼</a>'
-            if bump_buttons:
-                bump_html = f'<div class="bump-container">{bump_buttons}</div>'
+            my_rating = row["rating"]
+            
+            # Μπορεί να μετακινηθεί ΜΟΝΟ αν το διπλανό του τραγούδι έχει ΤΗΝ ΙΔΙΑ ΒΑΘΜΟΛΟΓΙΑ.
+            can_up = (i > 0) and (df.iloc[i-1]["rating"] == my_rating)
+            can_down = (i < len(df) - 1) and (df.iloc[i+1]["rating"] == my_rating)
+            
+            if can_up or can_down:
+                bump_buttons = ""
+                
+                if can_up:
+                    target_up_id = str(int(df.iloc[i-1][id_col])) if isinstance(df.iloc[i-1][id_col], float) and df.iloc[i-1][id_col].is_integer() else str(df.iloc[i-1][id_col])
+                    
+                    # Ψάχνει ποιο είναι το #1 τραγούδι σε ΑΥΤΗ ΤΗΝ ΙΣΟΒΑΘΜΙΑ
+                    top_idx = i
+                    while top_idx > 0 and df.iloc[top_idx-1]["rating"] == my_rating:
+                        top_idx -= 1
+                    target_top_id = str(int(df.iloc[top_idx][id_col])) if isinstance(df.iloc[top_idx][id_col], float) and df.iloc[top_idx][id_col].is_integer() else str(df.iloc[top_idx][id_col])
 
+                    # ΔΗΜΙΟΥΡΓΟΥΜΕ ΤΑ DATA-BUMP ΑΝΤΙ ΓΙΑ HREFS
+                    top_data = f"{link_type}:{item_id}:top:{target_top_id}"
+                    up_data = f"{link_type}:{item_id}:swap:{target_up_id}"
+                    
+                    if top_idx != i and target_top_id != target_up_id:
+                        bump_buttons += f'<a href="#" data-bump="{top_data}" class="bump-link" title="Push to Top">⇈</a>'
+                    bump_buttons += f'<a href="#" data-bump="{up_data}" class="bump-link" title="Move Up 1">▲</a>'
+                    
+                if can_down:
+                    target_down_id = str(int(df.iloc[i+1][id_col])) if isinstance(df.iloc[i+1][id_col], float) and df.iloc[i+1][id_col].is_integer() else str(df.iloc[i+1][id_col])
+                    
+                    # ΔΗΜΙΟΥΡΓΟΥΜΕ ΤΑ DATA-BUMP ΑΝΤΙ ΓΙΑ HREFS
+                    down_data = f"{link_type}:{item_id}:swap:{target_down_id}"
+                    bump_buttons += f'<a href="#" data-bump="{down_data}" class="bump-link" title="Move Down 1">▼</a>'
+
+                if bump_buttons:
+                    bump_html = f'<div class="bump-container">{bump_buttons}</div>'
+                    
         card_core = (
             f'<div class="list-item {reveal_class} {item_class}" {reveal_style}>'
             f'<div class="item-rank-container">'

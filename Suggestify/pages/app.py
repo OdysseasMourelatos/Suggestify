@@ -44,61 +44,91 @@ def inject_rating_script():
         doc.__ratingDelegated = true;
 
         doc.addEventListener('click', function(e) {
+            // --- 1. CLICK ΣΤΑ ΑΣΤΕΡΑΚΙΑ ---
             const star = e.target.closest('.star-cell');
-            if (!star) return;
-            e.preventDefault();
-            e.stopPropagation();
+            if (star) {
+                e.preventDefault();
+                e.stopPropagation();
 
-            const container = star.closest('.crate-stars');
-            if (!container) return;
+                const container = star.closest('.crate-stars');
+                if (!container) return;
 
-            const stars = Array.from(container.querySelectorAll('.star-cell'));
-            const idx = stars.indexOf(star);
-            const type = container.dataset.type;
-            const id = container.dataset.id;
-            const uid = container.dataset.uid;
-            const current = parseFloat(container.dataset.current || '0');
-            const val = (Math.ceil(current) === (idx + 1)) ? 0 : (idx + 1);
+                const stars = Array.from(container.querySelectorAll('.star-cell'));
+                const idx = stars.indexOf(star);
+                const type = container.dataset.type;
+                const id = container.dataset.id;
+                const uid = container.dataset.uid;
+                const current = parseFloat(container.dataset.current || '0');
+                const val = (Math.ceil(current) === (idx + 1)) ? 0 : (idx + 1);
 
-            // Άμεσο οπτικό feedback
-            stars.forEach(function(s, i) {
-                const fill = Math.max(0, Math.min(1, val - i)) * 100;
-                s.style.setProperty('--fill', fill + '%');
-            });
-            container.dataset.current = val;
+                stars.forEach(function(s, i) {
+                    const fill = Math.max(0, Math.min(1, val - i)) * 100;
+                    s.style.setProperty('--fill', fill + '%');
+                });
+                container.dataset.current = val;
 
-            function trySubmit(retries) {
-                const input = doc.querySelector('input[aria-label="hidden_rate_input"]');
-
-                // Fragment rerun μπορεί στιγμιαία να έχει ξαναφτιάξει το DOM node —
-                // κάνουμε retry αντί να τα παρατάμε σιωπηλά.
-                if (!input) {
-                    if (retries > 0) {
-                        setTimeout(function() { trySubmit(retries - 1); }, 60);
-                    } else {
-                        console.error("Suggestify: Hidden input not found after retries");
+                function trySubmit(retries) {
+                    const input = doc.querySelector('input[aria-label="hidden_rate_input"]');
+                    if (!input) {
+                        if (retries > 0) setTimeout(function() { trySubmit(retries - 1); }, 60);
+                        return;
                     }
-                    return;
+                    const setter = Object.getOwnPropertyDescriptor(parentWin.HTMLInputElement.prototype, 'value').set;
+                    setter.call(input, type + ':' + id + ':' + val + ':' + uid + ':' + Date.now());
+                    input.dispatchEvent(new parentWin.Event('input', { bubbles: true }));
+                    input.dispatchEvent(new parentWin.Event('change', { bubbles: true }));
+                    input.focus({ preventScroll: true });
+                    setTimeout(function() {
+                        input.dispatchEvent(new parentWin.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                        input.dispatchEvent(new parentWin.KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                        input.blur();
+                    }, 30);
                 }
-
-                const setter = Object.getOwnPropertyDescriptor(parentWin.HTMLInputElement.prototype, 'value').set;
-                setter.call(input, type + ':' + id + ':' + val + ':' + uid + ':' + Date.now());
-
-                // Τα events πρέπει να δημιουργηθούν από το parent window (React 17+ iframe fix)
-                input.dispatchEvent(new parentWin.Event('input', { bubbles: true }));
-                input.dispatchEvent(new parentWin.Event('change', { bubbles: true }));
-
-                // ΤΟ ΠΡΑΓΜΑΤΙΚΟ FIX: το input πρέπει να μπορεί να πάρει focus (δεν είναι πια display:none)
-                // ώστε το blur() παρακάτω να παράγει πραγματικό blur event -> commit στο Streamlit.
-                input.focus({ preventScroll: true });
-                setTimeout(function() {
-                    input.dispatchEvent(new parentWin.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-                    input.dispatchEvent(new parentWin.KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-                    input.blur();
-                }, 30);
+                trySubmit(5);
+                return;
             }
 
-            trySubmit(5);
+            // --- 2. CLICK ΣΤΑ BUMP ΒΕΛΑΚΙΑ ---
+            const bump = e.target.closest('.bump-link');
+            if (bump) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const bumpData = bump.dataset.bump;
+                if (!bumpData) return;
+
+                function trySubmitBump(retries) {
+                    const input = doc.querySelector('input[aria-label="hidden_bump_input"]');
+                    if (!input) {
+                        if (retries > 0) setTimeout(function() { trySubmitBump(retries - 1); }, 60);
+                        return;
+                    }
+                    const setter = Object.getOwnPropertyDescriptor(parentWin.HTMLInputElement.prototype, 'value').set;
+                    setter.call(input, bumpData + ':' + Date.now());
+                    input.dispatchEvent(new parentWin.Event('input', { bubbles: true }));
+                    input.dispatchEvent(new parentWin.Event('change', { bubbles: true }));
+                    input.focus({ preventScroll: true });
+                    setTimeout(function() {
+                        input.dispatchEvent(new parentWin.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                        input.dispatchEvent(new parentWin.KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                        input.blur();
+                    }, 30);
+                }
+                trySubmitBump(5);
+            }
+            // --- 3. CLICK ΣΤΟ RATING CHIP ---
+            const ratingChip = e.target.closest('.rating-chip-toggle');
+            if (ratingChip) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Βρίσκει και κάνει κλικ στο κουμπί της κεντρικής μπάρας
+                const toggleBtn = doc.querySelector('.st-key-quick_rate_toggle button');
+                if (toggleBtn) {
+                    toggleBtn.click();
+                }
+                return;
+            }
         });
     })();
     </script>
@@ -127,24 +157,27 @@ else:
     
 R = init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER,
                          get_rating_cache_gen=get_rating_cache_gen, bump_rating_cache_gen=bump_rating_cache_gen)
+
+st.markdown("""
+    <style>
+    div[data-testid="stTextInput"]:has(input[aria-label="hidden_rate_input"]),
+    div[data-testid="stTextInput"]:has(input[aria-label="hidden_bump_input"]) {
+        position: fixed !important;
+        top: -1000px !important;
+        left: -1000px !important;
+        width: 1px !important;
+        height: 1px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        opacity: 0.01 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# 1. RATING HANDLER (Μένει στο Fragment για να μην ανανεώνει τη σελίδα όταν ρίχνεις βαθμολογία)
 @st.fragment
 def hidden_rate_worker():
-    st.markdown("""
-        <style>
-        div[data-testid="stTextInput"]:has(input[aria-label="hidden_rate_input"]) {
-            position: fixed !important;
-            top: -1000px !important;
-            left: -1000px !important;
-            width: 1px !important;
-            height: 1px !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            opacity: 0.01 !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
     def on_rate_change():
         val = st.session_state.get("hidden_rate_state")
         if val:
@@ -152,13 +185,11 @@ def hidden_rate_worker():
             if len(parts) >= 4:
                 r_type, r_id, r_val = parts[0], parts[1], float(parts[2])
                 r_uid = int(parts[3])
-                
                 ok = False
                 if r_type == "song":
                     ok = R.set_song_rating(r_uid, r_id, r_val)
                 else:
                     ok = R.set_album_rating(r_uid, r_id, r_val)
-                    
                 if ok:
                     st.session_state[f"rating_val_{r_type}_{r_id}_{r_uid}"] = r_val
                     msg = f"Rated {r_val:g}/10 ✓" if r_val > 0 else "Rating cleared"
@@ -166,7 +197,25 @@ def hidden_rate_worker():
 
     st.text_input("hidden_rate_input", key="hidden_rate_state", label_visibility="collapsed", on_change=on_rate_change)
 
+# 2. BUMP HANDLER (ΧΩΡΙΣ Fragment! Θέλουμε να κάνει Soft-Rerun όλο το UI για να φανεί η νέα σειρά)
+def hidden_bump_worker():
+    def on_bump_change():
+        val = st.session_state.get("hidden_bump_state")
+        if val:
+            parts = val.split(":")
+            if len(parts) >= 4:
+                b_type, b_id, b_action, b_target = parts[0], parts[1], parts[2], parts[3]
+                try:
+                    if R.move_item(selected_user_id, b_type, b_id, b_action, b_target):
+                        st.toast("List order updated! 🔃", icon="✅")
+                except Exception as e:
+                    st.toast(f"⚠️ Couldn't reorder item: {e}", icon="⚠️")
+
+    st.text_input("hidden_bump_input", key="hidden_bump_state", label_visibility="collapsed", on_change=on_bump_change)
+
+# Καλούμε και τους 2 workers
 hidden_rate_worker()
+hidden_bump_worker()
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None, redirect_info: dict = None):
     header_df = run_query(f"""
@@ -252,7 +301,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
                     if redirect_date_range:
                         st.session_state["pending_start_date"] = redirect_date_range[0]
                         st.session_state["pending_end_date"] = redirect_date_range[1]
-                        st.session_state["pending_date_preset"] = None  # <--- ΔΙΟΡΘΩΘΗΚΕ
+                        st.session_state["pending_date_preset"] = None
                         st.query_params["preset"] = "manual"
                         st.query_params["start"] = redirect_date_range[0].isoformat()
                         st.query_params["end"] = redirect_date_range[1].isoformat()
@@ -300,7 +349,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
                     if redirect_date_range:
                         st.session_state["pending_start_date"] = redirect_date_range[0]
                         st.session_state["pending_end_date"] = redirect_date_range[1]
-                        st.session_state["pending_date_preset"] = None  # <--- ΔΙΟΡΘΩΘΗΚΕ
+                        st.session_state["pending_date_preset"] = None
                         st.query_params["preset"] = "manual"
                         st.query_params["start"] = redirect_date_range[0].isoformat()
                         st.query_params["end"] = redirect_date_range[1].isoformat()
@@ -351,7 +400,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
                     if redirect_date_range:
                         st.session_state["pending_start_date"] = redirect_date_range[0]
                         st.session_state["pending_end_date"] = redirect_date_range[1]
-                        st.session_state["pending_date_preset"] = None  # <--- ΔΙΟΡΘΩΘΗΚΕ
+                        st.session_state["pending_date_preset"] = None
                         st.query_params["preset"] = "manual"
                         st.query_params["start"] = redirect_date_range[0].isoformat()
                         st.query_params["end"] = redirect_date_range[1].isoformat()
@@ -471,19 +520,6 @@ st.query_params["user"] = str(selected_user_id)
 qr_kwargs = dict(quick_rate=st.session_state.quick_rate_mode, R=R, 
                  user_id=selected_user_id, rating_scale=10)
 
-# --- Action Handlers for HTML star/bump links ---
-_action_params = st.query_params
-
-if "bump" in _action_params:
-    try:
-        b_type, b_id, b_action = _action_params["bump"].split(":")
-        R.move_item(selected_user_id, b_type, b_id, b_action)
-    except Exception:
-        st.toast("⚠️ Couldn't reorder item", icon="⚠️")
-
-    del st.query_params["bump"]
-    st.rerun()
-    
 # Handle pending redirect dates safely before widgets instantiate
 if "pending_start_date" in st.session_state:
     st.session_state.start_date = st.session_state.pop("pending_start_date")
@@ -535,189 +571,120 @@ detail_id = view_state["id"]
 with st.container(key="top_bar_wrapper"):
     st.markdown(f"""
         <style>
-        /* Κεντρικό flexbox της πάνω μπάρας */
-        div.st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] {{
-            display: flex !important;
-            flex-wrap: nowrap !important;
-            justify-content: flex-start !important;
+        /* 1. ΕΥΘΥΓΡΑΜΜΙΣΗ ΒΑΣΗΣ (Bottom Alignment) ΓΙΑ ΟΛΕΣ ΤΙΣ ΣΤΗΛΕΣ */
+        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] {{
             align-items: flex-end !important;
-            gap: 0.75rem !important; /* Φέρνει τα Φίλτρα και τα Κουμπιά πιο κοντά */
+            gap: 1rem !important;
         }}
 
-        /* Όλες οι στήλες παίρνουν αυτόματο πλάτος (ακυρώνουμε τα ποσοστά του Streamlit) */
-        div.st-key-top_bar_wrapper div[data-testid="column"] {{
-            flex: 0 0 auto !important;
-            width: auto !important;
-            min-width: 0 !important;
+        /* 2. ΚΑΘΑΡΙΣΜΟΣ ΠΕΡΙΘΩΡΙΩΝ (Σβήνουμε ότι χαλούσε την ευθεία) */
+        .st-key-top_filter_row {{ margin-top: 0 !important; margin-bottom: 0 !important; }}
+        .st-key-share_row {{ margin-top: 0 !important; margin-bottom: 0 !important; }}
+        
+        /* 3. ΛΟΓΟΤΥΠΟ */
+        .navbar {{ 
+            padding: 0 !important; 
+            margin: 0 0 2px 0 !important; /* Ελαφρύ σπρώξιμο για να πατήσει ακριβώς στη γραμμή των κουτιών */
         }}
-
-        /* Η spacer στήλη ρουφάει τον κενό χώρο, σπρώχνοντας τα υπόλοιπα δεξιά */
-        div.st-key-top_bar_wrapper div[data-testid="column"]:has(> div .st-key-top_bar_spacer) {{
-            flex: 1 1 auto !important;
-            width: auto !important;
-        }}
-
-        /* --- Υπο-διάταξη για τα φίλτρα (Manual Mode) --- */
+        
+        /* 4. ΦΙΛΤΡΑ (Ημερομηνίες) */
         .st-key-top_filter_row div[data-testid="stHorizontalBlock"] {{
-            display: flex !important;
-            flex-wrap: nowrap !important;
+            gap: 0.8rem !important;
             align-items: flex-end !important;
-            gap: 0.4rem !important; /* Πολύ κοντά οι ημερομηνίες με το selectbox */
+            padding: 0 !important;
+            border: none !important;
+        }}
+        .st-key-top_filter_row [data-testid="column"] {{ min-width: 0px !important; }}
+        .st-key-top_filter_row .filter-label {{
+            font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.08em; color: {TEXT_DIM}; margin-bottom: 4px; display: block;
         }}
 
-        /* Σταθερά πλάτη για να μην ζουλιούνται ΠΟΤΕ τα inputs */
-        .st-key-top_filter_row div[data-baseweb="select"] {{
-            width: 140px !important;
-            min-width: 140px !important;
-        }}
-        .st-key-top_filter_row div[data-testid="stDateInput"] {{
-            width: 125px !important;
-            min-width: 125px !important;
-        }}
-        .st-key-top_filter_row {{ margin-top: 0 !important; margin-bottom: 0.15rem !important; }}
-
-        /* Styling του label */
-        .top-filter-label {{
-            font-size: 0.65rem;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--dynamic-color);
-            opacity: 0.8;
-            margin-bottom: 0.25rem;
-            display: block;
-        }}
-
-        /* ─── Rating toggle: pill with a live status dot ─── */
-        .st-key-quick_rate_toggle button {{
-            position: relative !important;
-            border-radius: 999px !important;
-            font-weight: 700 !important;
-            font-size: 0.85rem !important;
-            padding: 0 1.2rem 0 2.2rem !important;
-            height: 44px !important;
-            display: flex !important;
+        /* 5. ΚΟΥΜΠΙΑ (Δεξιά μεριά) */
+        .st-key-share_row div[data-testid="stHorizontalBlock"] {{
+            justify-content: flex-end !important; /* Σπρώχνει τα κουμπιά ΤΕΡΜΑ ΔΕΞΙΑ */
             align-items: center !important;
-            white-space: nowrap !important;
-            transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
-            letter-spacing: 0.01em !important;
-            box-sizing: border-box !important;
+            gap: 12px !important;
+            flex-wrap: nowrap !important;
         }}
+        .st-key-share_row div[data-testid="column"] {{
+            width: auto !important; flex: 0 0 auto !important; min-width: 0 !important;
+        }}
+
+        /* Styling Κουμπιών (Σταθερό ύψος 44px για να είναι ίσα με τα inputs) */
+        .st-key-quick_rate_toggle button, .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button {{
+            height: 44px !important;
+            border-radius: 999px !important; font-weight: 700 !important; font-size: 0.85rem !important;
+            display: flex !important; align-items: center !important; white-space: nowrap !important;
+            box-sizing: border-box !important; margin: 0 !important;
+        }}
+        .st-key-quick_rate_toggle button {{ padding: 0 1.2rem 0 2.2rem !important; transition: all 0.25s ease !important; position: relative !important; }}
+        .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button {{ padding: 0 1.2rem !important; transition: all 0.25s ease !important; }}
+        
         .st-key-quick_rate_toggle button::before {{
-            content: '';
-            position: absolute;
-            left: 1.05rem; top: 50%;
-            width: 8px; height: 8px;
-            border-radius: 50%;
-            transform: translateY(-50%);
+            content: ''; position: absolute; left: 1.05rem; top: 50%; width: 8px; height: 8px; border-radius: 50%; transform: translateY(-50%);
         }}
-        .st-key-quick_rate_toggle button[kind="secondary"] {{
-            background: rgba(255,255,255,0.04) !important;
-            border: 1px solid rgba(255,255,255,0.12) !important;
-            color: {TEXT_MID} !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="secondary"]::before {{
-            background: {TEXT_DIM};
-        }}
-        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{
-            border-color: rgba(255,255,255,0.25) !important;
-            color: {TEXT} !important;
-            transform: translateY(-1px) !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="primary"] {{
-            background: linear-gradient(135deg, #E53935, #C62828) !important;
-            border: 1px solid #FF6659 !important;
-            color: #fff !important;
-            box-shadow: 0 4px 16px rgba(229,57,53,0.4) !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="primary"]::before {{
-            background: #fff;
-            box-shadow: 0 0 8px #fff, 0 0 3px #fff;
-            animation: ratingPulse 1.6s ease-in-out infinite;
-        }}
-        .st-key-quick_rate_toggle button[kind="primary"]:hover {{
-            transform: translateY(-1px) !important;
-            box-shadow: 0 6px 22px rgba(229,57,53,0.55) !important;
-        }}
-        @keyframes ratingPulse {{
-            0%, 100% {{ opacity: 1; transform: translateY(-50%) scale(1); }}
-            50% {{ opacity: 0.5; transform: translateY(-50%) scale(0.75); }}
-        }}
+        .st-key-quick_rate_toggle button[kind="secondary"] {{ background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.12) !important; color: {TEXT_MID} !important; }}
+        .st-key-quick_rate_toggle button[kind="secondary"]::before {{ background: {TEXT_DIM}; }}
+        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{ border-color: rgba(255,255,255,0.25) !important; color: {TEXT} !important; transform: translateY(-1px) !important; }}
+        .st-key-quick_rate_toggle button[kind="primary"] {{ background: linear-gradient(135deg, #E53935, #C62828) !important; border: 1px solid #FF6659 !important; color: #fff !important; box-shadow: 0 4px 16px rgba(229,57,53,0.4) !important; }}
+        .st-key-quick_rate_toggle button[kind="primary"]::before {{ background: #fff; box-shadow: 0 0 8px #fff, 0 0 3px #fff; animation: ratingPulse 1.6s ease-in-out infinite; }}
+        .st-key-quick_rate_toggle button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 22px rgba(229,57,53,0.55) !important; }}
+        @keyframes ratingPulse {{ 0%, 100% {{ opacity: 1; transform: translateY(-50%) scale(1); }} 50% {{ opacity: 0.5; transform: translateY(-50%) scale(0.75); }} }}
 
-        /* ─── Share Stats button ─── */
-        div.st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child button {{
-            border-radius: 999px !important;
-            font-weight: 700 !important;
-            font-size: 0.85rem !important;
-            padding: 0 1.2rem !important;
-            height: 44px !important;
-            display: flex !important;
-            align-items: center !important;
-            white-space: nowrap !important;
-            background: rgba(29,185,84,0.06) !important;
-            border: 1px solid rgba(29,185,84,0.25) !important;
-            color: {GREEN} !important;
-            transition: all 0.25s cubic-bezier(0.16,1,0.3,1) !important;
-            box-sizing: border-box !important;
+        .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button {{
+            background: rgba(29,185,84,0.06) !important; border: 1px solid rgba(29,185,84,0.25) !important; color: {GREEN} !important;
         }}
-        div.st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child button:hover {{
-            background: rgba(29,185,84,0.16) !important;
-            border-color: {GREEN} !important;
-            color: #fff !important;
-            transform: translateY(-1px) !important;
-            box-shadow: 0 4px 16px rgba(29,185,84,0.3) !important;
+        .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button:hover {{
+            background: rgba(29,185,84,0.16) !important; border-color: {GREEN} !important; color: #fff !important; transform: translateY(-1px) !important; box-shadow: 0 4px 16px rgba(29,185,84,0.3) !important;
         }}
         </style>
     """, unsafe_allow_html=True)
 
-    col_brand, col_spacer, col_filters, col_share = st.columns([1.1, 4, 2.5, 1.8])
+    # Αναλογίες στηλών (Κεντρική Μπάρα)
+    col_brand, col_filters, col_share = st.columns([1.1, 2.3, 1.6])
 
     with col_brand:
         st.markdown('''
-        <div class="navbar" style="padding: 0; margin-top: 15px; margin-bottom: 0;">
+        <div class="navbar">
             <div class="nav-brand brand-title">
                 <span>🎧</span> Suggestify
             </div>
         </div>
         ''', unsafe_allow_html=True)
 
-    with col_spacer:
-        st.markdown('<div class="st-key-top_bar_spacer"></div>', unsafe_allow_html=True)
-
     with col_filters:
         with st.container(key="top_filter_row"):
+            # Αν έχει επιλέξει Manual εμφανίζει και τα τρία inputs
             if st.session_state.date_preset == "manual":
-                # ΑΛΛΑΓΗ: Βάζουμε πρώτα τις Ημερομηνίες (αριστερά) και το Period στο τέλος (δεξιά)
-                f_start, f_end, f_preset = st.columns([1, 1, 1.2])
+                f_preset, f_start, f_end = st.columns([1, 1.2, 1.2])
+                with f_preset:
+                    st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
+                    st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
                 with f_start:
-                    st.markdown('<div class="top-filter-label">FROM</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="filter-label">From</div>', unsafe_allow_html=True)
                     st.date_input("From", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="start_date", on_change=mark_manual)
                 with f_end:
-                    st.markdown('<div class="top-filter-label">TO</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
                     st.date_input("To", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="end_date", on_change=mark_manual)
-                with f_preset:
-                    st.markdown('<div class="top-filter-label">🗓️ PERIOD</div>', unsafe_allow_html=True)
-                    st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
             else:
-                st.markdown('<div class="top-filter-label">🗓️ PERIOD</div>', unsafe_allow_html=True)
-                st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
+                # Αν έχει επιλέξει All Time/Wrapped κτλ, το input περιορίζεται στο 1/3 της στήλης
+                f_preset, _empty = st.columns([1, 2.4])
+                with f_preset:
+                    st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
+                    st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
 
     with col_share:
         rating_mode_on = st.session_state.quick_rate_mode
-
         with st.container(key="share_row"):
             col_a, col_b = st.columns(2)
-
             with col_a:
                 with st.container(key="quick_rate_toggle"):
                     rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
-                    if st.button(rating_label, key="quick_rate_btn",
-                                 type="primary" if rating_mode_on else "secondary"):
-                        
+                    if st.button(rating_label, key="quick_rate_btn", type="primary" if rating_mode_on else "secondary"):
                         new_mode = not st.session_state.quick_rate_mode
                         st.session_state.quick_rate_mode = new_mode
                         qr_global["mode"] = new_mode
-
                         if new_mode:
                             st.query_params["qr"] = "1"
                         else:
@@ -732,7 +699,8 @@ with st.container(key="top_bar_wrapper"):
                     max_date=max_date,
                     label="📸 Share Stats"
                 )
-                
+# ====== ΤΕΛΟΣ ΤΗΣ ΠΑΝΩ ΜΠΑΡΑΣ ======
+
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
     ("artists", "🎤 Artists"), ("albums", "💿 Albums"),
@@ -1054,10 +1022,13 @@ if detail_type and detail_id:
                     R.preload_ratings(selected_user_id, "song", df_tracks["song_id"].tolist())
                     
                     if sort_art_tracks == "Rating":
-                        df_tracks["_mem_rating"] = df_tracks["song_id"].apply(
+                        df_tracks["rating"] = df_tracks["song_id"].apply(
                             lambda x: st.session_state.get(f"rating_val_song_{x}_{selected_user_id}", 0.0)
                         )
-                        df_tracks = df_tracks.sort_values(by=["_mem_rating", "streams"], ascending=[False, False]).reset_index(drop=True)
+                        df_tracks["_mem_weight"] = df_tracks["song_id"].apply(
+                            lambda x: st.session_state.get(f"sort_weight_song_{x}_{selected_user_id}", 0.0)
+                        )
+                        df_tracks = df_tracks.sort_values(by=["rating", "_mem_weight", "streams"], ascending=[False, False, False]).reset_index(drop=True)
                     elif sort_art_tracks == "Hours":
                         df_tracks = df_tracks.sort_values(by=["hours_played", "streams"], ascending=[False, False]).reset_index(drop=True)
                     else:
@@ -1110,10 +1081,13 @@ if detail_type and detail_id:
                     R.preload_ratings(selected_user_id, "album", df_albums["album_id"].tolist())
 
                     if sort_art_albums == "Rating":
-                        df_albums["_mem_rating"] = df_albums["album_id"].apply(
+                        df_albums["rating"] = df_albums["album_id"].apply(
                             lambda x: st.session_state.get(f"rating_val_album_{x}_{selected_user_id}", 0.0)
                         )
-                        df_albums = df_albums.sort_values(by=["_mem_rating", "streams"], ascending=[False, False]).reset_index(drop=True)
+                        df_albums["_mem_weight"] = df_albums["album_id"].apply(
+                            lambda x: st.session_state.get(f"sort_weight_album_{x}_{selected_user_id}", 0.0)
+                        )
+                        df_albums = df_albums.sort_values(by=["rating", "_mem_weight", "streams"], ascending=[False, False, False]).reset_index(drop=True)
                     elif sort_art_albums == "Hours":
                         df_albums = df_albums.sort_values(by=["hours_played", "streams"], ascending=[False, False]).reset_index(drop=True)
                     else:
@@ -1473,10 +1447,13 @@ if detail_type and detail_id:
                     
                     # Δυναμικό Sorting μέσω Pandas για να έχουμε τα απολύτως live δεδομένα
                     if sort_album_tracks == "Rating":
-                        df_tracks["_mem_rating"] = df_tracks["song_id"].apply(
+                        df_tracks["rating"] = df_tracks["song_id"].apply(
                             lambda x: st.session_state.get(f"rating_val_song_{x}_{selected_user_id}", 0.0)
                         )
-                        df_tracks = df_tracks.sort_values(by=["_mem_rating", "streams"], ascending=[False, False]).reset_index(drop=True)
+                        df_tracks["_mem_weight"] = df_tracks["song_id"].apply(
+                            lambda x: st.session_state.get(f"sort_weight_song_{x}_{selected_user_id}", 0.0)
+                        )
+                        df_tracks = df_tracks.sort_values(by=["rating", "_mem_weight", "streams"], ascending=[False, False, False]).reset_index(drop=True)
                     elif sort_album_tracks == "Hours":
                         df_tracks = df_tracks.sort_values(by=["hours_played", "streams"], ascending=[False, False]).reset_index(drop=True)
                     else:
@@ -1618,7 +1595,7 @@ if detail_type and detail_id:
             with c2:
                 st.markdown('<div class="section-header" style="margin-top: 0;"><span class="icon">🎤</span>Top Artists</div>', unsafe_allow_html=True)
                 df_artists = run_query(f"""
-                    SELECT a.id AS artist_id, a.name AS artist_name, MAX(a.image_url) AS image_url,                           COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
+                    SELECT a.id AS artist_id, a.name AS artist_name, MAX(a.image_url) AS image_url,                            COUNT(s.id) AS streams, ROUND(SUM(s.ms_played) / 3600000.0, 2) AS hours_played
                     FROM streams s
                     JOIN songs so ON so.id = s.song_id
                     LEFT JOIN albums al ON al.id = so.album_id

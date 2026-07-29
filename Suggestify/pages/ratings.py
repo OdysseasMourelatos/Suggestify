@@ -45,16 +45,22 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     # SQL
     # ==============================================================
     _UPSERT_SONG = """
-        INSERT INTO song_ratings (user_id, song_id, rating, updated_at)
-        VALUES (:user_id, :song_id, :rating, now())
+        INSERT INTO song_ratings (user_id, song_id, rating, sort_weight, updated_at)
+        VALUES (:user_id, :song_id, :rating, EXTRACT(EPOCH FROM now()), now())
         ON CONFLICT (user_id, song_id)
-        DO UPDATE SET rating = EXCLUDED.rating, updated_at = now();
+        DO UPDATE SET 
+            sort_weight = CASE WHEN song_ratings.rating != EXCLUDED.rating THEN EXTRACT(EPOCH FROM now()) ELSE song_ratings.sort_weight END,
+            rating = EXCLUDED.rating, 
+            updated_at = now();
     """
     _UPSERT_ALBUM = """
-        INSERT INTO album_ratings (user_id, album_id, rating, updated_at)
-        VALUES (:user_id, :album_id, :rating, now())
+        INSERT INTO album_ratings (user_id, album_id, rating, sort_weight, updated_at)
+        VALUES (:user_id, :album_id, :rating, EXTRACT(EPOCH FROM now()), now())
         ON CONFLICT (user_id, album_id)
-        DO UPDATE SET rating = EXCLUDED.rating, updated_at = now();
+        DO UPDATE SET 
+            sort_weight = CASE WHEN album_ratings.rating != EXCLUDED.rating THEN EXTRACT(EPOCH FROM now()) ELSE album_ratings.sort_weight END,
+            rating = EXCLUDED.rating, 
+            updated_at = now();
     """
     _DELETE_SONG = "DELETE FROM song_ratings WHERE user_id = :user_id AND song_id = :song_id;"
     _DELETE_ALBUM = "DELETE FROM album_ratings WHERE user_id = :user_id AND album_id = :album_id;"
@@ -110,50 +116,41 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         return ok
 
     # === Ο ΑΠΟΛΥΤΟΣ ΑΛΓΟΡΙΘΜΟΣ ΤΑΞΙΝΟΜΗΣΗΣ (PURE SQL = ΑΣΤΡΑΠΙΑΙΟΣ) ===
-    def move_item(user_id: int, item_type: str, item_id: str, action: str) -> bool:
-        import datetime
+    def move_item(user_id: int, item_type: str, item_id: str, action: str, target_id: str = None) -> bool:
         id_col = f"{item_type}_id"
         table = "song_ratings" if item_type == "song" else "album_ratings"
         
         with get_engine().begin() as conn:
-            # 1. Βρίσκουμε τον χρόνο (updated_at) και το rating του item
-            sql_me = f"SELECT rating, updated_at FROM {table} WHERE user_id = :uid AND {id_col} = :me_id"
-            me_row = conn.execute(text(sql_me), {"uid": user_id, "me_id": item_id}).fetchone()
-            if not me_row: return False
-            me_rating, me_ts = float(me_row[0]), me_row[1]
+            if action == "swap" and target_id:
+                # O(1) Ανταλλαγή βάρους!
+                sql_get = f"SELECT {id_col}, sort_weight FROM {table} WHERE user_id = :uid AND {id_col} IN (:id1, :id2)"
+                rows = conn.execute(text(sql_get), {"uid": user_id, "id1": item_id, "id2": target_id}).fetchall()
+                if len(rows) == 2:
+                    w1 = rows[0][1] if str(rows[0][0]) == item_id else rows[1][1]
+                    w2 = rows[1][1] if str(rows[0][0]) == item_id else rows[0][1]
 
-            if action == "top":
-                sql_upd = f"UPDATE {table} SET updated_at = now() WHERE user_id = :uid AND {id_col} = :me_id"
-                conn.execute(text(sql_upd), {"uid": user_id, "me_id": item_id})
-                
-            elif action in ["up", "down"]:
-                if action == "up":
-                    sql_target = f"""
-                        SELECT {id_col}, updated_at FROM {table} 
-                        WHERE user_id = :uid AND rating = :rating AND updated_at > :me_ts
-                        ORDER BY updated_at ASC LIMIT 1
-                    """
-                else:
-                    sql_target = f"""
-                        SELECT {id_col}, updated_at FROM {table} 
-                        WHERE user_id = :uid AND rating = :rating AND updated_at < :me_ts
-                        ORDER BY updated_at DESC LIMIT 1
-                    """
-                
-                target_row = conn.execute(text(sql_target), {"uid": user_id, "rating": me_rating, "me_ts": me_ts}).fetchone()
-                
-                if target_row:
-                    target_id, target_ts = target_row[0], target_row[1]
-                    if action == "up":
-                        new_me = target_ts + datetime.timedelta(milliseconds=1)
-                        new_target = me_ts - datetime.timedelta(milliseconds=1)
-                    else:
-                        new_me = target_ts - datetime.timedelta(milliseconds=1)
-                        new_target = me_ts + datetime.timedelta(milliseconds=1)
+                    if w1 == w2:
+                        w2 = w1 - 1.0
+
+                    sql_upd = f"UPDATE {table} SET sort_weight = :w, updated_at = now() WHERE user_id = :uid AND {id_col} = :id"
+                    conn.execute(text(sql_upd), {"w": w2, "uid": user_id, "id": item_id})
+                    conn.execute(text(sql_upd), {"w": w1, "uid": user_id, "id": target_id})
                     
-                    sql_swap = f"UPDATE {table} SET updated_at = :ts WHERE user_id = :uid AND {id_col} = :sid"
-                    conn.execute(text(sql_swap), {"ts": new_me, "uid": user_id, "sid": item_id})
-                    conn.execute(text(sql_swap), {"ts": new_target, "uid": user_id, "sid": target_id})
+                    # --- Η ΛΥΣΗ ΓΙΑ ΤΟ REFRESH: Ενημερώνουμε ΤΑΥΤΟΧΡΟΝΑ τη μνήμη του Streamlit! ---
+                    st.session_state[f"sort_weight_{item_type}_{item_id}_{user_id}"] = float(w2)
+                    st.session_state[f"sort_weight_{item_type}_{target_id}_{user_id}"] = float(w1)
+                    
+            elif action == "top" and target_id:
+                # Απλά παίρνει το βάρος της κορυφής και προσθέτει +1
+                sql_target = f"SELECT sort_weight FROM {table} WHERE user_id = :uid AND {id_col} = :tid"
+                t_row = conn.execute(text(sql_target), {"uid": user_id, "tid": target_id}).fetchone()
+                if t_row:
+                    new_w = float(t_row[0]) + 1.0
+                    sql_upd = f"UPDATE {table} SET sort_weight = :w, updated_at = now() WHERE user_id = :uid AND {id_col} = :id"
+                    conn.execute(text(sql_upd), {"w": new_w, "uid": user_id, "id": item_id})
+                    
+                    # --- Η ΛΥΣΗ ΓΙΑ ΤΟ REFRESH: Ενημερώνουμε ΤΑΥΤΟΧΡΟΝΑ τη μνήμη του Streamlit! ---
+                    st.session_state[f"sort_weight_{item_type}_{item_id}_{user_id}"] = float(new_w)
 
         _invalidate_rating_cache(user_id)
         return True
@@ -176,20 +173,22 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             st.session_state[state_key] = _getter(item_type)(user_id, item_id)
         return st.session_state[state_key]
 
-    _GET_SONG_BULK = "SELECT song_id AS item_id, rating FROM song_ratings WHERE user_id = :user_id AND song_id = ANY(:ids);"
-    _GET_ALBUM_BULK = "SELECT album_id AS item_id, rating FROM album_ratings WHERE user_id = :user_id AND album_id = ANY(:ids);"
+    _GET_SONG_BULK = "SELECT song_id AS item_id, rating, sort_weight FROM song_ratings WHERE user_id = :user_id AND song_id = ANY(:ids);"
+    _GET_ALBUM_BULK = "SELECT album_id AS item_id, rating, sort_weight FROM album_ratings WHERE user_id = :user_id AND album_id = ANY(:ids);"
 
     def preload_ratings(user_id: int, item_type: str, item_ids: list) -> None:
         assert item_type in ("song", "album")
         ids = [i for i in dict.fromkeys(item_ids) if i is not None]
         missing = [i for i in ids if f"rating_val_{item_type}_{i}_{user_id}" not in st.session_state]
-        if not missing:
-            return
+        if not missing: return
         sql = _GET_SONG_BULK if item_type == "song" else _GET_ALBUM_BULK
         df = run_rating_query(sql, {"user_id": user_id, "ids": missing})
-        found = dict(zip(df["item_id"], df["rating"])) if not df.empty else {}
+        
+        found_rating = dict(zip(df["item_id"], df["rating"])) if not df.empty else {}
+        found_weight = dict(zip(df["item_id"], df["sort_weight"])) if not df.empty else {}
         for i in missing:
-            st.session_state[f"rating_val_{item_type}_{i}_{user_id}"] = float(found.get(i, 0.0))
+            st.session_state[f"rating_val_{item_type}_{i}_{user_id}"] = float(found_rating.get(i, 0.0))
+            st.session_state[f"sort_weight_{item_type}_{i}_{user_id}"] = float(found_weight.get(i, 0.0))
             
     # ==============================================================
     # STATIC STAR BAR
@@ -246,7 +245,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         label = f"{rating:g} / {RATING_MAX:g}" if rating else "Not rated"
         color_style = f'color:{GREEN};' if rating else f'color:{TEXT_DIM};'
         return (
-            f'<div class="meta-chip"><div class="meta-chip-icon">⭐</div>'
+            f'<div class="meta-chip rating-chip-toggle" title="Click to open Rating Mode" style="cursor: pointer !important;"><div class="meta-chip-icon">⭐</div>'
             f'<div class="meta-chip-text"><div class="meta-chip-label">Your Rating</div>'
             f'<div class="meta-chip-value" style="{color_style}">{escape(label)}</div>'
             f'<div style="margin-top:5px; width:88px;">{star_bar_html(rating, size="0.6rem", glow=False)}</div>'
@@ -602,13 +601,13 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     # ---> FULL LIST QUERIES WITH SQL LIMIT & SORTING (ZERO OVERHEAD) <---
     def _all_rated_songs(user_id: int, search: str = None, limit: int = None, sort_by: str = "Highest Rated") -> pd.DataFrame:
         params = {"user_id": user_id}
-        order_sql = "ORDER BY updated_at DESC" if sort_by == "Recently Rated" else "ORDER BY rating DESC, updated_at DESC"
+        order_sql = "ORDER BY updated_at DESC" if sort_by == "Recently Rated" else "ORDER BY rating DESC, sort_weight DESC, updated_at DESC"
         limit_sql = "LIMIT :limit" if limit else ""
         if limit: params["limit"] = limit
         
         sql = f"""
             WITH base_ratings AS (
-                SELECT song_id, rating, updated_at
+                SELECT song_id, rating, sort_weight, updated_at
                 FROM song_ratings
                 WHERE user_id = :user_id
         """
@@ -638,7 +637,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             )
             SELECT br.song_id, so.title AS song_title,
                    COALESCE(ta.main_artist, 'Unknown') AS main_artist,
-                   so.image_url, br.rating, br.updated_at
+                   so.image_url, br.rating, br.sort_weight, br.updated_at
             FROM base_ratings br
             JOIN songs so ON so.id = br.song_id
             LEFT JOIN TrackArtists ta ON ta.song_id = br.song_id
@@ -648,13 +647,13 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
 
     def _all_rated_albums(user_id: int, search: str = None, limit: int = None, sort_by: str = "Highest Rated") -> pd.DataFrame:
         params = {"user_id": user_id}
-        order_sql = "ORDER BY updated_at DESC" if sort_by == "Recently Rated" else "ORDER BY rating DESC, updated_at DESC"
+        order_sql = "ORDER BY updated_at DESC" if sort_by == "Recently Rated" else "ORDER BY rating DESC, sort_weight DESC, updated_at DESC"
         limit_sql = "LIMIT :limit" if limit else ""
         if limit: params["limit"] = limit
         
         sql = f"""
             WITH base_ratings AS (
-                SELECT album_id, rating, updated_at
+                SELECT album_id, rating, sort_weight, updated_at
                 FROM album_ratings
                 WHERE user_id = :user_id
         """
@@ -693,7 +692,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             SELECT br.album_id, al.title AS album_title,
                    COALESCE(taa.artist_name, 'Unknown Artist') AS artist_name,
                    (SELECT MAX(so2.image_url) FROM songs so2 WHERE so2.album_id = br.album_id) AS image_url,
-                   br.rating, br.updated_at
+                   br.rating, br.sort_weight, br.updated_at
             FROM base_ratings br
             JOIN albums al ON al.id = br.album_id
             LEFT JOIN TrueAlbumArtists taa ON taa.album_id = br.album_id

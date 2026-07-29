@@ -122,6 +122,7 @@ public class DatabaseManager {
                 user_id     INTEGER  NOT NULL REFERENCES users(id)  ON DELETE CASCADE,
                 song_id     INTEGER  NOT NULL REFERENCES songs(id)  ON DELETE CASCADE,
                 rating      NUMERIC(3,1) NOT NULL CHECK (rating > 0 AND rating <= 10),
+                sort_weight DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM now()),
                 review      TEXT,
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -129,6 +130,7 @@ public class DatabaseManager {
             );
             CREATE INDEX IF NOT EXISTS idx_song_ratings_song   ON song_ratings(song_id);
             CREATE INDEX IF NOT EXISTS idx_song_ratings_rating ON song_ratings(rating);
+            CREATE INDEX IF NOT EXISTS idx_song_ratings_weight ON song_ratings(sort_weight);
             
             DROP TRIGGER IF EXISTS trg_song_ratings_updated_at ON song_ratings;
             CREATE TRIGGER trg_song_ratings_updated_at
@@ -142,6 +144,7 @@ public class DatabaseManager {
                 user_id     INTEGER  NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
                 album_id    INTEGER  NOT NULL REFERENCES albums(id)  ON DELETE CASCADE,
                 rating      NUMERIC(3,1) NOT NULL CHECK (rating > 0 AND rating <= 10),
+                sort_weight DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM now()),
                 review      TEXT,
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -149,6 +152,7 @@ public class DatabaseManager {
             );
             CREATE INDEX IF NOT EXISTS idx_album_ratings_album  ON album_ratings(album_id);
             CREATE INDEX IF NOT EXISTS idx_album_ratings_rating ON album_ratings(rating);
+            CREATE INDEX IF NOT EXISTS idx_album_ratings_weight ON album_ratings(sort_weight);
             
             DROP TRIGGER IF EXISTS trg_album_ratings_updated_at ON album_ratings;
             CREATE TRIGGER trg_album_ratings_updated_at
