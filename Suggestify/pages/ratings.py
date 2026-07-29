@@ -41,7 +41,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         if bump_rating_cache_gen:
             bump_rating_cache_gen(user_id)
             
-    # ==============================================================
+# ==============================================================
     # SQL
     # ==============================================================
     _UPSERT_SONG = """
@@ -62,17 +62,35 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             rating = EXCLUDED.rating, 
             updated_at = now();
     """
+    _UPSERT_ARTIST = """
+        INSERT INTO artist_ratings (user_id, artist_id, rating, sort_weight, updated_at)
+        VALUES (:user_id, :artist_id, :rating, EXTRACT(EPOCH FROM now()), now())
+        ON CONFLICT (user_id, artist_id)
+        DO UPDATE SET 
+            sort_weight = CASE WHEN artist_ratings.rating != EXCLUDED.rating THEN EXTRACT(EPOCH FROM now()) ELSE artist_ratings.sort_weight END,
+            rating = EXCLUDED.rating, 
+            updated_at = now();
+    """
+
     _DELETE_SONG = "DELETE FROM song_ratings WHERE user_id = :user_id AND song_id = :song_id;"
     _DELETE_ALBUM = "DELETE FROM album_ratings WHERE user_id = :user_id AND album_id = :album_id;"
+    _DELETE_ARTIST = "DELETE FROM artist_ratings WHERE user_id = :user_id AND artist_id = :artist_id;"
+
     _GET_SONG = "SELECT rating FROM song_ratings WHERE user_id = :user_id AND song_id = :song_id;"
     _GET_ALBUM = "SELECT rating FROM album_ratings WHERE user_id = :user_id AND album_id = :album_id;"
+    _GET_ARTIST = "SELECT rating FROM artist_ratings WHERE user_id = :user_id AND artist_id = :artist_id;"
 
     _GET_SONG_REVIEW = "SELECT review FROM song_ratings WHERE user_id = :user_id AND song_id = :song_id;"
     _GET_ALBUM_REVIEW = "SELECT review FROM album_ratings WHERE user_id = :user_id AND album_id = :album_id;"
+    _GET_ARTIST_REVIEW = "SELECT review FROM artist_ratings WHERE user_id = :user_id AND artist_id = :artist_id;"
     
-    # Το review μπορεί να αποθηκευτεί ΜΟΝΟ αν υπάρχει ήδη rating (rating > 0)
     _SET_SONG_REVIEW = "UPDATE song_ratings SET review = :review, updated_at = now() WHERE user_id = :user_id AND song_id = :song_id;"
     _SET_ALBUM_REVIEW = "UPDATE album_ratings SET review = :review, updated_at = now() WHERE user_id = :user_id AND album_id = :album_id;"
+    _SET_ARTIST_REVIEW = "UPDATE artist_ratings SET review = :review, updated_at = now() WHERE user_id = :user_id AND artist_id = :artist_id;"
+
+    _GET_SONG_BULK = "SELECT song_id AS item_id, rating, sort_weight FROM song_ratings WHERE user_id = :user_id AND song_id = ANY(:ids);"
+    _GET_ALBUM_BULK = "SELECT album_id AS item_id, rating, sort_weight FROM album_ratings WHERE user_id = :user_id AND album_id = ANY(:ids);"
+    _GET_ARTIST_BULK = "SELECT artist_id AS item_id, rating, sort_weight FROM artist_ratings WHERE user_id = :user_id AND artist_id = ANY(:ids);"
 
     def get_song_review(user_id: int, song_id) -> str:
         df = run_rating_query(_GET_SONG_REVIEW, {"user_id": user_id, "song_id": song_id})
@@ -80,6 +98,10 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
 
     def get_album_review(user_id: int, album_id) -> str:
         df = run_rating_query(_GET_ALBUM_REVIEW, {"user_id": user_id, "album_id": album_id})
+        return str(df.iloc[0]["review"]) if not df.empty and pd.notnull(df.iloc[0]["review"]) else ""
+
+    def get_artist_review(user_id: int, artist_id) -> str:
+        df = run_rating_query(_GET_ARTIST_REVIEW, {"user_id": user_id, "artist_id": artist_id})
         return str(df.iloc[0]["review"]) if not df.empty and pd.notnull(df.iloc[0]["review"]) else ""
 
     def set_song_review(user_id: int, song_id, review: str) -> bool:
@@ -91,8 +113,14 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         ok = _execute(_SET_ALBUM_REVIEW, {"user_id": user_id, "album_id": album_id, "review": review})
         if ok: _invalidate_rating_cache(user_id)
         return ok
+
+    def set_artist_review(user_id: int, artist_id, review: str) -> bool:
+        ok = _execute(_SET_ARTIST_REVIEW, {"user_id": user_id, "artist_id": artist_id, "review": review})
+        if ok: _invalidate_rating_cache(user_id)
+        return ok
+
     # ==============================================================
-    # WRITE PATH
+    # WRITE PATH & HELPERS
     # ==============================================================
     def _execute(sql: str, params: dict) -> bool:
         try:
@@ -115,10 +143,16 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         if ok: _invalidate_rating_cache(user_id)
         return ok
 
+    def set_artist_rating(user_id: int, artist_id, rating: float) -> bool:
+        ok = _execute(_DELETE_ARTIST, {"user_id": user_id, "artist_id": artist_id}) if rating <= 0 \
+            else _execute(_UPSERT_ARTIST, {"user_id": user_id, "artist_id": artist_id, "rating": rating})
+        if ok: _invalidate_rating_cache(user_id)
+        return ok
+
     # === Ο ΑΠΟΛΥΤΟΣ ΑΛΓΟΡΙΘΜΟΣ ΤΑΞΙΝΟΜΗΣΗΣ (PURE SQL = ΑΣΤΡΑΠΙΑΙΟΣ) ===
     def move_item(user_id: int, item_type: str, item_id: str, action: str, target_id: str = None) -> bool:
         id_col = f"{item_type}_id"
-        table = "song_ratings" if item_type == "song" else "album_ratings"
+        table = "song_ratings" if item_type == "song" else ("album_ratings" if item_type == "album" else "artist_ratings")
         
         with get_engine().begin() as conn:
             if action == "swap" and target_id:
@@ -163,9 +197,22 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         df = run_rating_query(_GET_ALBUM, {"user_id": user_id, "album_id": album_id})
         return float(df.iloc[0]["rating"]) if not df.empty else 0.0
 
-    def _getter(item_type): return get_song_rating if item_type == "song" else get_album_rating
-    def _setter(item_type): return set_song_rating if item_type == "song" else set_album_rating
-    def _step(item_type) -> float: return RATING_STEP_SONG if item_type == "song" else RATING_STEP_ALBUM
+    def get_artist_rating(user_id: int, artist_id) -> float:
+        df = run_rating_query(_GET_ARTIST, {"user_id": user_id, "artist_id": artist_id})
+        return float(df.iloc[0]["rating"]) if not df.empty else 0.0
+
+    def _getter(item_type): 
+        if item_type == "song": return get_song_rating
+        elif item_type == "album": return get_album_rating
+        else: return get_artist_rating
+
+    def _setter(item_type): 
+        if item_type == "song": return set_song_rating
+        elif item_type == "album": return set_album_rating
+        else: return set_artist_rating
+
+    def _step(item_type) -> float: 
+        return RATING_STEP_SONG if item_type == "song" else RATING_STEP_ALBUM
 
     def _current(item_type: str, item_id, user_id: int) -> float:
         state_key = f"rating_val_{item_type}_{item_id}_{user_id}"
@@ -173,15 +220,16 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
             st.session_state[state_key] = _getter(item_type)(user_id, item_id)
         return st.session_state[state_key]
 
-    _GET_SONG_BULK = "SELECT song_id AS item_id, rating, sort_weight FROM song_ratings WHERE user_id = :user_id AND song_id = ANY(:ids);"
-    _GET_ALBUM_BULK = "SELECT album_id AS item_id, rating, sort_weight FROM album_ratings WHERE user_id = :user_id AND album_id = ANY(:ids);"
-
     def preload_ratings(user_id: int, item_type: str, item_ids: list) -> None:
-        assert item_type in ("song", "album")
+        assert item_type in ("song", "album", "artist")
         ids = [i for i in dict.fromkeys(item_ids) if i is not None]
         missing = [i for i in ids if f"rating_val_{item_type}_{i}_{user_id}" not in st.session_state]
         if not missing: return
-        sql = _GET_SONG_BULK if item_type == "song" else _GET_ALBUM_BULK
+        
+        if item_type == "song": sql = _GET_SONG_BULK
+        elif item_type == "album": sql = _GET_ALBUM_BULK
+        else: sql = _GET_ARTIST_BULK
+            
         df = run_rating_query(sql, {"user_id": user_id, "ids": missing})
         
         found_rating = dict(zip(df["item_id"], df["rating"])) if not df.empty else {}
@@ -253,7 +301,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         )
 
     def compact_star_html(item_type: str, item_id, user_id: int, scale: int = 10, key_prefix: str = "") -> str:
-        assert item_type in ("song", "album")
+        assert item_type in ("song", "album", "artist")
         current = float(_current(item_type, item_id, user_id))
 
         cells = []
@@ -276,7 +324,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     # ==============================================================
     @st.fragment
     def render_star_rating(item_type: str, item_id, user_id: int, compact: bool = False):
-        assert item_type in ("song", "album")
+        assert item_type in ("song", "album", "artist")
         current = _current(item_type, item_id, user_id)
         step = _step(item_type)
         widget_key = f"slider_{item_type}_{item_id}_{user_id}"
@@ -1113,8 +1161,10 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
     return SimpleNamespace(
         set_song_rating=set_song_rating,
         set_album_rating=set_album_rating,
+        set_artist_rating=set_artist_rating, # ΠΡΟΣΘΗΚΗ
         get_song_rating=get_song_rating,
         get_album_rating=get_album_rating,
+        get_artist_rating=get_artist_rating, # ΠΡΟΣΘΗΚΗ
         move_item=move_item,
         render_star_rating=render_star_rating,
         compact_star_html=compact_star_html,

@@ -160,6 +160,28 @@ public class DatabaseManager {
                 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
         """;
 
+        String createArtistRatingsTable = """
+            CREATE TABLE IF NOT EXISTS artist_ratings (
+                id          BIGSERIAL PRIMARY KEY,
+                user_id     INTEGER  NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+                artist_id   INTEGER  NOT NULL REFERENCES artists(id)  ON DELETE CASCADE,
+                rating      NUMERIC(3,1) NOT NULL CHECK (rating > 0 AND rating <= 10),
+                sort_weight DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM now()),
+                review      TEXT,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_artist_rating UNIQUE (user_id, artist_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_artist_ratings_artist  ON artist_ratings(artist_id);
+            CREATE INDEX IF NOT EXISTS idx_artist_ratings_rating ON artist_ratings(rating);
+            CREATE INDEX IF NOT EXISTS idx_artist_ratings_weight ON artist_ratings(sort_weight);
+            
+            DROP TRIGGER IF EXISTS trg_artist_ratings_updated_at ON artist_ratings;
+            CREATE TRIGGER trg_artist_ratings_updated_at
+                BEFORE UPDATE ON artist_ratings
+                FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+        """;
+
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
 
@@ -176,6 +198,7 @@ public class DatabaseManager {
             stmt.execute(createTriggerFunction);
             stmt.execute(createSongRatingsTable);
             stmt.execute(createAlbumRatingsTable);
+            stmt.execute(createArtistRatingsTable);
 
             try {
                 stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");

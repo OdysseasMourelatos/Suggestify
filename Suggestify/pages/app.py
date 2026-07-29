@@ -175,7 +175,203 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 1. RATING HANDLER (Μένει στο Fragment για να μην ανανεώνει τη σελίδα όταν ρίχνεις βαθμολογία)
+import json
+import numpy as np
+
+def get_album_stats_html(album_id, user_id):
+    # 1. Βρίσκουμε όλα τα τραγούδια του Album (Γρήγορο query, κάνει cache)
+    songs_df = run_query("SELECT id FROM songs WHERE album_id = :aid", {"aid": album_id})
+    if songs_df.empty:
+        return ""
+        
+    song_ids = songs_df["id"].tolist()
+    
+    # 2. Φορτώνουμε τα ratings τους στη μνήμη αν δεν υπάρχουν
+    R.preload_ratings(user_id, "song", song_ids)
+    
+    # 3. Διαβάζουμε ΠΑΝΤΑ τις "ζωντανές" τιμές από το session_state
+    ratings = []
+    for sid in song_ids:
+        val = st.session_state.get(f"rating_val_song_{sid}_{user_id}", 0.0)
+        if val > 0:
+            ratings.append(val)
+            
+    n_rated = len(ratings)
+    
+    if n_rated > 0:
+        arr = np.array(ratings)
+        mean_val = f"{arr.mean():.2f}"
+        median_val = f"{np.median(arr):.2f}"
+        std_val_raw = float(np.std(arr, ddof=1)) if n_rated > 1 else 0.0
+        std_val = f"± {std_val_raw:.2f}"
+        
+        sug_min = max(0.0, arr.mean() - std_val_raw)
+        sug_max = min(10.0, arr.mean() + std_val_raw)
+        suggested_str = f"{sug_min:.1f} – {sug_max:.1f}" if std_val_raw > 0 else f"{arr.mean():.1f}"
+    else:
+        # Αν δεν έχει βαθμολογήσει τίποτα, δείχνει παύλες
+        mean_val = "—"
+        median_val = "—"
+        std_val = "—"
+        suggested_str = "—"
+
+    def _stat_block(icon, label, value, highlight=False):
+        is_active_highlight = highlight and n_rated > 0
+        cls = "album-stat-block highlight" if is_active_highlight else "album-stat-block"
+        color = GREEN if is_active_highlight else (TEXT if n_rated > 0 else TEXT_DIM)
+        
+        return (
+            f'<div class="{cls}">'
+            f'<div class="album-stat-icon">{icon}</div>'
+            f'<div class="album-stat-text">'
+            f'<div class="album-stat-label">{label}</div>'
+            f'<div class="album-stat-value" style="color:{color};">{value}</div>'
+            f'</div>'
+            f'</div>'
+        )
+
+    stats_css = f'''<style>
+    .album-stats-bar {{
+        display: flex; align-items: stretch;
+        background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+        border: 1px solid {BORDER}; border-radius: 16px;
+        padding: 2px; margin-bottom: 26px; position: relative; overflow: hidden;
+        animation: fadeSlideUp 0.45s cubic-bezier(0.16,1,0.3,1) both;
+    }}
+    .album-stats-bar::before {{
+        content: ''; position: absolute; top: 0; left: 8%; right: 8%; height: 2px;
+        background: linear-gradient(90deg, transparent, {GREEN}, transparent); opacity: 0.55;
+    }}
+    .album-stat-block {{
+        flex: 1; display: flex; align-items: center; justify-content: center;
+        gap: 10px; padding: 15px 10px; position: relative; transition: background 0.2s ease;
+    }}
+    .album-stat-block:hover {{ background: rgba(255,255,255,0.02); }}
+    .album-stat-block + .album-stat-block::before {{
+        content: ''; position: absolute; left: 0; top: 22%; bottom: 22%; width: 1px; background: {BORDER};
+    }}
+    .album-stat-icon {{
+        width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+        border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85rem;
+    }}
+    .album-stat-text {{ display: flex; flex-direction: column; gap: 2px; text-align: left; }}
+    .album-stat-label {{
+        font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.08em; color: {TEXT_DIM}; white-space: nowrap;
+    }}
+    .album-stat-value {{ font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; transition: color 0.3s ease; }}
+    .album-stat-block.highlight {{
+        background: radial-gradient(ellipse at center, rgba(29,185,84,0.10), transparent 70%); border-radius: 13px;
+    }}
+    .album-stat-block.highlight .album-stat-icon {{ background: rgba(29,185,84,0.18); }}
+    .album-stat-block.highlight .album-stat-label {{ color: {GREEN}; opacity: 0.85; }}
+    @media (max-width: 768px) {{
+        .album-stats-bar {{ flex-wrap: wrap; }}
+        .album-stat-block {{ flex: 1 1 45%; padding: 10px 6px; }}
+        .album-stat-block + .album-stat-block::before {{ display: none; }}
+        .album-stat-value {{ font-size: 0.95rem; }}
+    }}
+    </style>'''
+
+    stats_body = (
+        '<div class="album-stats-bar">'
+        + _stat_block("🎯", "Rated Tracks", n_rated)
+        + _stat_block("📊", "Mean", mean_val)
+        + _stat_block("📍", "Median", median_val)
+        + _stat_block("📐", "Std Dev", std_val)
+        + _stat_block("⭐", "Suggested", suggested_str, highlight=True)
+        + '</div>'
+    )
+    return stats_css + stats_body
+
+def get_artist_stats_html(artist_id, user_id):
+    # 1. Βρίσκουμε όλα τα τραγούδια του Artist
+    songs_df = run_query("SELECT song_id FROM song_artists WHERE artist_id = :aid AND is_feature = FALSE", {"aid": artist_id})
+    song_ids = songs_df["song_id"].tolist() if not songs_df.empty else []
+    
+    # 2. Βρίσκουμε όλα τα albums του Artist
+    albums_df = run_query("""
+        SELECT DISTINCT so.album_id 
+        FROM songs so 
+        JOIN song_artists sa ON sa.song_id = so.id 
+        WHERE sa.artist_id = :aid AND sa.is_feature = FALSE AND so.album_id IS NOT NULL
+    """, {"aid": artist_id})
+    album_ids = albums_df["album_id"].tolist() if not albums_df.empty else []
+    
+    # 3. Φορτώνουμε τα ratings τους στη μνήμη
+    if song_ids: R.preload_ratings(user_id, "song", song_ids)
+    if album_ids: R.preload_ratings(user_id, "album", album_ids)
+    
+    # 4. Συλλέγουμε όλες τις βαθμολογίες
+    ratings = []
+    for sid in song_ids:
+        val = st.session_state.get(f"rating_val_song_{sid}_{user_id}", 0.0)
+        if val > 0: ratings.append(val)
+        
+    for aid in album_ids:
+        val = st.session_state.get(f"rating_val_album_{aid}_{user_id}", 0.0)
+        if val > 0: ratings.append(val)
+        
+    n_rated = len(ratings)
+    
+    if n_rated > 0:
+        arr = np.array(ratings)
+        mean_val = f"{arr.mean():.2f}"
+        median_val = f"{np.median(arr):.2f}"
+        std_val_raw = float(np.std(arr, ddof=1)) if n_rated > 1 else 0.0
+        std_val = f"± {std_val_raw:.2f}"
+        
+        sug_min = max(0.0, arr.mean() - std_val_raw)
+        sug_max = min(10.0, arr.mean() + std_val_raw)
+        suggested_str = f"{sug_min:.1f} – {sug_max:.1f}" if std_val_raw > 0 else f"{arr.mean():.1f}"
+    else:
+        mean_val = "—"
+        median_val = "—"
+        std_val = "—"
+        suggested_str = "—"
+
+    def _stat_block(icon, label, value, highlight=False):
+        is_active_highlight = highlight and n_rated > 0
+        cls = "album-stat-block highlight" if is_active_highlight else "album-stat-block"
+        color = GREEN if is_active_highlight else (TEXT if n_rated > 0 else TEXT_DIM)
+        return (
+            f'<div class="{cls}">'
+            f'<div class="album-stat-icon">{icon}</div>'
+            f'<div class="album-stat-text">'
+            f'<div class="album-stat-label">{label}</div>'
+            f'<div class="album-stat-value" style="color:{color};">{value}</div>'
+            f'</div>'
+            f'</div>'
+        )
+
+    # Η CSS είναι η ίδια που χρησιμοποιούμε και στα Albums
+    stats_css = f'''<style>
+    .album-stats-bar {{ display: flex; align-items: stretch; background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01)); border: 1px solid {BORDER}; border-radius: 16px; padding: 2px; margin-bottom: 26px; position: relative; overflow: hidden; animation: fadeSlideUp 0.45s cubic-bezier(0.16,1,0.3,1) both; }}
+    .album-stats-bar::before {{ content: ''; position: absolute; top: 0; left: 8%; right: 8%; height: 2px; background: linear-gradient(90deg, transparent, {GREEN}, transparent); opacity: 0.55; }}
+    .album-stat-block {{ flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 15px 10px; position: relative; transition: background 0.2s ease; }}
+    .album-stat-block:hover {{ background: rgba(255,255,255,0.02); }}
+    .album-stat-block + .album-stat-block::before {{ content: ''; position: absolute; left: 0; top: 22%; bottom: 22%; width: 1px; background: {BORDER}; }}
+    .album-stat-icon {{ width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85rem; }}
+    .album-stat-text {{ display: flex; flex-direction: column; gap: 2px; text-align: left; }}
+    .album-stat-label {{ font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: {TEXT_DIM}; white-space: nowrap; }}
+    .album-stat-value {{ font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; transition: color 0.3s ease; }}
+    .album-stat-block.highlight {{ background: radial-gradient(ellipse at center, rgba(29,185,84,0.10), transparent 70%); border-radius: 13px; }}
+    .album-stat-block.highlight .album-stat-icon {{ background: rgba(29,185,84,0.18); }}
+    .album-stat-block.highlight .album-stat-label {{ color: {GREEN}; opacity: 0.85; }}
+    @media (max-width: 768px) {{ .album-stats-bar {{ flex-wrap: wrap; }} .album-stat-block {{ flex: 1 1 45%; padding: 10px 6px; }} .album-stat-block + .album-stat-block::before {{ display: none; }} .album-stat-value {{ font-size: 0.95rem; }} }}
+    </style>'''
+
+    stats_body = (
+        '<div class="album-stats-bar">'
+        + _stat_block("🎯", "Rated Work", n_rated)
+        + _stat_block("📊", "Mean", mean_val)
+        + _stat_block("📍", "Median", median_val)
+        + _stat_block("📐", "Std Dev", std_val)
+        + _stat_block("⭐", "Suggested", suggested_str, highlight=True)
+        + '</div>'
+    )
+    return stats_css + stats_body
+
 @st.fragment
 def hidden_rate_worker():
     def on_rate_change():
@@ -186,17 +382,62 @@ def hidden_rate_worker():
                 r_type, r_id, r_val = parts[0], parts[1], float(parts[2])
                 r_uid = int(parts[3])
                 ok = False
+                
                 if r_type == "song":
                     ok = R.set_song_rating(r_uid, r_id, r_val)
-                else:
+                elif r_type == "album":
                     ok = R.set_album_rating(r_uid, r_id, r_val)
+                elif r_type == "artist":
+                    ok = R.set_artist_rating(r_uid, r_id, r_val)
+                    
                 if ok:
                     st.session_state[f"rating_val_{r_type}_{r_id}_{r_uid}"] = r_val
                     msg = f"Rated {r_val:g}/10 ✓" if r_val > 0 else "Rating cleared"
                     st.toast(msg, icon="⭐")
+                    
+                    # Ενεργοποίηση του Live Update
+                    params = st.query_params
+                    if params.get("view") == "album" and params.get("id"):
+                        st.session_state["_live_update_album"] = {
+                            "album_id": params.get("id"),
+                            "user_id": r_uid
+                        }
+                    elif params.get("view") == "artist" and params.get("id"):
+                        st.session_state["_live_update_artist"] = {
+                            "artist_id": params.get("id"),
+                            "user_id": r_uid
+                        }
 
     st.text_input("hidden_rate_input", key="hidden_rate_state", label_visibility="collapsed", on_change=on_rate_change)
 
+    # ΜΗΧΑΝΙΣΜΟΣ LIVE UPDATE (Album)
+    if "_live_update_album" in st.session_state:
+        data = st.session_state["_live_update_album"]
+        new_html = get_album_stats_html(data["album_id"], data["user_id"])
+        html_json = json.dumps(new_html)
+        components.html(f"""
+        <script>
+        const doc = window.parent.document;
+        const wrapper = doc.getElementById('album-stats-wrapper');
+        if (wrapper) {{ wrapper.innerHTML = {html_json}; }}
+        </script>
+        """, height=0)
+        del st.session_state["_live_update_album"]
+        
+    # ΜΗΧΑΝΙΣΜΟΣ LIVE UPDATE (Artist)
+    if "_live_update_artist" in st.session_state:
+        data = st.session_state["_live_update_artist"]
+        new_html = get_artist_stats_html(data["artist_id"], data["user_id"])
+        html_json = json.dumps(new_html)
+        components.html(f"""
+        <script>
+        const doc = window.parent.document;
+        const wrapper = doc.getElementById('artist-stats-wrapper');
+        if (wrapper) {{ wrapper.innerHTML = {html_json}; }}
+        </script>
+        """, height=0)
+        del st.session_state["_live_update_artist"]
+        
 # 2. BUMP HANDLER (ΧΩΡΙΣ Fragment! Θέλουμε να κάνει Soft-Rerun όλο το UI για να φανεί η νέα σειρά)
 def hidden_bump_worker():
     def on_bump_change():
@@ -989,6 +1230,13 @@ if detail_type and detail_id:
                 image_url=row.get("image_url")
             )
             
+            # --- ΠΡΟΣΘΗΚΗ: RATING STARS & STATS WRAPPER ΓΙΑ ARTISTS ---
+            if st.session_state.quick_rate_mode:
+                R.render_star_rating("artist", detail_id, selected_user_id, compact=True)
+                st.markdown(f'<div id="artist-stats-wrapper">{get_artist_stats_html(detail_id, selected_user_id)}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(R.rating_chip_html(R.get_artist_rating(selected_user_id, detail_id)), unsafe_allow_html=True)
+            
             # Αλλάζουμε το layout σε 2 στήλες για τις λίστες
             c_tracks, c_albums = st.columns(2)
             
@@ -1302,116 +1550,9 @@ if detail_type and detail_id:
             chips_html += '</div>'
             st.markdown(chips_html, unsafe_allow_html=True)
             
-            # === ΝΕΟ ΚΟΜΜΑΤΙ: Album Track Statistics ===
+           # === ΝΕΟ ΚΟΜΜΑΤΙ: Album Track Statistics ===
             if st.session_state.quick_rate_mode:
-                track_ratings_df = run_rating_query("""
-                    SELECT r.rating 
-                    FROM song_ratings r
-                    JOIN songs s ON s.id = r.song_id
-                    WHERE s.album_id = :aid AND r.user_id = :uid AND r.rating > 0
-                """, {"aid": detail_id, "uid": selected_user_id})
-                
-                if not track_ratings_df.empty:
-                    ratings_series = track_ratings_df["rating"]
-                    n_rated = len(ratings_series)
-                    
-                    if n_rated > 0:
-                        mean_val = ratings_series.mean()
-                        median_val = ratings_series.median()
-                        std_val = ratings_series.std(ddof=1) if n_rated > 1 else 0.0
-
-                        sug_min = max(0.0, mean_val - std_val)
-                        sug_max = min(10.0, mean_val + std_val)
-                        suggested_str = f"{sug_min:.1f} – {sug_max:.1f}" if std_val > 0 else f"{mean_val:.1f}"
-
-                        def _stat_block(icon, label, value, highlight=False):
-                            cls = "album-stat-block highlight" if highlight else "album-stat-block"
-                            color = GREEN if highlight else TEXT
-                            return (
-                                f'<div class="{cls}">'
-                                f'<div class="album-stat-icon">{icon}</div>'
-                                f'<div class="album-stat-text">'
-                                f'<div class="album-stat-label">{label}</div>'
-                                f'<div class="album-stat-value" style="color:{color};">{value}</div>'
-                                f'</div>'
-                                f'</div>'
-                            )
-
-                        stats_css = f'''<style>
-                        .album-stats-bar {{
-                            display: flex;
-                            align-items: stretch;
-                            background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
-                            border: 1px solid {BORDER};
-                            border-radius: 16px;
-                            padding: 2px;
-                            margin-bottom: 26px;
-                            position: relative;
-                            overflow: hidden;
-                            animation: fadeSlideUp 0.45s cubic-bezier(0.16,1,0.3,1) both;
-                        }}
-                        .album-stats-bar::before {{
-                            content: '';
-                            position: absolute; top: 0; left: 8%; right: 8%; height: 2px;
-                            background: linear-gradient(90deg, transparent, {GREEN}, transparent);
-                            opacity: 0.55;
-                        }}
-                        .album-stat-block {{
-                            flex: 1;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            gap: 10px;
-                            padding: 15px 10px;
-                            position: relative;
-                            transition: background 0.2s ease;
-                        }}
-                        .album-stat-block:hover {{ background: rgba(255,255,255,0.02); }}
-                        .album-stat-block + .album-stat-block::before {{
-                            content: '';
-                            position: absolute;
-                            left: 0; top: 22%; bottom: 22%;
-                            width: 1px;
-                            background: {BORDER};
-                        }}
-                        .album-stat-icon {{
-                            width: 30px; height: 30px; flex-shrink: 0;
-                            display: flex; align-items: center; justify-content: center;
-                            border-radius: 8px;
-                            background: rgba(255,255,255,0.05);
-                            font-size: 0.85rem;
-                        }}
-                        .album-stat-text {{ display: flex; flex-direction: column; gap: 2px; text-align: left; }}
-                        .album-stat-label {{
-                            font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
-                            letter-spacing: 0.08em; color: {TEXT_DIM}; white-space: nowrap;
-                        }}
-                        .album-stat-value {{ font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }}
-                        .album-stat-block.highlight {{
-                            background: radial-gradient(ellipse at center, rgba(29,185,84,0.10), transparent 70%);
-                            border-radius: 13px;
-                        }}
-                        .album-stat-block.highlight .album-stat-icon {{ background: rgba(29,185,84,0.18); }}
-                        .album-stat-block.highlight .album-stat-label {{ color: {GREEN}; opacity: 0.85; }}
-                        @media (max-width: 768px) {{
-                            .album-stats-bar {{ flex-wrap: wrap; }}
-                            .album-stat-block {{ flex: 1 1 45%; padding: 10px 6px; }}
-                            .album-stat-block + .album-stat-block::before {{ display: none; }}
-                            .album-stat-value {{ font-size: 0.95rem; }}
-                        }}
-                        </style>'''
-
-                        stats_body = (
-                            '<div class="album-stats-bar">'
-                            + _stat_block("🎯", "Rated Tracks", n_rated)
-                            + _stat_block("📊", "Mean", f"{mean_val:.2f}")
-                            + _stat_block("📍", "Median", f"{median_val:.2f}")
-                            + _stat_block("📐", "Std Dev", f"± {std_val:.2f}")
-                            + _stat_block("⭐", "Suggested", suggested_str, highlight=True)
-                            + '</div>'
-                        )
-
-                        st.markdown(stats_css + stats_body, unsafe_allow_html=True)
+                st.markdown(f'<div id="album-stats-wrapper">{get_album_stats_html(detail_id, selected_user_id)}</div>', unsafe_allow_html=True)
             
             c_left, c_right = st.columns([1.2, 1.0])
             
