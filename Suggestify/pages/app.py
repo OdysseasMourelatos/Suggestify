@@ -1463,7 +1463,25 @@ if detail_type and detail_id:
                 else:
                     st.markdown('<div class="empty-state"><div class="icon">📭</div>No tracks found in this period</div>', unsafe_allow_html=True)
             with c_right:
-                st.markdown('<div class="chart-container" style="margin-top: 0;"><div class="chart-title">📈 Top 5 Tracks Evolution</div>', unsafe_allow_html=True)
+                # --- 1. ΝΕΟ: Συνολική Εξέλιξη Ολόκληρου του Album ---
+                st.markdown('<div class="chart-container" style="margin-top: 0;"><div class="chart-title">📈 Album Total Evolution</div>', unsafe_allow_html=True)
+                df_album_total_trend = run_query("""
+                    SELECT DATE_TRUNC('month', s.played_at) AS period, COUNT(*) AS stream_count,
+                           ROUND(SUM(s.ms_played)/3600000.0, 2) AS hours_played
+                    FROM streams s
+                    JOIN songs so ON so.id = s.song_id
+                    WHERE so.album_id = :aid 
+                      AND s.played_at::date BETWEEN :start_date AND :end_date
+                      AND s.user_id = :user_id
+                    GROUP BY 1 ORDER BY 1
+                """, {"aid": detail_id, **F})
+                
+                if not df_album_total_trend.empty:
+                    st.plotly_chart(chart_trend(df_album_total_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # --- 2. ΥΠΑΡΧΟΝ: Εξέλιξη των Top 5 Tracks ---
+                st.markdown('<div class="chart-container"><div class="chart-title">📊 Top 5 Tracks Evolution</div>', unsafe_allow_html=True)
                 df_album_trend = run_query("""
                     WITH top_tracks AS (
                         SELECT so.id, so.title
@@ -1490,6 +1508,7 @@ if detail_type and detail_id:
                     st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
                 st.markdown('</div>', unsafe_allow_html=True)
 
+                # --- 3. ΥΠΑΡΧΟΝ: Peak Hours ---
                 st.markdown('<div class="chart-container"><div class="chart-title">⏰ Peak Hours</div>', unsafe_allow_html=True)
                 df_hours = run_query("""
                     SELECT EXTRACT(HOUR FROM s.played_at)::INT AS hour, COUNT(*) AS stream_count
@@ -1507,6 +1526,7 @@ if detail_type and detail_id:
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
+                # --- 4. ΥΠΑΡΧΟΝ: Active Days ---
                 st.markdown('<div class="chart-container"><div class="chart-title">📅 Active Days</div>', unsafe_allow_html=True)
                 df_days = run_query("""
                     SELECT EXTRACT(ISODOW FROM s.played_at)::INT AS dow, COUNT(*) AS stream_count
