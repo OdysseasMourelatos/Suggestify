@@ -1237,6 +1237,39 @@ def _generate_both_formats(builder_fn, **kwargs):
     return out
 
 def _run_share_dialog(run_query, user_id, username, min_date, max_date, avatar_url=None):
+    
+    # --- JAVASCRIPT: Εμποδίζει εντελώς το κλείσιμο του modal όταν πατάς απ' έξω ---
+    components.html("""
+    <script>
+    (function() {
+        const parentDoc = window.parent.document;
+        // Τρέχει μόνο μία φορά
+        if (parentDoc.__preventModalClose) return;
+        parentDoc.__preventModalClose = true;
+
+        ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(eventType => {
+            parentDoc.addEventListener(eventType, function(e) {
+                // Ελέγχουμε αν υπάρχει ανοιχτό dialog
+                const dialogs = parentDoc.querySelectorAll('div[role="dialog"]');
+                if (dialogs.length === 0) return;
+
+                // 1. Είναι το background του modal; (Το στοιχείο που περικλείει το dialog)
+                const isBackdrop = e.target.querySelector('div[role="dialog"]') !== null || e.target.getAttribute('data-testid') === 'stModal';
+                // 2. Είναι η πίσω εφαρμογή; (Πιάνει τα κλικ στη μεγάλη μπάρα κύλισης του Streamlit)
+                const isMainApp = e.target.closest('[data-testid="stAppViewContainer"]') !== null;
+                // 3. Είναι το ριζικό έγγραφο; (Ακραία περίπτωση για κάποια scrollbars)
+                const isBody = e.target.tagName === 'BODY' || e.target.tagName === 'HTML';
+
+                // Αν πατήθηκε κάτι από τα παραπάνω (και όχι το ίδιο το modal ή κάποιο dropdown του)
+                if (isBackdrop || isMainApp || isBody) {
+                    e.stopPropagation(); // Σταματάει το event πριν το καταλάβει το Streamlit!
+                }
+            }, true); // Χρήση capture phase για άμεση αναχαίτιση
+        });
+    })();
+    </script>
+    """, height=0)
+
     st.caption("Create a Wrapped-style card of your listening stats and share it anywhere.")
 
     theme_options = list(THEMES.keys()) + [DYNAMIC_THEME_LABEL]
