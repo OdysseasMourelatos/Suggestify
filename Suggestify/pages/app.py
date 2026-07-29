@@ -1237,6 +1237,9 @@ if detail_type and detail_id:
             else:
                 st.markdown(R.rating_chip_html(R.get_artist_rating(selected_user_id, detail_id)), unsafe_allow_html=True)
             
+            # --- FIX: Προσθέτουμε λίγο κενό για να μην κάνουν collide τα elements ---
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            
             # Αλλάζουμε το layout σε 2 στήλες για τις λίστες
             c_tracks, c_albums = st.columns(2)
             
@@ -2197,8 +2200,10 @@ elif current_tab == "artists":
         
         if not df_artists.empty:
             df_artists["subtitle"] = "Artist"
+            # Φορτώνουμε τα ratings και περνάμε το **qr_kwargs
+            R.preload_ratings(selected_user_id, "artist", df_artists["artist_id"].tolist())
             render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
-               "artist_id", "artist", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
+               "artist_id", "artist", reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
 
@@ -2220,9 +2225,11 @@ elif current_tab == "artists":
 
         if not df_artists.empty:
             df_artists["subtitle"] = "Artist"
+            # Φορτώνουμε τα ratings και περνάμε το **qr_kwargs
+            R.preload_ratings(selected_user_id, "artist", df_artists["artist_id"].tolist())
             render_list_v2(df_artists, "artist_name", "subtitle", "streams", "hours_played",
                "artist_id", "artist", rank_col="global_rank",
-               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07)
+               reveal_top_n=10, reveal_delay_base=0.05, reveal_delay_step=0.07, **qr_kwargs)
         else:
             st.markdown('<div class="empty-state"><div class="icon">🎤</div>No artists found</div>', unsafe_allow_html=True)
 elif current_tab == "albums":

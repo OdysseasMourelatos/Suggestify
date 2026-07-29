@@ -352,7 +352,7 @@ def render_list_v2(df: pd.DataFrame, title_col: str, sub_col: str, streams_col: 
             reveal_style = f'style="animation-delay: {delay:.1f}s;"'
         reveal_class = "list-item-reveal" if reveal_style else ""
 
-        has_rating = quick_rate and link_type in ("song", "album") and R is not None and user_id is not None
+        has_rating = quick_rate and link_type in ("song", "album", "artist") and R is not None and user_id is not None
         item_class = "list-item-has-rating" if has_rating else ""
 
         bump_html = ""

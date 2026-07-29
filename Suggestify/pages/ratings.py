@@ -301,7 +301,7 @@ def init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
         )
 
     def compact_star_html(item_type: str, item_id, user_id: int, scale: int = 10, key_prefix: str = "") -> str:
-        assert item_type in ("song", "album", "artist")
+        assert item_type in ("song", "album", "artist") # <--- ΠΡΟΣΤΕΘΗΚΕ Ο ARTIST
         current = float(_current(item_type, item_id, user_id))
 
         cells = []
