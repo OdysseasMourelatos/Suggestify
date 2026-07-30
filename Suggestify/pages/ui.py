@@ -95,7 +95,7 @@ def inject_custom_css():
     }}
 
     .block-container {{ padding: 1rem 2rem 6rem !important; max-width: 100% !important; }}
-    .main .block-container {{ padding-top: 1rem !important; margin-top: -4.5rem !important; }}
+    .main .block-container {{ padding-top: 1rem !important; margin-top: -3.6rem !important; }}
     div[data-testid="stVerticalBlock"] {{ gap: 0.2rem !important; }}
     div[data-testid="column"] {{ gap: 0.5rem !important; }}
     header {{ display: none !important; }}
