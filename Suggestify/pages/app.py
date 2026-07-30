@@ -846,50 +846,79 @@ with st.container(key="top_bar_wrapper"):
             font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
             letter-spacing: 0.08em; color: {TEXT_DIM}; margin-bottom: 4px; display: block;
         }}
+        .st-key-top_filter_row div[data-baseweb="select"] > div {{
+            background: {CARD} !important;
+            border: 1px solid {BORDER} !important;
+            border-radius: 9px !important;
+            min-height: 40px !important;
+        }}
+        .st-key-top_filter_row div[data-baseweb="select"] > div:hover {{ border-color: rgba(29,185,84,0.4) !important; }}
+        div[data-testid="stDateInput"] > div input {{ border-radius: 9px !important; }}
 
-        /* 5. ΚΟΥΜΠΙΑ (Δεξιά μεριά) */
+        /* 5. UNIFIED CONTROL TOOLBAR (Rating + Share) — shrink-to-fit, right-aligned */
+        .st-key-share_row {{
+            background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+            border: 1px solid {BORDER};
+            border-radius: 12px;
+            padding: 4px;
+            position: relative;
+            overflow: hidden;
+            display: inline-flex !important;
+            margin-left: auto !important;
+        }}
+        .st-key-share_row::before {{
+            content: ''; position: absolute; top: 0; left: 10%; right: 10%; height: 2px;
+            background: linear-gradient(90deg, transparent, {GREEN}, transparent); opacity: 0.45;
+        }}
+        /* Kill Streamlit's default 50/50 column split entirely */
         .st-key-share_row div[data-testid="stHorizontalBlock"] {{
-            justify-content: flex-end !important; /* Σπρώχνει τα κουμπιά ΤΕΡΜΑ ΔΕΞΙΑ */
-            align-items: center !important;
-            gap: 12px !important;
+            display: inline-flex !important;
+            width: auto !important;
+            justify-content: flex-end !important;
+            align-items: stretch !important;
+            gap: 2px !important;
             flex-wrap: nowrap !important;
         }}
-        .st-key-share_row div[data-testid="column"] {{
-            width: auto !important; flex: 0 0 auto !important; min-width: 0 !important;
+        .st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {{
+            width: fit-content !important;
+            flex: 0 0 fit-content !important;
+            min-width: 0 !important;
+            max-width: none !important;
+        }}
+        .st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {{
+            position: relative; padding-right: 4px;
+        }}
+        .st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child::after {{
+            content: ''; position: absolute; right: 0; top: 20%; bottom: 20%; width: 1px; background: {BORDER};
         }}
 
-        /* Styling Κουμπιών (Σταθερό ύψος 44px για να είναι ίσα με τα inputs) */
-        .st-key-quick_rate_toggle button, .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button {{
-            height: 44px !important;
-            border-radius: 999px !important; font-weight: 700 !important; font-size: 0.85rem !important;
-            display: flex !important; align-items: center !important; white-space: nowrap !important;
-            box-sizing: border-box !important; margin: 0 !important;
+        .st-key-quick_rate_toggle button, .st-key-share_row div[data-testid="column"]:last-child button {{
+            height: 40px !important; border-radius: 9px !important;
+            font-weight: 700 !important; font-size: 0.82rem !important;
+            display: flex !important; align-items: center !important; justify-content: center !important;
+            white-space: nowrap !important; box-sizing: border-box !important;
+            margin: 0 !important; padding: 0 1rem !important; width: auto !important;
+            background: transparent !important; border: 1px solid transparent !important;
+            transition: all 0.2s ease !important;
         }}
-        .st-key-quick_rate_toggle button {{ padding: 0 1.2rem 0 2.2rem !important; transition: all 0.25s ease !important; position: relative !important; }}
-        .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button {{ padding: 0 1.2rem !important; transition: all 0.25s ease !important; }}
-        
-        .st-key-quick_rate_toggle button::before {{
-            content: ''; position: absolute; left: 1.05rem; top: 50%; width: 8px; height: 8px; border-radius: 50%; transform: translateY(-50%);
-        }}
-        .st-key-quick_rate_toggle button[kind="secondary"] {{ background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.12) !important; color: {TEXT_MID} !important; }}
-        .st-key-quick_rate_toggle button[kind="secondary"]::before {{ background: {TEXT_DIM}; }}
-        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{ border-color: rgba(255,255,255,0.25) !important; color: {TEXT} !important; transform: translateY(-1px) !important; }}
-        .st-key-quick_rate_toggle button[kind="primary"] {{ background: linear-gradient(135deg, #E53935, #C62828) !important; border: 1px solid #FF6659 !important; color: #fff !important; box-shadow: 0 4px 16px rgba(229,57,53,0.4) !important; }}
-        .st-key-quick_rate_toggle button[kind="primary"]::before {{ background: #fff; box-shadow: 0 0 8px #fff, 0 0 3px #fff; animation: ratingPulse 1.6s ease-in-out infinite; }}
-        .st-key-quick_rate_toggle button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 22px rgba(229,57,53,0.55) !important; }}
-        @keyframes ratingPulse {{ 0%, 100% {{ opacity: 1; transform: translateY(-50%) scale(1); }} 50% {{ opacity: 0.5; transform: translateY(-50%) scale(0.75); }} }}
 
-        .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button {{
-            background: rgba(29,185,84,0.06) !important; border: 1px solid rgba(29,185,84,0.25) !important; color: {GREEN} !important;
+        .st-key-quick_rate_toggle button[kind="secondary"] {{ color: {TEXT_DIM} !important; }}
+        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{ background: rgba(255,255,255,0.05) !important; color: {TEXT} !important; }}
+        .st-key-quick_rate_toggle button[kind="primary"] {{
+            background: rgba(229,57,53,0.14) !important; border-color: rgba(229,57,53,0.45) !important;
+            color: #FF6B6B !important;
         }}
-        .st-key-share_row > div > div[data-testid="stHorizontalBlock"] > div:last-child button:hover {{
-            background: rgba(29,185,84,0.16) !important; border-color: {GREEN} !important; color: #fff !important; transform: translateY(-1px) !important; box-shadow: 0 4px 16px rgba(29,185,84,0.3) !important;
+        .st-key-quick_rate_toggle button[kind="primary"]:hover {{ background: rgba(229,57,53,0.22) !important; color: #fff !important; }}
+
+        .st-key-share_row div[data-testid="column"]:last-child button {{ color: {GREEN} !important; }}
+        .st-key-share_row div[data-testid="column"]:last-child button:hover {{
+            background: rgba(29,185,84,0.12) !important; color: #fff !important;
         }}
         </style>
     """, unsafe_allow_html=True)
 
     # Αναλογίες στηλών (Κεντρική Μπάρα)
-    col_brand, col_filters, col_share = st.columns([1.1, 2.3, 1.6])
+    col_brand, col_filters, col_share = st.columns([1.1, 2.9, 1.0])
 
     with col_brand:
         st.markdown('''
@@ -927,7 +956,7 @@ with st.container(key="top_bar_wrapper"):
             col_a, col_b = st.columns(2)
             with col_a:
                 with st.container(key="quick_rate_toggle"):
-                    rating_label = "⭐ Rating: ON" if rating_mode_on else "⭐ Rating: OFF"
+                    rating_label = "★ Rating On" if rating_mode_on else "☆ Rating Off"
                     if st.button(rating_label, key="quick_rate_btn", type="primary" if rating_mode_on else "secondary"):
                         new_mode = not st.session_state.quick_rate_mode
                         st.session_state.quick_rate_mode = new_mode
