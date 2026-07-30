@@ -21,13 +21,14 @@ warnings.filterwarnings("ignore")
 
 from config import *
 from db import (get_engine, run_query, run_rating_query, get_date_bounds, get_release_year_bounds,
-                 get_rating_cache_gen, bump_rating_cache_gen)
+                 get_rating_cache_gen, bump_rating_cache_gen, run_write_query)
 from charts import themed, chart_trend, chart_multi_trend, chart_heatmap, chart_bar, chart_year_bar, chart_donut
 from ui import (counter_span, inject_counter_script, load_css, inject_custom_css, get_rank_class, 
                 get_item_icon, build_filtered_href, render_list_v2, render_kpi_grid, 
                 render_detail_header, render_season_cards, render_time_of_day_cards, render_track_spotlight_card)
 from share_stats import render_share_stats_button
 from ratings import init_ratings_module
+from arena import init_arena_module
 
 st.set_page_config(page_title="Suggestify", page_icon="🎧", layout="wide", initial_sidebar_state="collapsed")
 
@@ -160,10 +161,14 @@ else:
 R = init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER,
                          get_rating_cache_gen=get_rating_cache_gen, bump_rating_cache_gen=bump_rating_cache_gen)
 
+A = init_arena_module(get_engine, run_query, run_write_query, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
 st.markdown("""
     <style>
     div[data-testid="stTextInput"]:has(input[aria-label="hidden_rate_input"]),
-    div[data-testid="stTextInput"]:has(input[aria-label="hidden_bump_input"]) {
+    div[data-testid="stTextInput"]:has(input[aria-label="hidden_bump_input"]),
+    div[data-testid="stTextInput"]:has(input[aria-label="arena_timeout_input"]),
+    div[data-testid="stTextInput"]:has(input[aria-label="arena_mc_input"]),
+    div[data-testid="stTextInput"]:has(input[aria-label="arena_reveal_continue_input"]) {
         position: fixed !important;
         top: -1000px !important;
         left: -1000px !important;
@@ -464,6 +469,9 @@ def hidden_bump_worker():
 # Καλούμε και τους 2 workers
 hidden_rate_worker()
 hidden_bump_worker()
+
+A.inject_arena_script()
+A.arena_hidden_worker()
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None, redirect_info: dict = None):
     header_df = run_query(f"""
@@ -779,6 +787,9 @@ if "pending_start_date" in st.session_state:
 if "start_date" not in st.session_state:
     st.session_state.start_date = get_parsed_date(params.get("start"), min_date)
     st.session_state.end_date = get_parsed_date(params.get("end"), max_date)
+
+# Ασπίδα προστασίας: Αν το Streamlit έσβησε το date_preset, το ξαναφτιάχνουμε!
+if "date_preset" not in st.session_state:
     url_preset = params.get("preset", "all")
     st.session_state.date_preset = url_preset if url_preset in ["all", "wrapped", "month", "week"] else None
     
@@ -812,6 +823,7 @@ def mark_manual():
 preset_options = {"all": "♾️ All Time", "wrapped": "🎁 Wrapped", "month": "📅 Month", "week": "📅 Week", "manual": "⚙️ Manual"}
 
 view_state = get_current_view()
+A.render_modal(selected_user_id, user_dict)
 current_tab = view_state["tab"]
 detail_type = view_state["type"]
 detail_id = view_state["id"]
@@ -987,7 +999,7 @@ with st.container(key="top_bar_wrapper"):
 
     with col_filters:
         with st.container(key="top_filter_row"):
-            if st.session_state.date_preset == "manual":
+            if st.session_state.get("date_preset") == "manual":
                 f_preset, f_start, f_end = st.columns(3)
                 with f_preset:
                     st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
@@ -1030,12 +1042,14 @@ with st.container(key="top_bar_wrapper"):
                     label="📸 Share Stats"
                 )
 # ====== ΤΕΛΟΣ ΤΗΣ ΠΑΝΩ ΜΠΑΡΑΣ ======
+# ====== ΤΕΛΟΣ ΤΗΣ ΠΑΝΩ ΜΠΑΡΑΣ ======
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
     ("artists", "🎤 Artists"), ("albums", "💿 Albums"),
     ("genres", "🎸 Genres"), ("habits", "🕐 Habits"),
     ("ratings", "⭐ Ratings"),
-    ("friends", "🎉 Friends")
+    ("friends", "🎉 Friends"),
+    ("arena", "🕹️ Arena")
 ]
 
 def navigate_to_tab(tab_id: str):
@@ -1065,14 +1079,26 @@ with st.container(key="tab_nav_row"):
         with cols[i]:
             is_active = (current_tab == tab_id) and not detail_type
             if st.button(tab_label, key=f"nav_{tab_id}", type="primary" if is_active else "secondary", use_container_width=True):
-                navigate_to_tab(tab_id)
+                # Αν πατηθεί το Arena, ανοίγουμε το Modal αντί να αλλάξουμε σελίδα
+                if tab_id == "arena":
+                    st.query_params["arena"] = "1"
+                    st.query_params["arena_view"] = "mode"
+                    st.rerun()
+                else:
+                    navigate_to_tab(tab_id)
 
 with st.container(key="tab_nav_mobile"):
     with st.popover(f"{tab_labels[active_tab_id]}   ▾", use_container_width=True):
         for tab_id, tab_label in tabs:
             is_active = (current_tab == tab_id) and not detail_type
             if st.button(tab_label, key=f"nav_mobile_{tab_id}", type="primary" if is_active else "secondary", use_container_width=True):
-                navigate_to_tab(tab_id)
+                # Το ίδιο και για το κινητό
+                if tab_id == "arena":
+                    st.query_params["arena"] = "1"
+                    st.query_params["arena_view"] = "mode"
+                    st.rerun()
+                else:
+                    navigate_to_tab(tab_id)
 
 F = {
     "start_date": st.session_state.start_date, 

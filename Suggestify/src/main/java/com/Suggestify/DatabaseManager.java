@@ -182,6 +182,79 @@ public class DatabaseManager {
                 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
         """;
 
+        // ── ΝΕΟΙ ΠΙΝΑΚΕΣ ΓΙΑ ΤΟ ARENA ────────────────────────────────────────
+
+        String createArenaPoolsTable = """
+            CREATE TABLE IF NOT EXISTS arena_pools (
+                id              BIGSERIAL PRIMARY KEY,
+                mode            VARCHAR(20) NOT NULL CHECK (mode IN ('solo','friends')),
+                game_type       VARCHAR(20) NOT NULL CHECK (game_type IN ('cover','artist')),
+                round_count     INT NOT NULL CHECK (round_count IN (5,10,20)),
+                hint_budget     INT NOT NULL,
+                host_user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                friend_user_id  INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                status          VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE INDEX IF NOT EXISTS idx_arena_pools_host   ON arena_pools(host_user_id);
+            CREATE INDEX IF NOT EXISTS idx_arena_pools_friend ON arena_pools(friend_user_id);
+        """;
+
+        String createArenaPoolRoundsTable = """
+            CREATE TABLE IF NOT EXISTS arena_pool_rounds (
+                id                BIGSERIAL PRIMARY KEY,
+                pool_id           BIGINT NOT NULL REFERENCES arena_pools(id) ON DELETE CASCADE,
+                round_number      INT NOT NULL,
+                item_type         VARCHAR(20) NOT NULL CHECK (item_type IN ('album','artist')),
+                item_id           INTEGER NOT NULL,
+                item_name         VARCHAR(255) NOT NULL,
+                image_url         VARCHAR(500),
+                owner_user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                familiarity_tier  VARCHAR(20) NOT NULL CHECK (familiarity_tier IN ('core','regular','deep_cut')),
+                base_points       INT NOT NULL,
+                distractor_names  TEXT[] NOT NULL DEFAULT '{}',
+                CONSTRAINT uq_arena_pool_round UNIQUE (pool_id, round_number)
+            );
+            CREATE INDEX IF NOT EXISTS idx_arena_pool_rounds_pool ON arena_pool_rounds(pool_id);
+        """;
+
+        String createArenaSessionsTable = """
+            CREATE TABLE IF NOT EXISTS arena_sessions (
+                id                     BIGSERIAL PRIMARY KEY,
+                pool_id                BIGINT NOT NULL REFERENCES arena_pools(id) ON DELETE CASCADE,
+                user_id                INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                status                 VARCHAR(20) NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','completed','abandoned')),
+                current_round          INT NOT NULL DEFAULT 1,
+                hints_used             INT NOT NULL DEFAULT 0,
+                total_score            INT NOT NULL DEFAULT 0,
+                correct_count          INT NOT NULL DEFAULT 0,
+                best_round_score       INT NOT NULL DEFAULT 0,
+                perfect_bonus_applied  BOOLEAN NOT NULL DEFAULT FALSE,
+                started_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+                completed_at           TIMESTAMPTZ,
+                CONSTRAINT uq_arena_session UNIQUE (pool_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_arena_sessions_user ON arena_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_arena_sessions_pool ON arena_sessions(pool_id);
+        """;
+
+        String createArenaRoundAnswersTable = """
+            CREATE TABLE IF NOT EXISTS arena_round_answers (
+                id                    BIGSERIAL PRIMARY KEY,
+                session_id            BIGINT NOT NULL REFERENCES arena_sessions(id) ON DELETE CASCADE,
+                round_number          INT NOT NULL,
+                used_hint             BOOLEAN NOT NULL DEFAULT FALSE,
+                is_correct            BOOLEAN NOT NULL DEFAULT FALSE,
+                time_taken_ms         INT,
+                speed_multiplier      NUMERIC(3,2),
+                ownership_multiplier  NUMERIC(3,2) NOT NULL DEFAULT 1.0,
+                points_earned         INT NOT NULL DEFAULT 0,
+                answered_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_arena_round_answer UNIQUE (session_id, round_number)
+            );
+            CREATE INDEX IF NOT EXISTS idx_arena_round_answers_session ON arena_round_answers(session_id);
+        """;
+
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
 
@@ -194,11 +267,17 @@ public class DatabaseManager {
             stmt.execute(createAlbumGenresTable);
             stmt.execute(createStreamsTable);
 
-            // Εκτέλεση των νέωνινάκων για Ratings
+            // Εκτέλεση των νέων πινάκων για Ratings
             stmt.execute(createTriggerFunction);
             stmt.execute(createSongRatingsTable);
             stmt.execute(createAlbumRatingsTable);
             stmt.execute(createArtistRatingsTable);
+
+            // ── ΕΚΤΕΛΕΣΗ ΤΩΝ ΝΕΩΝ ΠΙΝΑΚΩΝ ΓΙΑ ΤΟ ARENA ──
+            stmt.execute(createArenaPoolsTable);
+            stmt.execute(createArenaPoolRoundsTable);
+            stmt.execute(createArenaSessionsTable);
+            stmt.execute(createArenaRoundAnswersTable);
 
             try {
                 stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");

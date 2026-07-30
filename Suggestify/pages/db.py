@@ -48,3 +48,12 @@ def get_rating_cache_gen(user_id: int) -> int:
 def bump_rating_cache_gen(user_id: int) -> None:
     gens = _rating_cache_generations()
     gens[user_id] = gens.get(user_id, 0) + 1
+    
+def run_write_query(sql: str, params: dict | None = None):
+    """Execute INSERT/UPDATE/DDL in a transaction. Returns fetched rows if the
+    statement has a RETURNING clause (or SELECT), else None."""
+    with get_engine().begin() as conn:
+        result = conn.execute(text(sql), params or {})
+        if result.returns_rows:
+            return result.mappings().all()
+        return None
