@@ -816,111 +816,173 @@ current_tab = view_state["tab"]
 detail_type = view_state["type"]
 detail_id = view_state["id"]
 
-# ====== ΑΡΧΗ ΤΟΥ ΝΕΟΥ ΚΩΔΙΚΑ ΓΙΑ ΤΗΝ ΠΑΝΩ ΜΠΑΡΑ ======
 with st.container(key="top_bar_wrapper"):
     st.markdown(f"""
         <style>
-        /* 1. ΕΥΘΥΓΡΑΜΜΙΣΗ ΒΑΣΗΣ (Bottom Alignment) ΓΙΑ ΟΛΕΣ ΤΙΣ ΣΤΗΛΕΣ */
+        /* ═══════════════════════════════════════════
+           TOOLBAR CARD — the whole bar is one glass surface
+           ═══════════════════════════════════════════ */
+        .st-key-top_bar_wrapper {{
+            background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.014));
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 10px 20px;
+            margin: 4px 0 14px;
+            box-shadow: 0 10px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
+        }}
+
+        /* Master row → real flexbox, everything vertically centered,
+           each column sized to its content (no stretching) */
         .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] {{
-            align-items: flex-end !important;
-            gap: 1rem !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 24px !important;
+            flex-wrap: nowrap !important;
         }}
-
-        /* 2. ΚΑΘΑΡΙΣΜΟΣ ΠΕΡΙΘΩΡΙΩΝ (Σβήνουμε ότι χαλούσε την ευθεία) */
-        .st-key-top_filter_row {{ margin-top: 0 !important; margin-bottom: 0 !important; }}
-        .st-key-share_row {{ margin-top: 0 !important; margin-bottom: 0 !important; }}
-        
-        /* 3. ΛΟΓΟΤΥΠΟ */
-        .navbar {{ 
-            padding: 0 !important; 
-            margin: 0 0 2px 0 !important; /* Ελαφρύ σπρώξιμο για να πατήσει ακριβώς στη γραμμή των κουτιών */
+        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {{
+            width: auto !important;
+            flex: 0 0 auto !important;
+            min-width: 0 !important;
         }}
-        
-        /* 4. ΦΙΛΤΡΑ (Ημερομηνίες) */
-        .st-key-top_filter_row div[data-testid="stHorizontalBlock"] {{
-            gap: 0.8rem !important;
-            align-items: flex-end !important;
-            padding: 0 !important;
-            border: none !important;
-        }}
-        .st-key-top_filter_row [data-testid="column"] {{ min-width: 0px !important; }}
-        .st-key-top_filter_row .filter-label {{
-            font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.08em; color: {TEXT_DIM}; margin-bottom: 4px; display: block;
-        }}
-        .st-key-top_filter_row div[data-baseweb="select"] > div {{
-            background: {CARD} !important;
-            border: 1px solid {BORDER} !important;
-            border-radius: 9px !important;
-            min-height: 40px !important;
-        }}
-        .st-key-top_filter_row div[data-baseweb="select"] > div:hover {{ border-color: rgba(29,185,84,0.4) !important; }}
-        div[data-testid="stDateInput"] > div input {{ border-radius: 9px !important; }}
-
-        /* 5. UNIFIED CONTROL TOOLBAR (Rating + Share) — shrink-to-fit, right-aligned */
-        .st-key-share_row {{
-            background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
-            border: 1px solid {BORDER};
-            border-radius: 12px;
-            padding: 4px;
-            position: relative;
-            overflow: hidden;
-            display: inline-flex !important;
+        /* Push the rating/share cluster to the far right — acts as flex spacer */
+        div[data-testid="column"]:has(.st-key-share_row) {{
             margin-left: auto !important;
         }}
-        .st-key-share_row::before {{
-            content: ''; position: absolute; top: 0; left: 10%; right: 10%; height: 2px;
-            background: linear-gradient(90deg, transparent, {GREEN}, transparent); opacity: 0.45;
+
+        /* ─── Logo ─── */
+        .st-key-top_bar_wrapper .navbar {{ padding: 0 !important; margin: 0 !important; }}
+        .st-key-top_bar_wrapper .brand-title {{
+            font-size: 1.3rem !important;
+            font-weight: 800 !important;
+            letter-spacing: -0.02em;
+            gap: 0.45rem;
+            white-space: nowrap;
         }}
-        /* Kill Streamlit's default 50/50 column split entirely */
+        .st-key-top_bar_wrapper .brand-title span {{ font-size: 1.55rem !important; }}
+
+        /* ─── Period / From / To cluster ─── */
+        .st-key-top_filter_row div[data-testid="stHorizontalBlock"] {{
+            display: flex !important;
+            align-items: center !important;
+            gap: 14px !important;
+            flex-wrap: nowrap !important;
+        }}
+        .st-key-top_filter_row div[data-testid="column"] {{
+            width: auto !important;
+            flex: 0 0 auto !important;
+        }}
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(1) {{ min-width: 160px; }}
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(2),
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(3) {{ min-width: 132px; }}
+
+        /* From/To fade+slide in on mount instead of the layout jumping */
+        @keyframes fadeSlideIn {{
+            from {{ opacity: 0; transform: translateX(-6px); }}
+            to   {{ opacity: 1; transform: translateX(0); }}
+        }}
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(2) {{
+            animation: fadeSlideIn 0.3s cubic-bezier(0.16,1,0.3,1) both;
+        }}
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(3) {{
+            animation: fadeSlideIn 0.3s cubic-bezier(0.16,1,0.3,1) 0.05s both;
+        }}
+
+        .st-key-top_bar_wrapper .filter-label {{
+            font-size: 0.6rem !important;
+            font-weight: 700 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: {TEXT_DIM} !important;
+            margin: 0 0 3px 2px !important;
+        }}
+
+        /* Equal-height, non-stretching inputs */
+        .st-key-top_bar_wrapper div[data-baseweb="select"] > div,
+        .st-key-top_bar_wrapper div[data-testid="stDateInput"] input {{
+            height: 38px !important;
+            min-height: 38px !important;
+            border-radius: 11px !important;
+            background: rgba(255,255,255,0.045) !important;
+            border: 1px solid rgba(255,255,255,0.09) !important;
+            font-size: 0.82rem !important;
+            font-weight: 600 !important;
+            transition: border-color .2s ease, background .2s ease, box-shadow .2s ease !important;
+        }}
+        .st-key-top_bar_wrapper div[data-baseweb="select"] > div:hover,
+        .st-key-top_bar_wrapper div[data-testid="stDateInput"] input:hover {{
+            border-color: rgba(29,185,84,0.4) !important;
+            background: rgba(255,255,255,0.065) !important;
+        }}
+        .st-key-top_bar_wrapper div[data-testid="stDateInput"] > div {{ margin-top: 0 !important; }}
+
+        /* ─── Rating + Share action cluster ─── */
+        .st-key-share_row {{
+            display: inline-flex !important;
+            align-items: stretch !important;
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 12px;
+            padding: 3px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04);
+        }}
         .st-key-share_row div[data-testid="stHorizontalBlock"] {{
             display: inline-flex !important;
             width: auto !important;
-            justify-content: flex-end !important;
-            align-items: stretch !important;
             gap: 2px !important;
             flex-wrap: nowrap !important;
         }}
-        .st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {{
-            width: fit-content !important;
-            flex: 0 0 fit-content !important;
-            min-width: 0 !important;
-            max-width: none !important;
+        .st-key-share_row div[data-testid="column"] {{
+            width: auto !important;
+            flex: 0 0 auto !important;
         }}
-        .st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {{
-            position: relative; padding-right: 4px;
+        .st-key-share_row div[data-testid="column"]:first-child {{
+            position: relative;
+            padding-right: 4px;
         }}
-        .st-key-share_row div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child::after {{
-            content: ''; position: absolute; right: 0; top: 20%; bottom: 20%; width: 1px; background: {BORDER};
+        .st-key-share_row div[data-testid="column"]:first-child::after {{
+            content: '';
+            position: absolute; right: 0; top: 22%; bottom: 22%; width: 1px;
+            background: rgba(255,255,255,0.1);
         }}
 
-        .st-key-quick_rate_toggle button, .st-key-share_row div[data-testid="column"]:last-child button {{
-            height: 40px !important; border-radius: 9px !important;
-            font-weight: 700 !important; font-size: 0.82rem !important;
-            display: flex !important; align-items: center !important; justify-content: center !important;
-            white-space: nowrap !important; box-sizing: border-box !important;
-            margin: 0 !important; padding: 0 1rem !important; width: auto !important;
-            background: transparent !important; border: 1px solid transparent !important;
+        .st-key-quick_rate_toggle button,
+        .st-key-share_row div[data-testid="column"]:last-child button {{
+            height: 38px !important;
+            border-radius: 9px !important;
+            font-weight: 700 !important;
+            font-size: 0.78rem !important;
+            padding: 0 15px !important;
+            white-space: nowrap !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            box-sizing: border-box !important;
+            margin: 0 !important;
+            width: auto !important;
             transition: all 0.2s ease !important;
         }}
-
         .st-key-quick_rate_toggle button[kind="secondary"] {{ color: {TEXT_DIM} !important; }}
-        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{ background: rgba(255,255,255,0.05) !important; color: {TEXT} !important; }}
+        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{
+            background: rgba(255,255,255,0.06) !important; color: {TEXT} !important;
+        }}
         .st-key-quick_rate_toggle button[kind="primary"] {{
-            background: rgba(229,57,53,0.14) !important; border-color: rgba(229,57,53,0.45) !important;
+            background: rgba(229,57,53,0.16) !important;
+            border-color: rgba(229,57,53,0.45) !important;
             color: #FF6B6B !important;
         }}
-        .st-key-quick_rate_toggle button[kind="primary"]:hover {{ background: rgba(229,57,53,0.22) !important; color: #fff !important; }}
-
+        .st-key-quick_rate_toggle button[kind="primary"]:hover {{
+            background: rgba(229,57,53,0.24) !important; color: #fff !important;
+        }}
         .st-key-share_row div[data-testid="column"]:last-child button {{ color: {GREEN} !important; }}
         .st-key-share_row div[data-testid="column"]:last-child button:hover {{
-            background: rgba(29,185,84,0.12) !important; color: #fff !important;
+            background: rgba(29,185,84,0.14) !important; color: #fff !important;
         }}
+
+        /* ─── Tabs beneath align with toolbar's card edges ─── */
+        .st-key-tab_nav_row {{ margin: 0 0 10px !important; }}
         </style>
     """, unsafe_allow_html=True)
 
-    # Αναλογίες στηλών (Κεντρική Μπάρα)
-    col_brand, col_filters, col_share = st.columns([1.1, 2.9, 1.0])
+    col_brand, col_filters, col_share = st.columns([0.9, 3.2, 1.0])
 
     with col_brand:
         st.markdown('''
@@ -933,9 +995,8 @@ with st.container(key="top_bar_wrapper"):
 
     with col_filters:
         with st.container(key="top_filter_row"):
-            # Αν έχει επιλέξει Manual εμφανίζει και τα τρία inputs
             if st.session_state.date_preset == "manual":
-                f_preset, f_start, f_end = st.columns([1, 1.2, 1.2])
+                f_preset, f_start, f_end = st.columns(3)
                 with f_preset:
                     st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
                     st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
@@ -946,8 +1007,7 @@ with st.container(key="top_bar_wrapper"):
                     st.markdown('<div class="filter-label">To</div>', unsafe_allow_html=True)
                     st.date_input("To", min_value=min_date, max_value=max_date, label_visibility="collapsed", key="end_date", on_change=mark_manual)
             else:
-                # Αν έχει επιλέξει All Time/Wrapped κτλ, το input περιορίζεται στο 1/3 της στήλης
-                f_preset, _empty = st.columns([1, 2.4])
+                f_preset = st.columns(1)[0]
                 with f_preset:
                     st.markdown('<div class="filter-label">🗓️ Period</div>', unsafe_allow_html=True)
                     st.selectbox("Period", options=list(preset_options.keys()), format_func=lambda x: preset_options[x], label_visibility="collapsed", key="date_preset", on_change=update_dates_from_preset)
@@ -978,7 +1038,6 @@ with st.container(key="top_bar_wrapper"):
                     label="📸 Share Stats"
                 )
 # ====== ΤΕΛΟΣ ΤΗΣ ΠΑΝΩ ΜΠΑΡΑΣ ======
-
 tabs = [
     ("overview", "📊 Overview"), ("tracks", "🎵 Tracks"),
     ("artists", "🎤 Artists"), ("albums", "💿 Albums"),

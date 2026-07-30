@@ -1,5 +1,4 @@
 from __future__ import annotations
-from turtle import color
 
 import streamlit as st
 import pandas as pd
