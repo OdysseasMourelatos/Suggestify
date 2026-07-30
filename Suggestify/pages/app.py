@@ -5,6 +5,12 @@ import datetime
 import warnings
 import os
 import sys
+
+# ─── HACK ΓΙΑ ΤΟ STREAMLIT CLOUD ───
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
 from html import escape
 import plotly.graph_objects as go
 from friends_match import render_friends_match_tab
@@ -12,10 +18,6 @@ import streamlit.components.v1 as components
 
 warnings.filterwarnings("ignore")
 
-# ─── HACK ΓΙΑ ΤΟ STREAMLIT CLOUD ───
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
 
 from config import *
 from db import (get_engine, run_query, run_rating_query, get_date_bounds, get_release_year_bounds,
