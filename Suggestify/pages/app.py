@@ -820,7 +820,7 @@ with st.container(key="top_bar_wrapper"):
     st.markdown(f"""
         <style>
         /* ═══════════════════════════════════════════
-           TOOLBAR CARD — the whole bar is one glass surface
+           TOOLBAR CARD
            ═══════════════════════════════════════════ */
         .st-key-top_bar_wrapper {{
             background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.014));
@@ -831,21 +831,26 @@ with st.container(key="top_bar_wrapper"):
             box-shadow: 0 10px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
         }}
 
-        /* Master row → real flexbox, everything vertically centered,
-           each column sized to its content (no stretching) */
-        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] {{
+        /* Master row */
+        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"],
+        .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] {{
             display: flex !important;
             align-items: center !important;
             gap: 24px !important;
             flex-wrap: nowrap !important;
         }}
-        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {{
+        
+        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="column"],
+        .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="stColumn"] {{
             width: auto !important;
             flex: 0 0 auto !important;
             min-width: 0 !important;
         }}
-        /* Push the rating/share cluster to the far right — acts as flex spacer */
-        div[data-testid="column"]:has(.st-key-share_row) {{
+        
+        div[data-testid="column"]:has(.st-key-share_row),
+        div[data-testid="stColumn"]:has(.st-key-share_row) {{
             margin-left: auto !important;
         }}
 
@@ -860,30 +865,39 @@ with st.container(key="top_bar_wrapper"):
         }}
         .st-key-top_bar_wrapper .brand-title span {{ font-size: 1.55rem !important; }}
 
-        /* ─── Period / From / To cluster ─── */
-        .st-key-top_filter_row div[data-testid="stHorizontalBlock"] {{
+        /* ─── Filter cluster ─── */
+        .st-key-top_filter_row div[data-testid="stHorizontalBlock"],
+        .st-key-top_filter_row div[data-testid="stColumns"] {{
             display: flex !important;
             align-items: center !important;
             gap: 14px !important;
             flex-wrap: nowrap !important;
         }}
-        .st-key-top_filter_row div[data-testid="column"] {{
+        
+        .st-key-top_filter_row div[data-testid="column"],
+        .st-key-top_filter_row div[data-testid="stColumn"] {{
             width: auto !important;
             flex: 0 0 auto !important;
         }}
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(1) {{ min-width: 160px; }}
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(2),
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(3) {{ min-width: 132px; }}
 
-        /* From/To fade+slide in on mount instead of the layout jumping */
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(1),
+        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(1) {{ min-width: 160px; }}
+        
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(2),
+        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(2),
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(3),
+        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(3) {{ min-width: 132px; }}
+
         @keyframes fadeSlideIn {{
             from {{ opacity: 0; transform: translateX(-6px); }}
             to   {{ opacity: 1; transform: translateX(0); }}
         }}
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(2) {{
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(2),
+        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(2) {{
             animation: fadeSlideIn 0.3s cubic-bezier(0.16,1,0.3,1) both;
         }}
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(3) {{
+        .st-key-top_filter_row div[data-testid="column"]:nth-child(3),
+        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(3) {{
             animation: fadeSlideIn 0.3s cubic-bezier(0.16,1,0.3,1) 0.05s both;
         }}
 
@@ -896,7 +910,6 @@ with st.container(key="top_bar_wrapper"):
             margin: 0 0 3px 2px !important;
         }}
 
-        /* Equal-height, non-stretching inputs */
         .st-key-top_bar_wrapper div[data-baseweb="select"] > div,
         .st-key-top_bar_wrapper div[data-testid="stDateInput"] input {{
             height: 38px !important;
@@ -915,7 +928,7 @@ with st.container(key="top_bar_wrapper"):
         }}
         .st-key-top_bar_wrapper div[data-testid="stDateInput"] > div {{ margin-top: 0 !important; }}
 
-        /* ─── Rating + Share action cluster ─── */
+        /* ─── Share action cluster ─── */
         .st-key-share_row {{
             display: inline-flex !important;
             align-items: stretch !important;
@@ -925,28 +938,33 @@ with st.container(key="top_bar_wrapper"):
             padding: 3px;
             box-shadow: 0 4px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04);
         }}
-        .st-key-share_row div[data-testid="stHorizontalBlock"] {{
+        .st-key-share_row div[data-testid="stHorizontalBlock"],
+        .st-key-share_row div[data-testid="stColumns"] {{
             display: inline-flex !important;
             width: auto !important;
             gap: 2px !important;
             flex-wrap: nowrap !important;
         }}
-        .st-key-share_row div[data-testid="column"] {{
+        .st-key-share_row div[data-testid="column"],
+        .st-key-share_row div[data-testid="stColumn"] {{
             width: auto !important;
             flex: 0 0 auto !important;
         }}
-        .st-key-share_row div[data-testid="column"]:first-child {{
+        .st-key-share_row div[data-testid="column"]:first-child,
+        .st-key-share_row div[data-testid="stColumn"]:first-child {{
             position: relative;
             padding-right: 4px;
         }}
-        .st-key-share_row div[data-testid="column"]:first-child::after {{
+        .st-key-share_row div[data-testid="column"]:first-child::after,
+        .st-key-share_row div[data-testid="stColumn"]:first-child::after {{
             content: '';
             position: absolute; right: 0; top: 22%; bottom: 22%; width: 1px;
             background: rgba(255,255,255,0.1);
         }}
 
         .st-key-quick_rate_toggle button,
-        .st-key-share_row div[data-testid="column"]:last-child button {{
+        .st-key-share_row div[data-testid="column"]:last-child button,
+        .st-key-share_row div[data-testid="stColumn"]:last-child button {{
             height: 38px !important;
             border-radius: 9px !important;
             font-weight: 700 !important;
@@ -972,12 +990,13 @@ with st.container(key="top_bar_wrapper"):
         .st-key-quick_rate_toggle button[kind="primary"]:hover {{
             background: rgba(229,57,53,0.24) !important; color: #fff !important;
         }}
-        .st-key-share_row div[data-testid="column"]:last-child button {{ color: {GREEN} !important; }}
-        .st-key-share_row div[data-testid="column"]:last-child button:hover {{
+        .st-key-share_row div[data-testid="column"]:last-child button,
+        .st-key-share_row div[data-testid="stColumn"]:last-child button {{ color: {GREEN} !important; }}
+        .st-key-share_row div[data-testid="column"]:last-child button:hover,
+        .st-key-share_row div[data-testid="stColumn"]:last-child button:hover {{
             background: rgba(29,185,84,0.14) !important; color: #fff !important;
         }}
 
-        /* ─── Tabs beneath align with toolbar's card edges ─── */
         .st-key-tab_nav_row {{ margin: 0 0 10px !important; }}
         </style>
     """, unsafe_allow_html=True)
@@ -2101,16 +2120,17 @@ elif current_tab == "tracks":
     ry_min, ry_max = get_release_year_bounds()
     release_year_options = ["All Release Years"] + [str(y) for y in range(ry_max, ry_min - 1, -1)]
 
-    col_month, col_hour, col_ryear = st.columns(3)
-    with col_month:
-        st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
-        filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_tracks")
-    with col_hour:
-        st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
-        filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_tracks")
-    with col_ryear:
-        st.markdown('<div class="filter-label">🗓️ Release Year</div>', unsafe_allow_html=True)
-        filter_ryear = st.selectbox("Release Year", release_year_options, label_visibility="collapsed", key="filter_release_year_tracks")
+    with st.container(key="filter_bar_row"):
+        col_month, col_hour, col_ryear = st.columns(3)   # ή st.columns(2) στο artists
+        with col_month:
+            st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
+            filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_tracks")
+        with col_hour:
+            st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
+            filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_tracks")
+        with col_ryear:
+            st.markdown('<div class="filter-label">🗓️ Release Year</div>', unsafe_allow_html=True)
+            filter_ryear = st.selectbox("Release Year", release_year_options, label_visibility="collapsed", key="filter_release_year_tracks")
 
     query_params = {**F, "limit": display_limit}
     order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"
@@ -2230,13 +2250,14 @@ elif current_tab == "artists":
     display_limit = col_limit.selectbox("Limit", [50, 100, 200], index=0, label_visibility="collapsed")
 
     # --- ΠΡΟΣΘΗΚΗ ΦΙΛΤΡΩΝ ---
-    col_month, col_hour = st.columns(2)
-    with col_month:
-        st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
-        filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_artists")
-    with col_hour:
-        st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
-        filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_artists")
+    with st.container(key="filter_bar_row"):
+        col_month, col_hour, col_ryear = st.columns(3)   # ή st.columns(2) στο artists
+        with col_month:
+            st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
+            filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_artists")
+        with col_hour:
+            st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
+            filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_artists")
 
     query_params = {**F, "limit": display_limit}
     order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"
@@ -2342,16 +2363,17 @@ elif current_tab == "albums":
     ry_min, ry_max = get_release_year_bounds()
     release_year_options = ["All Release Years"] + [str(y) for y in range(ry_max, ry_min - 1, -1)]
 
-    col_month, col_hour, col_ryear = st.columns(3)
-    with col_month:
-        st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
-        filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_albums")
-    with col_hour:
-        st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
-        filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_albums")
-    with col_ryear:
-        st.markdown('<div class="filter-label">🗓️ Release Year</div>', unsafe_allow_html=True)
-        filter_ryear = st.selectbox("Release Year", release_year_options, label_visibility="collapsed", key="filter_release_year_albums")
+    with st.container(key="filter_bar_row"):
+        col_month, col_hour, col_ryear = st.columns(3)   # ή st.columns(2) στο artists
+        with col_month:
+            st.markdown('<div class="filter-label">📅 Month</div>', unsafe_allow_html=True)
+            filter_month = st.selectbox("Month", MONTH_FILTER_OPTIONS, label_visibility="collapsed", key="filter_month_albums")
+        with col_hour:
+            st.markdown('<div class="filter-label">🕐 Hour of Day</div>', unsafe_allow_html=True)
+            filter_hour = st.selectbox("Hour", HOUR_FILTER_OPTIONS, label_visibility="collapsed", key="filter_hour_albums")
+        with col_ryear:
+            st.markdown('<div class="filter-label">🗓️ Release Year</div>', unsafe_allow_html=True)
+            filter_ryear = st.selectbox("Release Year", release_year_options, label_visibility="collapsed", key="filter_release_year_albums")
 
     query_params = {**F, "limit": display_limit}
     order_col = "COUNT(s.id)" if sort_by == "Streams" else "SUM(s.ms_played)"

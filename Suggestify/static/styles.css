@@ -35,7 +35,8 @@ div.element-container {
 div[data-testid="stVerticalBlock"] > div {
     gap: 0.2rem !important; /* Μειώνει το default κάθετο gap */
 }
-div[data-testid="stHorizontalBlock"] {
+div[data-testid="stHorizontalBlock"],
+div[data-testid="stColumns"] {
     gap: 0.5rem !important;
 }
 
@@ -252,14 +253,16 @@ section.main > div.block-container {
     margin-bottom: 0rem !important;
 }
 
-.st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
+.st-key-filter_bar_row div[data-testid="stHorizontalBlock"],
+.st-key-filter_bar_row div[data-testid="stColumns"] {
     align-items: flex-start; /* ΑΛΛΑΓΗ: Αποτρέπει το input να καβαλάει το label */
     flex-wrap: wrap;
     gap: 0.85rem;
     padding: 0.4rem 0 1rem; 
     border-top: 1px solid VAR_BORDER; 
 }
-.st-key-filter_bar_row [data-testid="column"] {
+.st-key-filter_bar_row [data-testid="column"],
+.st-key-filter_bar_row [data-testid="stColumn"] {
     min-width: 150px;
 }
 .st-key-filter_bar_row div[data-testid="stVerticalBlock"] > div {
@@ -711,7 +714,8 @@ div[data-testid="stPopoverBody"] button {
     }
 
     /* ─── FILTER BAR: clean 2x2 grid, Spotify-style, nothing clipped ─── */
-    .st-key-filter_bar_row div[data-testid="stHorizontalBlock"] {
+    .st-key-filter_bar_row div[data-testid="stHorizontalBlock"],
+    .st-key-filter_bar_row div[data-testid="stColumns"] {
         align-items: flex-end;
         gap: 0.75rem !important;
         padding: 0 0 1rem 0 !important; 
@@ -743,7 +747,8 @@ div[data-testid="stPopoverBody"] button {
     .kpi-grid {
         gap: 0.6rem !important;
     }
-    div[data-testid="column"]:has(.kpi-card) {
+    div[data-testid="column"]:has(.kpi-card),
+    div[data-testid="stColumn"]:has(.kpi-card) {
         min-width: 47% !important;
     }
     .kpi-card {
@@ -806,11 +811,78 @@ div[data-testid="stPopoverBody"] button {
         font-size: 0.85rem !important;
         padding: 0.6rem 0.8rem !important;
     }
+
+    /* Toolbar wrapping for mobile */
+    .st-key-top_bar_wrapper {
+        padding: 10px 12px !important;
+    }
+    .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"],
+    .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] {
+        flex-direction: column !important;
+        flex-wrap: wrap !important;
+        gap: 10px !important;
+        align-items: stretch !important;
+    }
+    .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+    .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+    .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="column"],
+    .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="stColumn"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+    div[data-testid="column"]:has(.st-key-share_row),
+    div[data-testid="stColumn"]:has(.st-key-share_row) {
+        margin-left: 0 !important;
+    }
+
+    /* Period/From/To: πάντα κάτω-κάτω, ποτέ στριμωγμένα */
+    .st-key-top_filter_row div[data-testid="stHorizontalBlock"],
+    .st-key-top_filter_row div[data-testid="stColumns"] {
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+    .st-key-top_filter_row div[data-testid="column"],
+    .st-key-top_filter_row div[data-testid="stColumn"] {
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+
+    /* Rating On/Off + Share Stats: πλάτος 50/50, μεγάλα touch targets */
+    .st-key-share_row {
+        width: 100% !important;
+        padding: 4px !important;
+    }
+    .st-key-share_row div[data-testid="stHorizontalBlock"],
+    .st-key-share_row div[data-testid="stColumns"] {
+        width: 100% !important;
+        display: flex !important;
+    }
+    .st-key-share_row div[data-testid="column"],
+    .st-key-share_row div[data-testid="stColumn"] {
+        flex: 1 1 50% !important;
+        width: 50% !important;
+    }
+    .st-key-quick_rate_toggle button,
+    .st-key-share_row div[data-testid="column"]:last-child button,
+    .st-key-share_row div[data-testid="stColumn"]:last-child button {
+        width: 100% !important;
+        height: 42px !important;
+        font-size: 0.82rem !important;
+    }
+
+    .js-plotly-plot, .plotly-graph-div, .svg-container {
+        min-height: 260px !important;
+        width: 100% !important;
+    }
+    .js-plotly-plot .main-svg {
+        width: 100% !important;
+    }
 }
 
 /* Extra-small phones (iPhone SE etc.) — drop to single column filters */
 @media (max-width: 23.75em) {
-    .st-key-filter_bar_row [data-testid="column"] {
+    .st-key-filter_bar_row [data-testid="column"],
+    .st-key-filter_bar_row [data-testid="stColumn"] {
         flex: 1 1 100% !important;
         min-width: 100% !important;
         max-width: 100% !important;
@@ -830,13 +902,15 @@ div[data-testid="stPopoverBody"] button {
     padding: 0.4rem 0.5rem !important;
 }
 
-.st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
+.st-key-tab_nav_row div[data-testid="stHorizontalBlock"],
+.st-key-tab_nav_row div[data-testid="stColumns"] {
     gap: 0.25rem !important;
     width: 100% !important;
     flex-wrap: nowrap !important;
 }
 
-.st-key-tab_nav_row [data-testid="column"] {
+.st-key-tab_nav_row [data-testid="column"],
+.st-key-tab_nav_row [data-testid="stColumn"] {
     flex: 1 1 0 !important;
     min-width: 0 !important;
     padding: 0 !important;
@@ -892,12 +966,14 @@ div[data-testid="stPopoverBody"] button {
         margin: 0 !important;
     }
 
-    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"] {
+    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"],
+    .st-key-tab_nav_row div[data-testid="stColumns"] {
         width: max-content !important;
         align-items: center !important;
     }
 
-    .st-key-tab_nav_row [data-testid="column"] {
+    .st-key-tab_nav_row [data-testid="column"],
+    .st-key-tab_nav_row [data-testid="stColumn"] {
         width: auto !important;
         flex: 0 0 auto !important;
     }
