@@ -818,188 +818,161 @@ detail_id = view_state["id"]
 
 with st.container(key="top_bar_wrapper"):
     st.markdown(f"""
-        <style>
-        /* ═══════════════════════════════════════════
-           TOOLBAR CARD
-           ═══════════════════════════════════════════ */
-        .st-key-top_bar_wrapper {{
-            background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.014));
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 10px 20px;
-            margin: 4px 0 14px;
-            box-shadow: 0 10px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
-        }}
+            <style>
+            /* ═══════════════════════════════════════════
+               TOOLBAR CARD (Responsive Fixes)
+               ═══════════════════════════════════════════ */
+            .st-key-top_bar_wrapper {{
+                background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.014));
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 16px;
+                padding: 10px 20px;
+                margin: 4px 0 14px;
+                box-shadow: 0 10px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
+            }}
 
-        /* Master row */
-        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"],
-        .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] {{
-            display: flex !important;
-            align-items: center !important;
-            gap: 24px !important;
-            flex-wrap: nowrap !important;
-        }}
-        
-        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-        .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
-        .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="column"],
-        .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="stColumn"] {{
-            width: auto !important;
-            flex: 0 0 auto !important;
-            min-width: 0 !important;
-        }}
-        
-        div[data-testid="column"]:has(.st-key-share_row),
-        div[data-testid="stColumn"]:has(.st-key-share_row) {{
-            margin-left: auto !important;
-        }}
+            /* ─── BASE ELEMENTS (Κοινά) ─── */
+            .st-key-top_bar_wrapper .brand-title {{
+                font-size: 1.3rem !important;
+                font-weight: 800 !important;
+                letter-spacing: -0.02em;
+                gap: 0.45rem;
+                white-space: nowrap;
+            }}
+            .st-key-top_bar_wrapper .brand-title span {{ font-size: 1.55rem !important; }}
 
-        /* ─── Logo ─── */
-        .st-key-top_bar_wrapper .navbar {{ padding: 0 !important; margin: 0 !important; }}
-        .st-key-top_bar_wrapper .brand-title {{
-            font-size: 1.3rem !important;
-            font-weight: 800 !important;
-            letter-spacing: -0.02em;
-            gap: 0.45rem;
-            white-space: nowrap;
-        }}
-        .st-key-top_bar_wrapper .brand-title span {{ font-size: 1.55rem !important; }}
+            .st-key-top_bar_wrapper .filter-label {{
+                font-size: 0.6rem !important;
+                font-weight: 700 !important;
+                text-transform: uppercase;
+                letter-spacing: 0.07em;
+                color: {TEXT_DIM} !important;
+                margin: 0 0 3px 2px !important;
+            }}
 
-        /* ─── Filter cluster ─── */
-        .st-key-top_filter_row div[data-testid="stHorizontalBlock"],
-        .st-key-top_filter_row div[data-testid="stColumns"] {{
-            display: flex !important;
-            align-items: center !important;
-            gap: 14px !important;
-            flex-wrap: nowrap !important;
-        }}
-        
-        .st-key-top_filter_row div[data-testid="column"],
-        .st-key-top_filter_row div[data-testid="stColumn"] {{
-            width: auto !important;
-            flex: 0 0 auto !important;
-        }}
+            .st-key-top_bar_wrapper div[data-baseweb="select"] > div,
+            .st-key-top_bar_wrapper div[data-testid="stDateInput"] input {{
+                height: 38px !important; min-height: 38px !important;
+                border-radius: 11px !important;
+                background: rgba(255,255,255,0.045) !important;
+                border: 1px solid rgba(255,255,255,0.09) !important;
+                font-size: 0.82rem !important; font-weight: 600 !important;
+                transition: all .2s ease !important;
+            }}
+            .st-key-top_bar_wrapper div[data-baseweb="select"] > div:hover,
+            .st-key-top_bar_wrapper div[data-testid="stDateInput"] input:hover {{
+                border-color: rgba(29,185,84,0.4) !important;
+                background: rgba(255,255,255,0.065) !important;
+            }}
+            .st-key-top_bar_wrapper div[data-testid="stDateInput"] > div {{ margin-top: 0 !important; }}
 
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(1),
-        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(1) {{ min-width: 160px; }}
-        
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(2),
-        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(2),
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(3),
-        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(3) {{ min-width: 132px; }}
+            .st-key-quick_rate_toggle button,
+            .st-key-share_row div[data-testid="column"]:last-child button,
+            .st-key-share_row div[data-testid="stColumn"]:last-child button {{
+                height: 38px !important; border-radius: 9px !important;
+                font-weight: 700 !important; font-size: 0.78rem !important;
+                padding: 0 15px !important; white-space: nowrap !important;
+                background: transparent !important; border: 1px solid transparent !important;
+                margin: 0 !important; width: 100% !important; transition: all 0.2s ease !important;
+            }}
+            .st-key-quick_rate_toggle button[kind="secondary"] {{ color: {TEXT_DIM} !important; }}
+            .st-key-quick_rate_toggle button[kind="secondary"]:hover {{ background: rgba(255,255,255,0.06) !important; color: {TEXT} !important; }}
+            .st-key-quick_rate_toggle button[kind="primary"] {{ background: rgba(229,57,53,0.16) !important; border-color: rgba(229,57,53,0.45) !important; color: #FF6B6B !important; }}
+            .st-key-quick_rate_toggle button[kind="primary"]:hover {{ background: rgba(229,57,53,0.24) !important; color: #fff !important; }}
+            .st-key-share_row div[data-testid="column"]:last-child button,
+            .st-key-share_row div[data-testid="stColumn"]:last-child button {{ color: {GREEN} !important; }}
+            .st-key-share_row div[data-testid="column"]:last-child button:hover,
+            .st-key-share_row div[data-testid="stColumn"]:last-child button:hover {{ background: rgba(29,185,84,0.14) !important; color: #fff !important; }}
 
-        @keyframes fadeSlideIn {{
-            from {{ opacity: 0; transform: translateX(-6px); }}
-            to   {{ opacity: 1; transform: translateX(0); }}
-        }}
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(2),
-        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(2) {{
-            animation: fadeSlideIn 0.3s cubic-bezier(0.16,1,0.3,1) both;
-        }}
-        .st-key-top_filter_row div[data-testid="column"]:nth-child(3),
-        .st-key-top_filter_row div[data-testid="stColumn"]:nth-child(3) {{
-            animation: fadeSlideIn 0.3s cubic-bezier(0.16,1,0.3,1) 0.05s both;
-        }}
+            /* ─── DESKTOP ONLY ─── */
+            @media (min-width: 48.01em) {{
+                .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"],
+                .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] {{
+                    display: flex !important; align-items: center !important; gap: 24px !important; flex-wrap: nowrap !important;
+                }}
+                .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+                .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+                .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="column"],
+                .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] > div[data-testid="stColumn"] {{
+                    width: auto !important; flex: 0 0 auto !important; min-width: 0 !important;
+                }}
+                div[data-testid="column"]:has(.st-key-share_row),
+                div[data-testid="stColumn"]:has(.st-key-share_row) {{ margin-left: auto !important; }}
 
-        .st-key-top_bar_wrapper .filter-label {{
-            font-size: 0.6rem !important;
-            font-weight: 700 !important;
-            text-transform: uppercase;
-            letter-spacing: 0.07em;
-            color: {TEXT_DIM} !important;
-            margin: 0 0 3px 2px !important;
-        }}
+                .st-key-top_filter_row div[data-testid="stHorizontalBlock"],
+                .st-key-top_filter_row div[data-testid="stColumns"] {{
+                    display: flex !important; align-items: center !important; gap: 14px !important; flex-wrap: nowrap !important;
+                }}
+                .st-key-top_filter_row div[data-testid="column"],
+                .st-key-top_filter_row div[data-testid="stColumn"] {{ width: auto !important; flex: 0 0 auto !important; }}
+                
+                .st-key-share_row {{
+                    display: inline-flex !important; align-items: stretch !important;
+                    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.09);
+                    border-radius: 12px; padding: 3px;
+                }}
+                .st-key-share_row div[data-testid="stHorizontalBlock"],
+                .st-key-share_row div[data-testid="stColumns"] {{
+                    display: inline-flex !important; width: auto !important; gap: 2px !important; flex-wrap: nowrap !important;
+                }}
+                .st-key-share_row div[data-testid="column"],
+                .st-key-share_row div[data-testid="stColumn"] {{ width: auto !important; flex: 0 0 auto !important; }}
+                .st-key-share_row div[data-testid="column"]:first-child,
+                .st-key-share_row div[data-testid="stColumn"]:first-child {{ position: relative; padding-right: 4px; }}
+                .st-key-share_row div[data-testid="column"]:first-child::after,
+                .st-key-share_row div[data-testid="stColumn"]:first-child::after {{
+                    content: ''; position: absolute; right: 0; top: 22%; bottom: 22%; width: 1px; background: rgba(255,255,255,0.1);
+                }}
+            }}
 
-        .st-key-top_bar_wrapper div[data-baseweb="select"] > div,
-        .st-key-top_bar_wrapper div[data-testid="stDateInput"] input {{
-            height: 38px !important;
-            min-height: 38px !important;
-            border-radius: 11px !important;
-            background: rgba(255,255,255,0.045) !important;
-            border: 1px solid rgba(255,255,255,0.09) !important;
-            font-size: 0.82rem !important;
-            font-weight: 600 !important;
-            transition: border-color .2s ease, background .2s ease, box-shadow .2s ease !important;
-        }}
-        .st-key-top_bar_wrapper div[data-baseweb="select"] > div:hover,
-        .st-key-top_bar_wrapper div[data-testid="stDateInput"] input:hover {{
-            border-color: rgba(29,185,84,0.4) !important;
-            background: rgba(255,255,255,0.065) !important;
-        }}
-        .st-key-top_bar_wrapper div[data-testid="stDateInput"] > div {{ margin-top: 0 !important; }}
+            /* ─── MOBILE ONLY ─── */
+            @media (max-width: 48em) {{
+                .st-key-top_bar_wrapper {{ padding: 12px !important; }}
+                .st-key-top_bar_wrapper > div > div[data-testid="stHorizontalBlock"],
+                .st-key-top_bar_wrapper > div > div[data-testid="stColumns"] {{
+                    flex-direction: column !important; gap: 12px !important; align-items: stretch !important;
+                }}
+                
+                .st-key-top_filter_row div[data-testid="stHorizontalBlock"],
+                .st-key-top_filter_row div[data-testid="stColumns"] {{
+                    flex-direction: column !important; gap: 8px !important; align-items: stretch !important;
+                }}
+                .st-key-top_filter_row div[data-testid="column"],
+                .st-key-top_filter_row div[data-testid="stColumn"] {{
+                    min-width: 100% !important; width: 100% !important; flex: 1 1 100% !important;
+                }}
 
-        /* ─── Share action cluster ─── */
-        .st-key-share_row {{
-            display: inline-flex !important;
-            align-items: stretch !important;
-            background: rgba(255,255,255,0.045);
-            border: 1px solid rgba(255,255,255,0.09);
-            border-radius: 12px;
-            padding: 3px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04);
-        }}
-        .st-key-share_row div[data-testid="stHorizontalBlock"],
-        .st-key-share_row div[data-testid="stColumns"] {{
-            display: inline-flex !important;
-            width: auto !important;
-            gap: 2px !important;
-            flex-wrap: nowrap !important;
-        }}
-        .st-key-share_row div[data-testid="column"],
-        .st-key-share_row div[data-testid="stColumn"] {{
-            width: auto !important;
-            flex: 0 0 auto !important;
-        }}
-        .st-key-share_row div[data-testid="column"]:first-child,
-        .st-key-share_row div[data-testid="stColumn"]:first-child {{
-            position: relative;
-            padding-right: 4px;
-        }}
-        .st-key-share_row div[data-testid="column"]:first-child::after,
-        .st-key-share_row div[data-testid="stColumn"]:first-child::after {{
-            content: '';
-            position: absolute; right: 0; top: 22%; bottom: 22%; width: 1px;
-            background: rgba(255,255,255,0.1);
-        }}
+                /* Διορθώνει το στρίμωγμα του Share Row */
+                .st-key-share_row {{
+                    display: flex !important; width: 100% !important;
+                    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.09);
+                    border-radius: 12px; padding: 4px;
+                }}
+                .st-key-share_row div[data-testid="stHorizontalBlock"],
+                .st-key-share_row div[data-testid="stColumns"] {{
+                    display: flex !important; flex-direction: row !important; width: 100% !important; gap: 4px !important;
+                }}
+                .st-key-share_row div[data-testid="column"],
+                .st-key-share_row div[data-testid="stColumn"] {{
+                    flex: 1 1 50% !important; width: 50% !important;
+                }}
+                .st-key-share_row div[data-testid="column"]:first-child::after,
+                .st-key-share_row div[data-testid="stColumn"]:first-child::after {{ display: none !important; }}
 
-        .st-key-quick_rate_toggle button,
-        .st-key-share_row div[data-testid="column"]:last-child button,
-        .st-key-share_row div[data-testid="stColumn"]:last-child button {{
-            height: 38px !important;
-            border-radius: 9px !important;
-            font-weight: 700 !important;
-            font-size: 0.78rem !important;
-            padding: 0 15px !important;
-            white-space: nowrap !important;
-            background: transparent !important;
-            border: 1px solid transparent !important;
-            box-sizing: border-box !important;
-            margin: 0 !important;
-            width: auto !important;
-            transition: all 0.2s ease !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="secondary"] {{ color: {TEXT_DIM} !important; }}
-        .st-key-quick_rate_toggle button[kind="secondary"]:hover {{
-            background: rgba(255,255,255,0.06) !important; color: {TEXT} !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="primary"] {{
-            background: rgba(229,57,53,0.16) !important;
-            border-color: rgba(229,57,53,0.45) !important;
-            color: #FF6B6B !important;
-        }}
-        .st-key-quick_rate_toggle button[kind="primary"]:hover {{
-            background: rgba(229,57,53,0.24) !important; color: #fff !important;
-        }}
-        .st-key-share_row div[data-testid="column"]:last-child button,
-        .st-key-share_row div[data-testid="stColumn"]:last-child button {{ color: {GREEN} !important; }}
-        .st-key-share_row div[data-testid="column"]:last-child button:hover,
-        .st-key-share_row div[data-testid="stColumn"]:last-child button:hover {{
-            background: rgba(29,185,84,0.14) !important; color: #fff !important;
-        }}
-
-        .st-key-tab_nav_row {{ margin: 0 0 10px !important; }}
-        </style>
-    """, unsafe_allow_html=True)
+                /* Ξεπαγιδεύει το Tab Dropdown από το να πέφτει πάνω στα κουμπιά */
+                .st-key-tab_nav_mobile {{
+                    position: static !important;
+                    transform: none !important;
+                    width: 100% !important;
+                    margin: 0 0 16px 0 !important;
+                    display: block !important;
+                }}
+                .st-key-tab_nav_mobile > div, .st-key-tab_nav_mobile button {{
+                    width: 100% !important;
+                }}
+            }}
+            </style>
+        """, unsafe_allow_html=True)
 
     col_brand, col_filters, col_share = st.columns([0.9, 3.2, 1.0])
 
