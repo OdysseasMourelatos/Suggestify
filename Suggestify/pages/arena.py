@@ -24,10 +24,13 @@ TIER_TARGET_FRAC = {"core": 0.35, "regular": 0.35, "deep_cut": 0.30}
 TIER_BASE_POINTS = {"core": 50, "regular": 100, "deep_cut": 200}
 FUZZY_MATCH_THRESHOLD = 0.82    # difflib ratio for free-text answers
 EASY_SCORE_MULTIPLIER = 0.8     # slight point discount for the always-multiple-choice mode
+PERFECT_ALBUM_BONUS_FRAC = 0.2  # +20% bonus points when 100% of an album's tracks are found
 
 GAME_META = {
     "cover":  {"icon": "🖼️", "label": "Guess the Cover",  "desc": "Album art, progressively revealed."},
     "artist": {"icon": "🎤", "label": "Guess the Artist", "desc": "Artist photos, progressively revealed."},
+    "tracks": {"icon": "📀", "label": "Guess the Album Tracks",
+               "desc": "Name every track on a full album before the clock runs out."},
 }
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -100,6 +103,41 @@ CREATE TABLE IF NOT EXISTS arena_round_answers (
     CONSTRAINT uq_arena_round_answer UNIQUE (session_id, round_number)
 );
 CREATE INDEX IF NOT EXISTS idx_arena_round_answers_session ON arena_round_answers(session_id);
+
+-- Widen the CHECK constraints to allow the new 'tracks' game type / 'album_tracks' item type
+ALTER TABLE arena_pools DROP CONSTRAINT IF EXISTS arena_pools_game_type_check;
+ALTER TABLE arena_pools ADD CONSTRAINT arena_pools_game_type_check
+    CHECK (game_type IN ('cover','artist','tracks'));
+
+ALTER TABLE arena_pool_rounds DROP CONSTRAINT IF EXISTS arena_pool_rounds_item_type_check;
+ALTER TABLE arena_pool_rounds ADD CONSTRAINT arena_pool_rounds_item_type_check
+    CHECK (item_type IN ('album','artist','album_tracks'));
+
+-- One row per track that belongs to an "album_tracks" round (many-to-one: round -> tracks)
+CREATE TABLE IF NOT EXISTS arena_round_tracks (
+    id                BIGSERIAL PRIMARY KEY,
+    pool_id           BIGINT NOT NULL REFERENCES arena_pools(id) ON DELETE CASCADE,
+    round_number      INT NOT NULL,
+    track_id          INTEGER NOT NULL,
+    track_name        VARCHAR(255) NOT NULL,
+    track_number      INT NOT NULL,
+    familiarity_tier  VARCHAR(20) NOT NULL CHECK (familiarity_tier IN ('core','regular','deep_cut')),
+    base_points       INT NOT NULL,
+    CONSTRAINT uq_arena_round_track UNIQUE (pool_id, round_number, track_id)
+);
+CREATE INDEX IF NOT EXISTS idx_arena_round_tracks_round ON arena_round_tracks(pool_id, round_number);
+
+-- Per-session record of which tracks have been found within a given round (album)
+CREATE TABLE IF NOT EXISTS arena_track_answers (
+    id              BIGSERIAL PRIMARY KEY,
+    session_id      BIGINT NOT NULL REFERENCES arena_sessions(id) ON DELETE CASCADE,
+    round_number    INT NOT NULL,
+    track_id        INTEGER NOT NULL,
+    points_earned   INT NOT NULL DEFAULT 0,
+    found_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_arena_track_answer UNIQUE (session_id, round_number, track_id)
+);
+CREATE INDEX IF NOT EXISTS idx_arena_track_answers_session ON arena_track_answers(session_id, round_number);
 """
 
 def init_arena_module(get_engine, run_query, run_write_query,
@@ -163,11 +201,73 @@ def init_arena_module(get_engine, run_query, run_write_query,
         df["tier"] = tiers
         return df
 
+    def _eligible_albums_pool(user_id: int) -> pd.DataFrame:
+        """Albums the user has actually listened to, that have more than 1 track (excludes singles)."""
+        df = run_query("""
+            SELECT al.id AS item_id, al.title AS item_name, MAX(so.image_url) AS image_url,
+                   COUNT(DISTINCT so.id) AS total_tracks,
+                   COUNT(s.id) AS stream_count
+            FROM songs so
+            JOIN albums al ON al.id = so.album_id
+            LEFT JOIN streams s ON s.song_id = so.id AND s.user_id = :uid
+            GROUP BY al.id, al.title
+            HAVING COUNT(DISTINCT so.id) > 1 AND COUNT(s.id) >= 10
+            ORDER BY stream_count DESC
+        """, {"uid": user_id})
+
+        if df.empty:
+            df["tier"] = []
+            return df
+
+        n = len(df)
+        tiers = []
+        for i in range(n):
+            pct = i / n
+            if pct < 0.20:
+                tiers.append("core")
+            elif pct < 0.70:
+                tiers.append("regular")
+            else:
+                tiers.append("deep_cut")
+        df = df.reset_index(drop=True)
+        df["tier"] = tiers
+        return df
+
+    def _build_album_tracklist(user_id: int, album_id: int) -> list[dict]:
+        """Full tracklist for one album, tiered by the user's per-track stream count
+        (unstreamed tracks naturally fall into 'deep_cut' -> highest point value)."""
+        df = run_query("""
+            SELECT so.id AS track_id, so.title AS track_name,
+                   COUNT(s.id) AS stream_count
+            FROM songs so
+            LEFT JOIN streams s ON s.song_id = so.id AND s.user_id = :uid
+            WHERE so.album_id = :aid
+            GROUP BY so.id, so.title
+            ORDER BY so.id
+        """, {"uid": user_id, "aid": album_id})
+        if df.empty:
+            return []
+
+        n = len(df)
+        df = df.sort_values("stream_count", ascending=False).reset_index(drop=True)
+        tiers = []
+        for i in range(n):
+            pct = i / n
+            if pct < 0.20:
+                tiers.append("core")
+            elif pct < 0.70:
+                tiers.append("regular")
+            else:
+                tiers.append("deep_cut")
+        df["tier"] = tiers
+        return df.to_dict("records")
+
     def is_arena_eligible(user_id: int) -> dict:
         out = {}
         for gt in ("cover", "artist"):
             pool = _eligible_pool(user_id, gt)
             out[gt] = len(pool) >= ELIGIBILITY_FLOOR
+        out["tracks"] = len(_eligible_albums_pool(user_id)) >= ELIGIBILITY_FLOOR
         return out
 
     def _stratified_sample(pool: pd.DataFrame, n: int) -> list[dict]:
@@ -212,6 +312,58 @@ def init_arena_module(get_engine, run_query, run_write_query,
         if difficulty not in ("easy", "hard"):
             difficulty = "hard"
         hint_budget = HINT_BUDGET[round_count]
+
+        # ─── "tracks" mode picks whole albums instead of single items ───
+        if game_type == "tracks":
+            host_albums_pool = _eligible_albums_pool(host_user_id)
+            if mode == "friends" and friend_user_id:
+                friend_albums_pool = _eligible_albums_pool(friend_user_id)
+                n_host = round_count // 2
+                n_friend = round_count - n_host
+                host_items = _stratified_sample(host_albums_pool, n_host)
+                friend_items = _stratified_sample(friend_albums_pool, n_friend)
+                for it in host_items:
+                    it["owner_user_id"] = host_user_id
+                for it in friend_items:
+                    it["owner_user_id"] = friend_user_id
+                chosen = host_items + friend_items
+                random.shuffle(chosen)
+            else:
+                chosen = _stratified_sample(host_albums_pool, round_count)
+                for it in chosen:
+                    it["owner_user_id"] = host_user_id
+
+            rows = run_write_query("""
+                INSERT INTO arena_pools (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id)
+                VALUES (:mode, :game_type, :round_count, :difficulty, :hint_budget, :host_user_id, :friend_user_id)
+                RETURNING id
+            """, dict(mode=mode, game_type=game_type, round_count=round_count, difficulty=difficulty,
+                      hint_budget=hint_budget, host_user_id=host_user_id, friend_user_id=friend_user_id))
+            pool_id = rows[0]["id"]
+
+            for i, item in enumerate(chosen, start=1):
+                run_write_query("""
+                    INSERT INTO arena_pool_rounds
+                        (pool_id, round_number, item_type, item_id, item_name, image_url,
+                         owner_user_id, familiarity_tier, base_points, distractor_names)
+                    VALUES (:pool_id, :round_number, 'album_tracks', :item_id, :item_name, :image_url,
+                            :owner_user_id, :tier, 0, '{}')
+                """, dict(pool_id=pool_id, round_number=i,
+                          item_id=int(item["item_id"]), item_name=item["item_name"], image_url=item["image_url"],
+                          owner_user_id=item["owner_user_id"], tier=item["tier"]))
+
+                tracklist = _build_album_tracklist(item["owner_user_id"], int(item["item_id"]))
+                for pos, trk in enumerate(tracklist, start=1):
+                    run_write_query("""
+                        INSERT INTO arena_round_tracks
+                            (pool_id, round_number, track_id, track_name, track_number, familiarity_tier, base_points)
+                        VALUES (:pool_id, :round_number, :track_id, :track_name, :track_number, :tier, :base_points)
+                    """, dict(pool_id=pool_id, round_number=i, track_id=int(trk["track_id"]),
+                              track_name=trk["track_name"], track_number=pos, tier=trk["tier"],
+                              base_points=TIER_BASE_POINTS[trk["tier"]]))
+            return pool_id
+
+        # ─── existing cover/artist logic ───
         host_pool = _eligible_pool(host_user_id, game_type)
 
         if mode == "friends" and friend_user_id:
@@ -281,6 +433,19 @@ def init_arena_module(get_engine, run_query, run_write_query,
         """, {"p": pool_id, "rn": round_number})
         return dict(rows[0]) if rows else None
 
+    def get_round_tracks(pool_id: int, round_number: int) -> list[dict]:
+        rows = run_write_query("""
+            SELECT * FROM arena_round_tracks WHERE pool_id=:p AND round_number=:rn ORDER BY track_number
+        """, {"p": pool_id, "rn": round_number})
+        return [dict(r) for r in rows] if rows else []
+
+    def get_track_answers_map(session_id: int, round_number: int) -> dict:
+        rows = run_write_query("""
+            SELECT track_id, points_earned FROM arena_track_answers
+            WHERE session_id=:sid AND round_number=:rn
+        """, {"sid": session_id, "rn": round_number})
+        return {r["track_id"]: dict(r) for r in rows} if rows else {}
+
     def _score_answer(pool: dict, round_row: dict, session_user_id: int,
                        is_correct: bool, used_hint: bool, time_taken_ms: int):
         if not is_correct: return 0.0, 1.0, 0
@@ -326,6 +491,73 @@ def init_arena_module(get_engine, run_query, run_write_query,
         """, dict(hint_inc=1 if used_hint else 0, pts=points,
                   correct_inc=1 if is_correct else 0, sid=session["id"]))
         return points
+
+    def _score_track_answer(pool: dict, round_row: dict, track_row: dict, session_user_id: int) -> int:
+        owner_mult = 1.3 if (pool["mode"] == "friends" and round_row["owner_user_id"] != session_user_id) else 1.0
+        return round(track_row["base_points"] * owner_mult)
+
+    def submit_track_answer(session: dict, pool: dict, round_row: dict, track_row: dict, time_taken_ms: int) -> int:
+        """Records one correctly-guessed track and adds its points immediately.
+        Does NOT advance current_round — the round stays open for further guesses."""
+        existing = run_write_query(
+            "SELECT id FROM arena_track_answers WHERE session_id=:sid AND round_number=:rn AND track_id=:tid",
+            {"sid": session["id"], "rn": round_row["round_number"], "tid": track_row["track_id"]}
+        )
+        if existing:
+            return 0
+
+        points = _score_track_answer(pool, round_row, track_row, session["user_id"])
+        run_write_query("""
+            INSERT INTO arena_track_answers (session_id, round_number, track_id, points_earned)
+            VALUES (:sid, :rn, :tid, :pts)
+            ON CONFLICT (session_id, round_number, track_id) DO NOTHING
+        """, dict(sid=session["id"], rn=round_row["round_number"], tid=track_row["track_id"], pts=points))
+        run_write_query("""
+            UPDATE arena_sessions SET total_score = total_score + :pts WHERE id = :sid
+        """, dict(pts=points, sid=session["id"]))
+        return points
+
+    def finalize_track_round(session: dict, pool: dict, round_row: dict, timed_out: bool = False):
+        """Closes out the current album — called on 100% completion, Pass/Give-up, or timeout.
+        Advances current_round so the next album (or the recap) loads."""
+        existing = run_write_query(
+            "SELECT id FROM arena_round_answers WHERE session_id=:sid AND round_number=:rn",
+            {"sid": session["id"], "rn": round_row["round_number"]}
+        )
+        if existing:
+            return
+
+        tracks = get_round_tracks(pool["id"], round_row["round_number"])
+        found_map = get_track_answers_map(session["id"], round_row["round_number"])
+        is_perfect = len(tracks) > 0 and len(found_map) == len(tracks)
+        round_points = sum(f["points_earned"] for f in found_map.values())
+
+        bonus = round(round_points * PERFECT_ALBUM_BONUS_FRAC) if (is_perfect and not timed_out) else 0
+
+        run_write_query("""
+            INSERT INTO arena_round_answers
+              (session_id, round_number, used_hint, is_correct, time_taken_ms,
+               speed_multiplier, ownership_multiplier, points_earned)
+            VALUES (:sid, :rn, FALSE, :correct, NULL, 1.0, 1.0, :bonus)
+            ON CONFLICT (session_id, round_number) DO NOTHING
+        """, dict(sid=session["id"], rn=round_row["round_number"], correct=is_perfect, bonus=bonus))
+
+        run_write_query("""
+            UPDATE arena_sessions SET
+              correct_count = correct_count + :found_inc,
+              total_score = total_score + :bonus,
+              best_round_score = GREATEST(best_round_score, :round_pts),
+              current_round = current_round + 1
+            WHERE id = :sid
+        """, dict(found_inc=len(found_map), bonus=bonus, round_pts=round_points + bonus, sid=session["id"]))
+
+    def get_tracks_totals(pool_id: int, session_id: int) -> tuple[int, int]:
+        """(tracks_found, tracks_total) across the whole match — used in the recap screen."""
+        total_rows = run_write_query("SELECT COUNT(*) AS c FROM arena_round_tracks WHERE pool_id=:p", {"p": pool_id})
+        found_rows = run_write_query("SELECT COUNT(*) AS c FROM arena_track_answers WHERE session_id=:s", {"s": session_id})
+        total = total_rows[0]["c"] if total_rows else 0
+        found = found_rows[0]["c"] if found_rows else 0
+        return found, total
 
     def finalize_session(session_id: int):
         rows = run_write_query("""
@@ -545,7 +777,17 @@ def init_arena_module(get_engine, run_query, run_write_query,
             val = st.session_state.get("arena_timeout_state")
             if not val: return
             ctx = _current_context()
-            pool = ctx[0] if ctx else None
+            if not ctx: return
+            pool, session, round_row = ctx
+            if round_row is None: return
+
+            if pool.get("game_type") == "tracks":
+                finalize_track_round(session, pool, round_row, timed_out=True)
+                if session["current_round"] >= pool["round_count"]:
+                    finalize_session(session["id"])
+                    st.query_params["arena_view"] = "recap"
+                return
+
             if pool and pool.get("difficulty") == "easy":
                 hint_active = False
             else:
@@ -780,6 +1022,22 @@ def init_arena_module(get_engine, run_query, run_write_query,
         transform: rotate(90deg) !important;
     }}
 
+    /* ΝΕΟ: "Guess the Album Tracks" — λίστα κομματιών & στοιχεία εισαγωγής */
+    .arena-track-list {{
+        display: flex; flex-direction: column; gap: 0.5rem;
+        margin: 1.2rem 0 1.4rem; max-height: 260px; overflow-y: auto; padding-right: 4px;
+    }}
+    .arena-track-row {{
+        display: flex; align-items: center; gap: 0.7rem;
+        background: rgba(255,255,255,0.04); border: 1px solid {BORDER}; border-radius: 10px;
+        padding: 0.55rem 0.9rem; transition: all 0.2s ease;
+    }}
+    .arena-track-num {{ color: {TEXT_DIM}; font-weight: 700; font-size: 0.8rem; width: 22px; flex-shrink: 0; }}
+    .arena-track-name {{ color: {TEXT}; font-weight: 600; font-size: 0.9rem; flex: 1; text-align: left; }}
+    .arena-track-hidden {{ color: {TEXT_DIM}; letter-spacing: 0.1em; }}
+    .arena-track-pts {{ color: {GREEN}; font-weight: 800; font-size: 0.8rem; }}
+    .arena-track-found {{ background: rgba(29,185,84,0.10); border-color: rgba(29,185,84,0.35); }}
+
     body:has(.st-key-arena_modal_overlay) {{ overflow: hidden !important; }}
     </style>
     """
@@ -908,23 +1166,31 @@ def init_arena_module(get_engine, run_query, run_write_query,
             friend_user_id = user_dict[friend_username]
 
         round_count = _segment_control(
-            "How many rounds?",
+            "How many albums?" if game_type == "tracks" else "How many rounds?",
             [(5, "5"), (10, "10"), (20, "20")],
             "arena_round_count_seg", 10,
         )
 
-        st.markdown("<div style='height:1.4rem;'></div>", unsafe_allow_html=True)
+        difficulty = "hard"
+        if game_type != "tracks":
+            st.markdown("<div style='height:1.4rem;'></div>", unsafe_allow_html=True)
 
-        difficulty = _segment_control(
-            "Difficulty",
-            [("easy", "🟢 Easy"), ("hard", "🔴 Hard")],
-            "arena_difficulty_seg", "hard",
-            accent_colors={"easy": GREEN, "hard": "#ef4444"},
-        )
-        caption = ("Always 4 multiple-choice options — no typing required."
-                   if difficulty == "easy" else
-                   "Type the exact name. Stuck? Spend a hint to reveal 4 options.")
-        st.markdown(f'<div class="arena-segment-caption">{caption}</div>', unsafe_allow_html=True)
+            difficulty = _segment_control(
+                "Difficulty",
+                [("easy", "🟢 Easy"), ("hard", "🔴 Hard")],
+                "arena_difficulty_seg", "hard",
+                accent_colors={"easy": GREEN, "hard": "#ef4444"},
+            )
+            caption = ("Always 4 multiple-choice options — no typing required."
+                       if difficulty == "easy" else
+                       "Type the exact name. Stuck? Spend a hint to reveal 4 options.")
+            st.markdown(f'<div class="arena-segment-caption">{caption}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(
+                f'<div class="arena-segment-caption">Type every track name on each album before the '
+                f'clock runs out. Rarely-played deep cuts are worth the most points.</div>',
+                unsafe_allow_html=True
+            )
 
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Start Game", key="arena_start_btn", type="primary", use_container_width=True):
@@ -976,6 +1242,113 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
         render_reveal_continue_script(reveal["round_key"])
 
+    def _render_tracks_gameplay(user_id: int, pool_id: int, pool: dict, session_id: int):
+        rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
+        session = dict(rows[0])
+
+        if session["current_round"] > pool["round_count"]:
+            finalize_session(session_id)
+            st.query_params["arena_view"] = "recap"
+            st.rerun()
+            return
+
+        round_row = get_round(pool_id, session["current_round"])
+        tracks = get_round_tracks(pool_id, session["current_round"])
+        found_map = get_track_answers_map(session_id, session["current_round"])
+        total_tracks, found_count = len(tracks), len(found_map)
+
+        game_meta = GAME_META["tracks"]
+        st.markdown(
+            f'<div class="arena-kicker-wrap"><span class="arena-kicker">{game_meta["icon"]} {game_meta["label"]}</span></div>'
+            f'<div class="arena-title">{escape(round_row["item_name"])}</div>'
+            f'<div class="arena-subtitle">Album {session["current_round"]} '
+            f'<span style="color:{TEXT_DIM};">/ {pool["round_count"]}</span> &nbsp;·&nbsp; '
+            f'Score: <b>{session["total_score"]}</b> &nbsp;·&nbsp; Found: <b>{found_count}/{total_tracks}</b></div>',
+            unsafe_allow_html=True
+        )
+
+        start_key = f"arena_round_start_{session_id}_{session['current_round']}"
+        if start_key not in st.session_state:
+            st.session_state[start_key] = time.time()
+        started_at = st.session_state[start_key]
+
+        st.markdown(f'''
+        <div class="arena-progress-track"><div class="arena-progress-bar" id="arena-progress-bar"></div></div>
+        <div class="arena-reveal-frame" style="max-width:180px;"><img id="arena-reveal-img" src="{escape(round_row["image_url"] or "")}" /></div>
+        ''', unsafe_allow_html=True)
+
+        round_key = f"{session_id}_{session['current_round']}"
+        render_round_timer_script(round_key, started_at * 1000)
+
+        rows_html = ""
+        for i, trk in enumerate(tracks, start=1):
+            found = found_map.get(trk["track_id"])
+            if found:
+                rows_html += (
+                    f'<div class="arena-track-row arena-track-found">'
+                    f'<span class="arena-track-num">{i}.</span>'
+                    f'<span class="arena-track-name">{escape(trk["track_name"])}</span>'
+                    f'<span class="arena-track-pts">+{found["points_earned"]}</span>'
+                    f'</div>'
+                )
+            else:
+                rows_html += (
+                    f'<div class="arena-track-row">'
+                    f'<span class="arena-track-num">{i}.</span>'
+                    f'<span class="arena-track-name arena-track-hidden">?????</span>'
+                    f'</div>'
+                )
+        st.markdown(f'<div class="arena-track-list">{rows_html}</div>', unsafe_allow_html=True)
+
+        # Nonce-suffixed key so the input visibly clears after every guess
+        nonce_key = f"arena_tracks_nonce_{round_key}"
+        nonce = st.session_state.get(nonce_key, 0)
+        guess_key = f"arena_tracks_guess_{round_key}_{nonce}"
+
+        def _on_guess_change():
+            guess_val = st.session_state.get(guess_key, "")
+            if not guess_val.strip():
+                return
+            cur_rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
+            cur_session = dict(cur_rows[0])
+            cur_round_row = get_round(pool_id, cur_session["current_round"])
+            cur_tracks = get_round_tracks(pool_id, cur_session["current_round"])
+            cur_found = get_track_answers_map(session_id, cur_session["current_round"])
+
+            for trk in cur_tracks:
+                if trk["track_id"] in cur_found:
+                    continue
+                if _answer_matches(guess_val, trk["track_name"]):
+                    elapsed_ms = int((time.time() - st.session_state.get(start_key, time.time())) * 1000)
+                    pts = submit_track_answer(cur_session, pool, cur_round_row, trk, elapsed_ms)
+                    st.toast(f"✅ {trk['track_name']} (+{pts} pts)", icon="🎯")
+
+                    new_found = get_track_answers_map(session_id, cur_session["current_round"])
+                    if len(new_found) >= len(cur_tracks):
+                        finalize_track_round(cur_session, pool, cur_round_row)
+                        refreshed = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})[0]
+                        if refreshed["current_round"] > pool["round_count"]:
+                            finalize_session(session_id)
+                            st.query_params["arena_view"] = "recap"
+                    break
+            st.session_state[nonce_key] = nonce + 1
+
+        st.text_input(
+            "Type a track name…", key=guess_key,
+            placeholder="Type a track name and press Enter…",
+            label_visibility="collapsed", on_change=_on_guess_change
+        )
+
+        c_pass, _ = st.columns([1, 2])
+        with c_pass:
+            if st.button("🏳️ Give up on this album", key=f"arena_tracks_giveup_{round_key}", use_container_width=True):
+                finalize_track_round(session, pool, round_row)
+                refreshed = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})[0]
+                if refreshed["current_round"] > pool["round_count"]:
+                    finalize_session(session_id)
+                    st.query_params["arena_view"] = "recap"
+                st.rerun()
+
     def _render_gameplay(user_id: int):
         pool_id = st.session_state.get("arena_pool_id")
         session_id = st.session_state.get("arena_session_id")
@@ -985,7 +1358,11 @@ def init_arena_module(get_engine, run_query, run_write_query,
             return
 
         pool = get_pool(pool_id)
-        
+
+        if pool.get("game_type") == "tracks":
+            _render_tracks_gameplay(user_id, pool_id, pool, session_id)
+            return
+
         rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
         session = dict(rows[0])
 
@@ -1114,7 +1491,11 @@ def init_arena_module(get_engine, run_query, run_write_query,
         )
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Score", session["total_score"])
-        c2.metric("Correct", f"{session['correct_count']}/{pool['round_count']}")
+        if pool.get("game_type") == "tracks":
+            found, total = get_tracks_totals(pool["id"], session["id"])
+            c2.metric("Tracks Found", f"{found}/{total}")
+        else:
+            c2.metric("Correct", f"{session['correct_count']}/{pool['round_count']}")
         c3.metric("Best Round", session["best_round_score"])
         if pool.get("difficulty") == "easy":
             c4.metric("Difficulty", "🟢 Easy")
