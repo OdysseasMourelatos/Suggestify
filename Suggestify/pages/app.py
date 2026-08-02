@@ -29,7 +29,6 @@ from ui import (counter_span, inject_counter_script, load_css, inject_custom_css
 from share_stats import render_share_stats_button
 from ratings import init_ratings_module
 from arena import init_arena_module
-from letter_roulette import init_letter_game_module
 
 st.set_page_config(page_title="Suggestify", page_icon="🎧", layout="wide", initial_sidebar_state="collapsed")
 
@@ -163,7 +162,6 @@ R = init_ratings_module(get_engine, run_query, run_rating_query, themed, GREEN, 
                          get_rating_cache_gen=get_rating_cache_gen, bump_rating_cache_gen=bump_rating_cache_gen)
 
 A = init_arena_module(get_engine, run_query, run_write_query, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
-LG = init_letter_game_module(get_engine, run_query, run_write_query, GREEN, TEXT, TEXT_MID, TEXT_DIM, BG, CARD, BORDER)
 st.markdown("""
     <style>
     div[data-testid="stTextInput"]:has(input[aria-label="hidden_rate_input"]),
@@ -171,9 +169,9 @@ st.markdown("""
     div[data-testid="stTextInput"]:has(input[aria-label="arena_timeout_input"]),
     div[data-testid="stTextInput"]:has(input[aria-label="arena_mc_input"]),
     div[data-testid="stTextInput"]:has(input[aria-label="arena_reveal_continue_input"]),
-    div[data-testid="stTextInput"]:has(input[aria-label="lg_rally_timeout_input"]),
-    div[data-testid="stTextInput"]:has(input[aria-label="lg_blitz_timeout_input"]),
-    div[data-testid="stTextInput"]:has(input[aria-label="lg_rally_poll_input"]) {
+    div[data-testid="stTextInput"]:has(input[aria-label="arena_letter_rally_timeout_input"]),
+    div[data-testid="stTextInput"]:has(input[aria-label="arena_letter_blitz_timeout_input"]),
+    div[data-testid="stTextInput"]:has(input[aria-label="arena_letter_poll_input"]) {
         position: fixed !important;
         top: -1000px !important;
         left: -1000px !important;
@@ -477,7 +475,6 @@ hidden_bump_worker()
 
 A.inject_arena_script()
 A.arena_hidden_worker()
-LG.letter_game_hidden_worker()
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None, redirect_info: dict = None):
     header_df = run_query(f"""
@@ -830,8 +827,6 @@ preset_options = {"all": "♾️ All Time", "wrapped": "🎁 Wrapped", "month": 
 
 view_state = get_current_view()
 A.render_modal(selected_user_id, user_dict)
-LG.render_modal(selected_user_id, user_dict)
-
 current_tab = view_state["tab"]
 detail_type = view_state["type"]
 detail_id = view_state["id"]
