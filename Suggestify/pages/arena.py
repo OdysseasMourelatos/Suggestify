@@ -16,8 +16,10 @@ import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
 
-# === ΧΡΟΝΟΣ ΑΝΑ ΓΥΡΟ ΣΤΑ 25 ΔΕΥΤΕΡΟΛΕΠΤΑ ===
-REVEAL_SECONDS = 25
+# === ΧΡΟΝΟΣ ΑΝΑ ΓΥΡΟ ===
+REVEAL_SECONDS_DEFAULT = 25
+REVEAL_SECONDS_TRACKS = 150     # Πολύ περισσότερος χρόνος για το Tracks mode
+
 ELIGIBILITY_FLOOR = 15          # min eligible items per game_type before Arena unlocks for a user
 HINT_BUDGET = {5: 1, 10: 2, 20: 4}
 TIER_TARGET_FRAC = {"core": 0.35, "regular": 0.35, "deep_cut": 0.30}
@@ -29,9 +31,12 @@ PERFECT_ALBUM_BONUS_FRAC = 0.2  # +20% bonus points when 100% of an album's trac
 GAME_META = {
     "cover":  {"icon": "🖼️", "label": "Guess the Cover",  "desc": "Album art, progressively revealed."},
     "artist": {"icon": "🎤", "label": "Guess the Artist", "desc": "Artist photos, progressively revealed."},
-    "tracks": {"icon": "📀", "label": "Guess the Album Tracks",
-               "desc": "Name every track on a full album before the clock runs out."},
+    "tracks": {"icon": "📀", "label": "Guess the Album Tracks", "desc": "Name every track on a full album before the clock runs out."},
+    "letter": {"icon": "🔤", "label": "Letter Roulette", "desc": "Name songs starting with a random letter before time runs out."}
 }
+
+def get_round_duration(game_type: str) -> int:
+    return REVEAL_SECONDS_TRACKS if game_type == "tracks" else REVEAL_SECONDS_DEFAULT
 
 # ─────────────────────────────────────────────────────────────────────────
 # Schema
@@ -203,15 +208,23 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
     def _eligible_albums_pool(user_id: int) -> pd.DataFrame:
         """Albums the user has actually listened to, that have more than 1 track (excludes singles)."""
+        # OPTIMIZED: Isolate the user's stream counts in a CTE to avoid a massive nested loop join
         df = run_query("""
+            WITH user_stream_counts AS (
+                SELECT song_id, COUNT(*) AS stream_count
+                FROM streams
+                WHERE user_id = :uid
+                GROUP BY song_id
+            )
             SELECT al.id AS item_id, al.title AS item_name, MAX(so.image_url) AS image_url,
                    COUNT(DISTINCT so.id) AS total_tracks,
-                   COUNT(s.id) AS stream_count
+                   SUM(usc.stream_count) AS stream_count
             FROM songs so
+            JOIN user_stream_counts usc ON usc.song_id = so.id
             JOIN albums al ON al.id = so.album_id
-            LEFT JOIN streams s ON s.song_id = so.id AND s.user_id = :uid
+            WHERE so.image_url IS NOT NULL
             GROUP BY al.id, al.title
-            HAVING COUNT(DISTINCT so.id) > 1 AND COUNT(s.id) >= 10
+            HAVING COUNT(DISTINCT so.id) > 1 AND SUM(usc.stream_count) >= 10
             ORDER BY stream_count DESC
         """, {"uid": user_id})
 
@@ -233,41 +246,15 @@ def init_arena_module(get_engine, run_query, run_write_query,
         df["tier"] = tiers
         return df
 
-    def _build_album_tracklist(user_id: int, album_id: int) -> list[dict]:
-        """Full tracklist for one album, tiered by the user's per-track stream count
-        (unstreamed tracks naturally fall into 'deep_cut' -> highest point value)."""
-        df = run_query("""
-            SELECT so.id AS track_id, so.title AS track_name,
-                   COUNT(s.id) AS stream_count
-            FROM songs so
-            LEFT JOIN streams s ON s.song_id = so.id AND s.user_id = :uid
-            WHERE so.album_id = :aid
-            GROUP BY so.id, so.title
-            ORDER BY so.id
-        """, {"uid": user_id, "aid": album_id})
-        if df.empty:
-            return []
-
-        n = len(df)
-        df = df.sort_values("stream_count", ascending=False).reset_index(drop=True)
-        tiers = []
-        for i in range(n):
-            pct = i / n
-            if pct < 0.20:
-                tiers.append("core")
-            elif pct < 0.70:
-                tiers.append("regular")
-            else:
-                tiers.append("deep_cut")
-        df["tier"] = tiers
-        return df.to_dict("records")
-
     def is_arena_eligible(user_id: int) -> dict:
         out = {}
         for gt in ("cover", "artist"):
             pool = _eligible_pool(user_id, gt)
             out[gt] = len(pool) >= ELIGIBILITY_FLOOR
         out["tracks"] = len(_eligible_albums_pool(user_id)) >= ELIGIBILITY_FLOOR
+        
+        out["letter"] = True 
+        
         return out
 
     def _stratified_sample(pool: pd.DataFrame, n: int) -> list[dict]:
@@ -333,6 +320,48 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 for it in chosen:
                     it["owner_user_id"] = host_user_id
 
+            # -- BULK FETCH TRACKS TO SOLVE N+1 QUERY PERFORMANCE ISSUE --
+            tracklists_by_item = {}
+            for uid in set(it["owner_user_id"] for it in chosen):
+                u_aids = tuple(int(it["item_id"]) for it in chosen if it["owner_user_id"] == uid)
+                if not u_aids: continue
+                
+                
+                if len(u_aids) == 1:
+                    df_tracks = run_query("""
+                    WITH user_streams AS (
+                        SELECT song_id, COUNT(*) as stream_count
+                        FROM streams
+                        WHERE user_id = :uid
+                        GROUP BY song_id
+                    )
+                    SELECT so.album_id, so.id AS track_id, so.title AS track_name,
+                           us.stream_count
+                    FROM songs so
+                    JOIN user_streams us ON us.song_id = so.id
+                    WHERE so.album_id IN :aids
+                """, {"uid": uid, "aids": tuple(u_aids)})
+                else:
+                    df_tracks = run_query("""
+                        SELECT so.album_id, so.id AS track_id, so.title AS track_name,
+                               (SELECT COUNT(*) FROM streams WHERE song_id = so.id AND user_id = :uid) AS stream_count
+                        FROM songs so
+                        WHERE so.album_id IN :aids
+                    """, {"uid": uid, "aids": tuple(u_aids)})
+                    
+                if not df_tracks.empty:
+                    for aid, group in df_tracks.groupby("album_id"):
+                        group = group.sort_values("stream_count", ascending=False).reset_index(drop=True)
+                        n = len(group)
+                        tiers = []
+                        for idx in range(n):
+                            pct = idx / max(1, n)
+                            if pct < 0.20: tiers.append("core")
+                            elif pct < 0.70: tiers.append("regular")
+                            else: tiers.append("deep_cut")
+                        group["tier"] = tiers
+                        tracklists_by_item[(uid, aid)] = group.to_dict("records")
+
             rows = run_write_query("""
                 INSERT INTO arena_pools (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id)
                 VALUES (:mode, :game_type, :round_count, :difficulty, :hint_budget, :host_user_id, :friend_user_id)
@@ -352,7 +381,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
                           item_id=int(item["item_id"]), item_name=item["item_name"], image_url=item["image_url"],
                           owner_user_id=item["owner_user_id"], tier=item["tier"]))
 
-                tracklist = _build_album_tracklist(item["owner_user_id"], int(item["item_id"]))
+                tracklist = tracklists_by_item.get((item["owner_user_id"], int(item["item_id"])), [])
                 for pos, trk in enumerate(tracklist, start=1):
                     run_write_query("""
                         INSERT INTO arena_round_tracks
@@ -449,7 +478,9 @@ def init_arena_module(get_engine, run_query, run_write_query,
     def _score_answer(pool: dict, round_row: dict, session_user_id: int,
                        is_correct: bool, used_hint: bool, time_taken_ms: int):
         if not is_correct: return 0.0, 1.0, 0
-        frac = min(max(time_taken_ms / (REVEAL_SECONDS * 1000), 0.0), 1.0)
+        dur_sec = get_round_duration(pool.get("game_type", "cover"))
+        frac = min(max(time_taken_ms / (dur_sec * 1000), 0.0), 1.0)
+        
         if frac <= 0.25: speed_mult = 2.0
         elif frac <= 0.50: speed_mult = 1.5
         elif frac <= 0.75: speed_mult = 1.0
@@ -659,14 +690,16 @@ def init_arena_module(get_engine, run_query, run_write_query,
         </script>
         """, height=0)
 
-    def render_round_timer_script(round_key: str, started_at_ms: float):
+    def render_round_timer_script(round_key: str, started_at_ms: float, duration_sec: int, game_type: str):
         components.html(f"""
         <script>
         (function() {{
             const doc = window.parent.document;
             const startedAt = {started_at_ms};
-            const durationMs = {REVEAL_SECONDS * 1000};
+            const durationMs = {duration_sec * 1000};
             const roundKey = {json.dumps(round_key)};
+            const gameType = {json.dumps(game_type)};
+            
             if (doc.__arenaRoundKey === roundKey) return;
             doc.__arenaRoundKey = roundKey;
             doc.__arenaTimedOut = false;
@@ -695,8 +728,14 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 const frac = Math.min((now - startedAt) / durationMs, 1);
                 const bar = doc.getElementById('arena-progress-bar');
                 const img = doc.getElementById('arena-reveal-img');
+                
                 if (bar) bar.style.width = ((1 - frac) * 100) + '%';
-                if (img) img.style.filter = 'blur(' + (22 * (1 - frac)) + 'px)';
+                
+                // ΔΕΝ εφαρμόζουμε blur αν το game type είναι "tracks"
+                if (img && gameType !== 'tracks') {{
+                    img.style.filter = 'blur(' + (22 * (1 - frac)) + 'px)';
+                }}
+                
                 if (frac >= 1 && !doc.__arenaTimedOut) {{
                     doc.__arenaTimedOut = true;
                     clearInterval(doc.__arenaInterval);
@@ -782,20 +821,18 @@ def init_arena_module(get_engine, run_query, run_write_query,
             if round_row is None: return
 
             if pool.get("game_type") == "tracks":
+                st.session_state["_arena_tracks_reveal"] = session["current_round"]
                 finalize_track_round(session, pool, round_row, timed_out=True)
-                if session["current_round"] >= pool["round_count"]:
-                    finalize_session(session["id"])
-                    st.query_params["arena_view"] = "recap"
                 return
 
             if pool and pool.get("difficulty") == "easy":
                 hint_active = False
             else:
                 hint_active = st.session_state.get(
-                    f"arena_hint_{st.session_state.get('arena_session_id')}_"
-                    f"{st.session_state.get('arena_round_no', 1)}", False
+                    f"arena_hint_{st.session_state.get('arena_session_id')}_{st.session_state.get('arena_round_no', 1)}", False
                 )
-            _resolve(is_correct=False, used_hint=hint_active, time_taken_ms=REVEAL_SECONDS * 1000)
+            dur_sec = get_round_duration(pool.get("game_type", "cover"))
+            _resolve(is_correct=False, used_hint=hint_active, time_taken_ms=dur_sec * 1000)
 
         st.text_input("arena_timeout_input", key="arena_timeout_state",
                        label_visibility="collapsed", on_change=on_timeout)
@@ -1037,11 +1074,64 @@ def init_arena_module(get_engine, run_query, run_write_query,
     .arena-track-hidden {{ color: {TEXT_DIM}; letter-spacing: 0.1em; }}
     .arena-track-pts {{ color: {GREEN}; font-weight: 800; font-size: 0.8rem; }}
     .arena-track-found {{ background: rgba(29,185,84,0.10); border-color: rgba(29,185,84,0.35); }}
-
+    .arena-track-missed {{ background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); }}
+    .arena-track-missed .arena-track-name {{ color: #f87171; }}
     body:has(.st-key-arena_modal_overlay) {{ overflow: hidden !important; }}
     </style>
     """
+    def _render_tracks_reveal(pool: dict, session: dict, reveal_round_no: int):
+        round_row = get_round(pool["id"], reveal_round_no)
+        tracks = get_round_tracks(pool["id"], reveal_round_no)
+        found_map = get_track_answers_map(session["id"], reveal_round_no)
+        total_tracks, found_count = len(tracks), len(found_map)
+        
+        game_meta = GAME_META["tracks"]
+        st.markdown(
+            f'<div class="arena-kicker-wrap"><span class="arena-kicker">{game_meta["icon"]} {game_meta["label"]}</span></div>'
+            f'<div class="arena-title">{escape(round_row["item_name"])}</div>'
+            f'<div class="arena-subtitle">Album {reveal_round_no} '
+            f'<span style="color:{TEXT_DIM};">/ {pool["round_count"]}</span> &nbsp;·&nbsp; '
+            f'Found: <b>{found_count}/{total_tracks}</b></div>',
+            unsafe_allow_html=True
+        )
 
+        st.markdown(f'''
+        <div class="arena-reveal-frame" style="max-width:180px;"><img src="{escape(round_row["image_url"] or "")}" /></div>
+        ''', unsafe_allow_html=True)
+
+        rows_html = ""
+        for i, trk in enumerate(tracks, start=1):
+            if trk["track_id"] in found_map:
+                pts = found_map[trk["track_id"]]["points_earned"]
+                rows_html += (
+                    f'<div class="arena-track-row arena-track-found">'
+                    f'<span class="arena-track-num">{i}.</span>'
+                    f'<span class="arena-track-name">{escape(trk["track_name"])}</span>'
+                    f'<span class="arena-track-pts">+{pts}</span>'
+                    f'</div>'
+                )
+            else:
+                rows_html += (
+                    f'<div class="arena-track-row arena-track-missed">'
+                    f'<span class="arena-track-num">{i}.</span>'
+                    f'<span class="arena-track-name">{escape(trk["track_name"])}</span>'
+                    f'<span class="arena-track-pts" style="color: #f87171;">Missed</span>'
+                    f'</div>'
+                )
+        st.markdown(f'<div class="arena-track-list">{rows_html}</div><br>', unsafe_allow_html=True)
+
+        is_last = reveal_round_no >= pool["round_count"]
+        btn_label = "🏁 See Results" if is_last else "Continue ⏭️"
+        
+        _, c_btn, _ = st.columns([1, 2, 1])
+        with c_btn:
+            if st.button(btn_label, key=f"arena_tracks_continue_{reveal_round_no}", use_container_width=True, type="primary"):
+                del st.session_state["_arena_tracks_reveal"]
+                if is_last:
+                    finalize_session(session["id"])
+                    st.query_params["arena_view"] = "recap"
+                st.rerun()
+                
     def _close_arena():
         st.query_params.pop("arena", None)
         st.query_params.pop("arena_view", None)
@@ -1076,6 +1166,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 elif view == "recap":
                     _render_recap(selected_user_id)
 
+    
     def _modal_header(kicker: str, title: str, subtitle: str | None = None):
         sub_html = f'<div class="arena-subtitle">{subtitle}</div>' if subtitle else ""
         st.markdown(
@@ -1114,9 +1205,23 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 )
                 disabled = not ok
                 if cols[1].button("Play" if ok else "Not enough data", key=f"arena_game_{game_type}", disabled=disabled):
-                    st.session_state["arena_game_type"] = game_type
-                    st.query_params["arena_view"] = "rounds"
-                    st.rerun()
+                    if game_type == "letter":
+                        # 1. Περνάμε την επιλογή (Solo/Friends) από το Arena στο Letter Roulette
+                        st.session_state["lg_mode"] = st.session_state.get("arena_mode", "solo")
+                        
+                        # 2. Κλείνουμε το Arena modal
+                        st.query_params.pop("arena", None)
+                        st.query_params.pop("arena_view", None)
+                        
+                        # 3. Ανοίγουμε το Letter Roulette κάνοντας SKIP την πρώτη οθόνη
+                        st.query_params["letter_game"] = "1"
+                        st.query_params["lg_view"] = "version" 
+                        st.rerun()
+                    else:
+                        # Standard Arena behavior
+                        st.session_state["arena_game_type"] = game_type
+                        st.query_params["arena_view"] = "rounds"
+                        st.rerun()
 
     def _segment_control(label: str, options: list[tuple], state_key: str, default,
                           accent_colors: dict | None = None):
@@ -1278,7 +1383,8 @@ def init_arena_module(get_engine, run_query, run_write_query,
         ''', unsafe_allow_html=True)
 
         round_key = f"{session_id}_{session['current_round']}"
-        render_round_timer_script(round_key, started_at * 1000)
+        dur_sec = get_round_duration(pool.get("game_type", "tracks"))
+        render_round_timer_script(round_key, started_at * 1000, dur_sec, pool.get("game_type", "tracks"))
 
         rows_html = ""
         for i, trk in enumerate(tracks, start=1):
@@ -1309,28 +1415,29 @@ def init_arena_module(get_engine, run_query, run_write_query,
             guess_val = st.session_state.get(guess_key, "")
             if not guess_val.strip():
                 return
-            cur_rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
-            cur_session = dict(cur_rows[0])
-            cur_round_row = get_round(pool_id, cur_session["current_round"])
-            cur_tracks = get_round_tracks(pool_id, cur_session["current_round"])
-            cur_found = get_track_answers_map(session_id, cur_session["current_round"])
-
-            for trk in cur_tracks:
-                if trk["track_id"] in cur_found:
+            
+            # OPTIMIZED: Removed 4 redundant DB calls. We reuse outer-scope variables 
+            # (session, pool, round_row, tracks, found_map) directly.
+            
+            for trk in tracks:
+                if trk["track_id"] in found_map:
                     continue
+                
                 if _answer_matches(guess_val, trk["track_name"]):
-                    elapsed_ms = int((time.time() - st.session_state.get(start_key, time.time())) * 1000)
-                    pts = submit_track_answer(cur_session, pool, cur_round_row, trk, elapsed_ms)
-                    st.toast(f"✅ {trk['track_name']} (+{pts} pts)", icon="🎯")
-
-                    new_found = get_track_answers_map(session_id, cur_session["current_round"])
-                    if len(new_found) >= len(cur_tracks):
-                        finalize_track_round(cur_session, pool, cur_round_row)
-                        refreshed = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})[0]
-                        if refreshed["current_round"] > pool["round_count"]:
-                            finalize_session(session_id)
-                            st.query_params["arena_view"] = "recap"
+                    elapsed_ms = int((time.time() - started_at) * 1000)
+                    pts = submit_track_answer(session, pool, round_row, trk, elapsed_ms)
+                    
+                    if pts > 0:
+                        st.toast(f"✅ {trk['track_name']} (+{pts} pts)", icon="🎯")
+                        # Update the local dictionary to track progression instantly
+                        found_map[trk["track_id"]] = {"points_earned": pts}
+                        
+                        # Immediately close out the round if the album is complete
+                        if len(found_map) >= len(tracks):
+                            st.session_state["_arena_tracks_reveal"] = session["current_round"]
+                            finalize_track_round(session, pool, round_row)
                     break
+                    
             st.session_state[nonce_key] = nonce + 1
 
         st.text_input(
@@ -1339,14 +1446,12 @@ def init_arena_module(get_engine, run_query, run_write_query,
             label_visibility="collapsed", on_change=_on_guess_change
         )
 
-        c_pass, _ = st.columns([1, 2])
+        # Changed from [1, 2] to [1, 2, 1] to center the button
+        _, c_pass, _ = st.columns([1, 2, 1])
         with c_pass:
             if st.button("🏳️ Give up on this album", key=f"arena_tracks_giveup_{round_key}", use_container_width=True):
+                st.session_state["_arena_tracks_reveal"] = session["current_round"]
                 finalize_track_round(session, pool, round_row)
-                refreshed = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})[0]
-                if refreshed["current_round"] > pool["round_count"]:
-                    finalize_session(session_id)
-                    st.query_params["arena_view"] = "recap"
                 st.rerun()
 
     def _render_gameplay(user_id: int):
@@ -1358,6 +1463,14 @@ def init_arena_module(get_engine, run_query, run_write_query,
             return
 
         pool = get_pool(pool_id)
+        rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
+        session = dict(rows[0])
+
+        # ΕΛΕΓΧΟΣ ΓΙΑ TRACKS REVEAL
+        tracks_reveal_no = st.session_state.get("_arena_tracks_reveal")
+        if pool.get("game_type") == "tracks" and tracks_reveal_no:
+            _render_tracks_reveal(pool, session, tracks_reveal_no)
+            return
 
         if pool.get("game_type") == "tracks":
             _render_tracks_gameplay(user_id, pool_id, pool, session_id)
@@ -1410,7 +1523,8 @@ def init_arena_module(get_engine, run_query, run_write_query,
         ''', unsafe_allow_html=True)
 
         round_key = f"{session_id}_{session['current_round']}"
-        render_round_timer_script(round_key, started_at * 1000)
+        dur_sec = get_round_duration(pool.get("game_type", "cover"))
+        render_round_timer_script(round_key, started_at * 1000, dur_sec, pool.get("game_type", "cover"))
 
         hint_key = f"arena_hint_{session_id}_{session['current_round']}"
         hint_active = st.session_state.get(hint_key, False)
@@ -1522,6 +1636,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
                       "arena_round_count_seg", "arena_difficulty_seg"):
                 st.session_state.pop(k, None)
             st.rerun()
+            
 
     return SimpleNamespace(
         inject_arena_script=inject_arena_script,
