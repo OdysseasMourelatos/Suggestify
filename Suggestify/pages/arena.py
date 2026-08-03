@@ -9,6 +9,7 @@ import random
 import time
 import difflib
 import datetime
+import re
 from html import escape
 from types import SimpleNamespace
 
@@ -19,9 +20,10 @@ import streamlit.components.v1 as components
 # === ΧΡΟΝΟΣ ΑΝΑ ΓΥΡΟ ===
 REVEAL_SECONDS_DEFAULT = 25
 REVEAL_SECONDS_TRACKS = 150     # Πολύ περισσότερος χρόνος για το Tracks mode
-RALLY_TURN_SECONDS = 60         # Letter Roulette — Rally: seconds per turn
-BLITZ_SECONDS = 120             # Letter Roulette — Blitz: single countdown
+RALLY_TURN_SECONDS = 60         # Letter Roulette / Discography Duel — Rally: seconds per turn
+BLITZ_SECONDS = 120             # Letter Roulette / Discography Duel — Blitz: single countdown
 LETTER_MIN_POOL = 6             # a letter needs >= this many eligible songs to be selectable
+DISCOG_MIN_POOL = 6             # an artist needs >= this many eligible songs to be selectable
 
 ELIGIBILITY_FLOOR = 15          # min eligible items per game_type before Arena unlocks for a user
 HINT_BUDGET = {5: 1, 10: 2, 20: 4}
@@ -35,7 +37,8 @@ GAME_META = {
     "cover":  {"icon": "🖼️", "label": "Guess the Cover",  "desc": "Album art, progressively revealed."},
     "artist": {"icon": "🎤", "label": "Guess the Artist", "desc": "Artist photos, progressively revealed."},
     "tracks": {"icon": "📀", "label": "Guess the Album Tracks", "desc": "Name every track on a full album before the clock runs out."},
-    "letter": {"icon": "🔤", "label": "Letter Roulette", "desc": "Name songs starting with a random letter before time runs out."}
+    "letter": {"icon": "🔤", "label": "Letter Roulette", "desc": "Name songs starting with a random letter before time runs out."},
+    "discog": {"icon": "🎙️", "label": "Discography Duel", "desc": "Name as many songs as you can by a random artist from your library before time runs out."},
 }
 
 def get_round_duration(game_type: str) -> int:
@@ -115,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_arena_round_answers_session ON arena_round_answer
 -- Κεντρικά Check Constraints 
 ALTER TABLE arena_pools DROP CONSTRAINT IF EXISTS arena_pools_game_type_check;
 ALTER TABLE arena_pools ADD CONSTRAINT arena_pools_game_type_check
-    CHECK (game_type IN ('cover','artist','tracks','letter'));
+    CHECK (game_type IN ('cover','artist','tracks','letter','discog'));
 
 ALTER TABLE arena_pools DROP CONSTRAINT IF EXISTS arena_pools_round_count_check;
 ALTER TABLE arena_pools ADD CONSTRAINT arena_pools_round_count_check
@@ -161,6 +164,11 @@ ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS letter_version VARCHAR(10) CHEC
 ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS turn_number INT NOT NULL DEFAULT 1;
 ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS turn_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
 ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS loser_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+
+-- Discography Duel (shares the letter_version / turn_* / valid_pool plumbing above)
+ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS target_artist_id INTEGER REFERENCES artists(id) ON DELETE CASCADE;
+ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS target_artist_name VARCHAR(255);
+ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS target_artist_image VARCHAR(500);
 
 CREATE TABLE IF NOT EXISTS arena_letter_answers (
     id                BIGSERIAL PRIMARY KEY,
@@ -241,7 +249,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
     def _eligible_albums_pool(user_id: int) -> pd.DataFrame:
         """Albums the user has actually listened to, that have more than 1 track (excludes singles)."""
-        # OPTIMIZED: Isolate the user's stream counts in a CTE to avoid a massive nested loop join
         df = run_query("""
             WITH user_stream_counts AS (
                 SELECT song_id, COUNT(*) AS stream_count
@@ -280,20 +287,15 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return df
 
     # ─────────────────────────────────────────────────────────────────
-    # Letter Roulette — pool building (all filtering happens in SQL)
+    # Letter Roulette — pool building
     # ─────────────────────────────────────────────────────────────────
 
     def _letter_uid_filter(user_ids: list[int]) -> tuple[str, dict]:
-        """(sql_clause, params) for streams.user_id — handles solo (1 id)
-        and friends (2 ids) explicitly rather than relying on array binding."""
         if len(user_ids) == 1:
             return "= :uid0", {"uid0": int(user_ids[0])}
         return "IN (:uid0, :uid1)", {"uid0": int(user_ids[0]), "uid1": int(user_ids[1])}
 
     def _letter_counts_by_alpha(user_ids: list[int]) -> dict:
-        """One indexed query: distinct-song count per starting letter, scoped
-        to the given user(s)' streaming history. Powers both eligibility
-        gating and picking a target letter with enough depth for a round."""
         clause, params = _letter_uid_filter(user_ids)
         df = run_query(f"""
             WITH scoped_songs AS (
@@ -316,15 +318,9 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return [l for l, c in counts.items() if c >= LETTER_MIN_POOL]
 
     def _letter_eligible_friend_ids(user_id: int, candidate_ids: list[int]) -> list[int]:
-        """Of the candidate friend ids, which produce an eligible combined
-        pool with user_id? Used to grey out unplayable duel partners."""
         return [fid for fid in candidate_ids if len(_letter_eligible_letters([user_id, fid])) > 0]
 
     def _letter_fetch_pool(user_ids: list[int], letter: str) -> list[dict]:
-        """The single high-performance query: songs starting with `letter`
-        that the scoped user(s) actually streamed, tiered by rarity via a
-        window function computed server-side — no pandas percentile loop,
-        no loading of unrelated rows."""
         clause, params = _letter_uid_filter(user_ids)
         params["pattern"] = f"{letter}%"
         df = run_query(f"""
@@ -365,6 +361,86 @@ def init_arena_module(get_engine, run_query, run_write_query,
             })
         return out
 
+    # ─────────────────────────────────────────────────────────────────
+    # Discography Duel — pool building
+    # ─────────────────────────────────────────────────────────────────
+    # Mirrors the Letter Roulette plumbing above almost exactly, but the
+    # "bucket" songs are grouped into is a random artist from the user's
+    # (or the user+friend's) library rather than a starting letter.
+
+    def _discog_counts_by_artist(user_ids: list[int]) -> pd.DataFrame:
+        clause, params = _letter_uid_filter(user_ids)
+        df = run_query(f"""
+            WITH scoped_songs AS (
+                SELECT DISTINCT s.song_id
+                FROM streams s
+                WHERE s.user_id {clause}
+            )
+            SELECT a.id AS artist_id, a.name AS artist_name, a.image_url AS artist_image,
+                   COUNT(DISTINCT so.id) AS cnt
+            FROM songs so
+            JOIN scoped_songs ss ON ss.song_id = so.id
+            JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+            JOIN artists a ON a.id = sa.artist_id
+            GROUP BY a.id, a.name, a.image_url
+        """, params)
+        return df
+
+    def _discog_eligible_artists(user_ids: list[int]) -> pd.DataFrame:
+        df = _discog_counts_by_artist(user_ids)
+        if df.empty:
+            return df
+        return df[df["cnt"] >= DISCOG_MIN_POOL].reset_index(drop=True)
+
+    def _discog_eligible_friend_ids(user_id: int, candidate_ids: list[int]) -> list[int]:
+        return [fid for fid in candidate_ids if len(_discog_eligible_artists([user_id, fid])) > 0]
+
+    def _discog_fetch_pool(user_ids: list[int], artist_id: int) -> list[dict]:
+        clause, params = _letter_uid_filter(user_ids)
+        params["aid"] = int(artist_id)
+        df = run_query(f"""
+            WITH scoped_streams AS (
+                SELECT song_id, COUNT(*) AS stream_count
+                FROM streams
+                WHERE user_id {clause}
+                GROUP BY song_id
+            ),
+            artist_songs AS (
+                SELECT DISTINCT so.id AS song_id, so.title AS song_name
+                FROM songs so
+                JOIN song_artists sa ON sa.song_id = so.id AND sa.is_feature = FALSE
+                WHERE sa.artist_id = :aid
+            ),
+            joined AS (
+                SELECT ars.song_id, ars.song_name, ss.stream_count
+                FROM artist_songs ars
+                JOIN scoped_streams ss ON ss.song_id = ars.song_id
+            ),
+            ranked AS (
+                SELECT song_id, song_name, stream_count,
+                       PERCENT_RANK() OVER (ORDER BY stream_count DESC) AS pct_rank
+                FROM joined
+            )
+            SELECT song_id, song_name, stream_count,
+                   CASE WHEN pct_rank < 0.20 THEN 'core'
+                        WHEN pct_rank < 0.70 THEN 'regular'
+                        ELSE 'deep_cut' END AS familiarity_tier
+            FROM ranked
+            ORDER BY stream_count DESC
+        """, params)
+        if df.empty:
+            return []
+        out = []
+        for _, row in df.iterrows():
+            tier = row["familiarity_tier"]
+            out.append({
+                "song_id": int(row["song_id"]),
+                "song_name": row["song_name"],
+                "familiarity_tier": tier,
+                "points": TIER_BASE_POINTS[tier],
+            })
+        return out
+
     def is_arena_eligible(user_id: int) -> dict:
         out = {}
         for gt in ("cover", "artist"):
@@ -372,6 +448,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
             out[gt] = len(pool) >= ELIGIBILITY_FLOOR
         out["tracks"] = len(_eligible_albums_pool(user_id)) >= ELIGIBILITY_FLOOR
         out["letter"] = len(_letter_eligible_letters([user_id])) > 0
+        out["discog"] = len(_discog_eligible_artists([user_id])) > 0
         return out
 
     def _stratified_sample(pool: pd.DataFrame, n: int) -> list[dict]:
@@ -416,7 +493,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         if difficulty not in ("easy", "hard"):
             difficulty = "hard"
 
-        # ─── "letter" mode: Letter Roulette (Rally / Blitz) ───
         if game_type == "letter":
             lv = letter_version if letter_version in ("rally", "blitz") else "blitz"
             user_ids = [host_user_id] if mode == "solo" else [host_user_id, friend_user_id]
@@ -440,9 +516,36 @@ def init_arena_module(get_engine, run_query, run_write_query,
                       lv=lv, turn_user=host_user_id if lv == "rally" else None))
             return rows[0]["id"]
 
+        if game_type == "discog":
+            lv = letter_version if letter_version in ("rally", "blitz") else "blitz"
+            user_ids = [host_user_id] if mode == "solo" else [host_user_id, friend_user_id]
+            artists = _discog_eligible_artists(user_ids)
+            if artists.empty:
+                return None
+            chosen_artist = artists.sample(n=1).iloc[0]
+            artist_id = int(chosen_artist["artist_id"])
+            artist_name = chosen_artist["artist_name"]
+            artist_image = chosen_artist["artist_image"]
+            discog_pool = _discog_fetch_pool(user_ids, artist_id)
+            if len(discog_pool) < DISCOG_MIN_POOL:
+                return None
+
+            rows = run_write_query("""
+                INSERT INTO arena_pools
+                    (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id,
+                     target_artist_id, target_artist_name, target_artist_image,
+                     valid_pool, pool_size, letter_version, turn_user_id)
+                VALUES (:mode, 'discog', 0, 'hard', 0, :host, :friend,
+                        :aid, :aname, :aimg, :pool, :psize, :lv, :turn_user)
+                RETURNING id
+            """, dict(mode=mode, host=host_user_id, friend=friend_user_id,
+                      aid=artist_id, aname=artist_name, aimg=artist_image,
+                      pool=json.dumps(discog_pool), psize=len(discog_pool),
+                      lv=lv, turn_user=host_user_id if lv == "rally" else None))
+            return rows[0]["id"]
+
         hint_budget = HINT_BUDGET[round_count]
 
-        # ─── "tracks" mode picks whole albums instead of single items ───
         if game_type == "tracks":
             host_albums_pool = _eligible_albums_pool(host_user_id)
             if mode == "friends" and friend_user_id:
@@ -462,12 +565,10 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 for it in chosen:
                     it["owner_user_id"] = host_user_id
 
-            # -- BULK FETCH TRACKS TO SOLVE N+1 QUERY PERFORMANCE ISSUE --
             tracklists_by_item = {}
             for uid in set(it["owner_user_id"] for it in chosen):
                 u_aids = tuple(int(it["item_id"]) for it in chosen if it["owner_user_id"] == uid)
                 if not u_aids: continue
-                
                 
                 if len(u_aids) == 1:
                     df_tracks = run_query("""
@@ -534,7 +635,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
                               base_points=TIER_BASE_POINTS[trk["tier"]]))
             return pool_id
 
-        # ─── existing cover/artist logic ───
         host_pool = _eligible_pool(host_user_id, game_type)
 
         if mode == "friends" and friend_user_id:
@@ -599,9 +699,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return dict(rows[0])
 
     def _get_session_row(pool_id: int, user_id: int) -> dict | None:
-        """Read-only session lookup (no upsert) — used for peeking at an
-        opponent's progress in recap screens without creating a session
-        for them if they haven't opened the match yet."""
         rows = run_write_query("SELECT * FROM arena_sessions WHERE pool_id=:p AND user_id=:u", {"p": pool_id, "u": user_id})
         return dict(rows[0]) if rows else None
 
@@ -677,8 +774,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return round(track_row["base_points"] * owner_mult)
 
     def submit_track_answer(session: dict, pool: dict, round_row: dict, track_row: dict, time_taken_ms: int) -> int:
-        """Records one correctly-guessed track and adds its points immediately.
-        Does NOT advance current_round — the round stays open for further guesses."""
         existing = run_write_query(
             "SELECT id FROM arena_track_answers WHERE session_id=:sid AND round_number=:rn AND track_id=:tid",
             {"sid": session["id"], "rn": round_row["round_number"], "tid": track_row["track_id"]}
@@ -698,8 +793,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return points
 
     def finalize_track_round(session: dict, pool: dict, round_row: dict, timed_out: bool = False):
-        """Closes out the current album — called on 100% completion, Pass/Give-up, or timeout.
-        Advances current_round so the next album (or the recap) loads."""
         existing = run_write_query(
             "SELECT id FROM arena_round_answers WHERE session_id=:sid AND round_number=:rn",
             {"sid": session["id"], "rn": round_row["round_number"]}
@@ -732,7 +825,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         """, dict(found_inc=len(found_map), bonus=bonus, round_pts=round_points + bonus, sid=session["id"]))
 
     def get_tracks_totals(pool_id: int, session_id: int) -> tuple[int, int]:
-        """(tracks_found, tracks_total) across the whole match — used in the recap screen."""
         total_rows = run_write_query("SELECT COUNT(*) AS c FROM arena_round_tracks WHERE pool_id=:p", {"p": pool_id})
         found_rows = run_write_query("SELECT COUNT(*) AS c FROM arena_track_answers WHERE session_id=:s", {"s": session_id})
         total = total_rows[0]["c"] if total_rows else 0
@@ -784,12 +876,16 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return recap
 
     # ─────────────────────────────────────────────────────────────────
-    # Letter Roulette — in-memory validation + scoring writes
+    # Letter Roulette / Discography Duel — in-memory validation + scoring
+    # writes. These helpers are agnostic to which of the two "duel" game
+    # types (letter or discog) the pool belongs to — they only rely on the
+    # generic pool_id / valid_pool / turn_* / status columns, so both games
+    # share this exact code path.
     # ─────────────────────────────────────────────────────────────────
 
+    _DUEL_GAME_TYPES = ("letter", "discog")
+
     def _load_letter_pool(pool: dict) -> list[dict]:
-        """Cache the (static) valid pool client-side exactly once per pool —
-        every subsequent fuzzy-match check is pure Python, no DB round trip."""
         key = f"arena_letter_pool_{pool['id']}"
         if key not in st.session_state:
             vp = pool["valid_pool"]
@@ -803,8 +899,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return {r["song_id"] for r in rows} if rows else set()
 
     def _find_letter_match(guess: str, pool_songs: list[dict], used_ids: set) -> dict | None:
-        """Pure in-memory validation against the cached pool — the whole
-        point of caching it — so pressing Enter has zero DB latency."""
         if not guess.strip():
             return None
         for song in pool_songs:
@@ -815,9 +909,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return None
 
     def _record_letter_answer(pool_id: int, session_id: int, song: dict, turn_number: int | None) -> bool:
-        """The one DB write on a correct guess. ON CONFLICT DO NOTHING on
-        (pool_id, song_id) is what makes 'a song can't be reused' safe even
-        with two concurrent friends-mode browser sessions racing on it."""
         rows = run_write_query("""
             INSERT INTO arena_letter_answers
                 (pool_id, session_id, song_id, song_name, familiarity_tier, points_earned, turn_number)
@@ -827,7 +918,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
         """, dict(p=pool_id, s=session_id, sid=song["song_id"], sname=song["song_name"],
                   tier=song["familiarity_tier"], pts=song["points"], turn=turn_number))
         if not rows:
-            return False  # someone else claimed it a beat earlier
+            return False
         run_write_query("""
             UPDATE arena_sessions SET total_score = total_score + :pts, correct_count = correct_count + 1
             WHERE id = :sid
@@ -835,7 +926,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         return True
 
     def _advance_letter_turn(pool: dict):
-        """Flips the active player (friends) or just resets the clock (solo)."""
         next_user = pool["host_user_id"]
         if pool["mode"] == "friends":
             next_user = pool["friend_user_id"] if pool["turn_user_id"] == pool["host_user_id"] else pool["host_user_id"]
@@ -844,7 +934,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         """, {"nu": next_user, "id": pool["id"]})
 
     def _end_letter_rally(pool: dict, loser_user_id: int | None):
-        """loser_user_id is None for a full pool clear (co-op win)."""
         run_write_query("""
             UPDATE arena_pools SET status='completed', loser_user_id=:loser WHERE id=:id
         """, {"loser": loser_user_id, "id": pool["id"]})
@@ -864,17 +953,40 @@ def init_arena_module(get_engine, run_query, run_write_query,
         """, {"p": pool_id, "u": user_id})
 
     # ─────────────────────────────────────────────────────────────────
-    # Free-text matching
+    # Free-text matching (Fuzzy + Regex Normalization)
     # ─────────────────────────────────────────────────────────────────
+
+    def _normalize_string(text: str) -> str:
+        t = text.lower()
+        t = re.sub(r'\(.*?\)', '', t)
+        t = re.sub(r'\[.*?\]', '', t)
+        t = re.sub(r'\b(?:feat\.?|ft\.?)\b.*', '', t)
+        return t.strip()
 
     def _answer_matches(guess: str, correct: str) -> bool:
-        g, c = guess.strip().lower(), correct.strip().lower()
+        if not guess.strip(): return False
+        
+        # Clean guess: only alphanumeric
+        g = re.sub(r'[^a-z0-9]', '', guess.lower())
         if not g: return False
-        if g == c: return True
-        return difflib.SequenceMatcher(None, g, c).ratio() >= FUZZY_MATCH_THRESHOLD
+
+        # Clean correct string & generate target parts
+        c_norm = _normalize_string(correct)
+        c_parts = [c_norm] + re.split(r'[/|\-]', c_norm)
+        
+        for part in c_parts:
+            p = re.sub(r'[^a-z0-9]', '', part)
+            if not p: continue
+            
+            if g == p: 
+                return True
+            if difflib.SequenceMatcher(None, g, p).ratio() >= FUZZY_MATCH_THRESHOLD:
+                return True
+                
+        return False
 
     # ─────────────────────────────────────────────────────────────────
-    # JS: hidden-input pattern for timeout + MC tile clicks
+    # JS: hidden-input pattern for timeout, MC tile clicks, and SEAMLESS INPUT
     # ─────────────────────────────────────────────────────────────────
 
     def inject_arena_script():
@@ -884,6 +996,58 @@ def init_arena_module(get_engine, run_query, run_write_query,
             const doc = window.parent.document;
             if (doc.__arenaDelegated) return;
             doc.__arenaDelegated = true;
+
+            // -- Seamless Input Global Setup --
+            if (!window.parent.__arenaSeamlessInput) {
+                const inp = doc.createElement('input');
+                inp.id = 'arena-seamless-input';
+                inp.type = 'text';
+                inp.autocomplete = 'off';
+                inp.placeholder = 'Type your guess and press Enter...';
+                
+                // Copy exact CSS from standard inputs
+                inp.style.cssText = `
+                    width: 100%;
+                    padding: 1rem !important;
+                    border-radius: 8px;
+                    border: 1px solid rgba(255,255,255,0.2);
+                    background: rgba(0,0,0,0.2);
+                    color: white;
+                    font-size: 1.1rem !important;
+                    text-align: center !important;
+                    font-weight: 600 !important;
+                    outline: none;
+                    transition: all 0.2s ease;
+                    box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+                    margin-bottom: 1rem;
+                `;
+                
+                inp.addEventListener('focus', () => {
+                    inp.style.borderColor = '#1DB954';
+                    inp.style.background = 'rgba(255,255,255,0.05)';
+                    inp.style.boxShadow = '0 0 0 2px rgba(29,185,84,0.2)';
+                });
+                inp.addEventListener('blur', () => {
+                    inp.style.borderColor = 'rgba(255,255,255,0.2)';
+                    inp.style.background = 'rgba(0,0,0,0.2)';
+                    inp.style.boxShadow = 'inset 0 2px 4px rgba(0,0,0,0.1)';
+                });
+
+                inp.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = inp.value.trim();
+                        if (!val) return;
+                        
+                        // Instant visual reset - no Streamlit blocking
+                        inp.value = '';
+                        
+                        // Pass value to Streamlit
+                        fire('input[aria-label="arena_hidden_guess_input"]', val + '::' + Date.now());
+                    }
+                });
+                window.parent.__arenaSeamlessInput = inp;
+            }
 
             function fire(inputSelector, value) {
                 function trySubmit(retries) {
@@ -896,12 +1060,27 @@ def init_arena_module(get_engine, run_query, run_write_query,
                     setter.call(input, value);
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     input.dispatchEvent(new Event('change', { bubbles: true }));
-                    input.focus({ preventScroll: true });
-                    setTimeout(function() {
-                        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-                        input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-                        input.blur();
-                    }, 30);
+                    
+                    // Do not steal focus back from the seamless input!
+                    if (inputSelector !== 'input[aria-label="arena_hidden_guess_input"]') {
+                        input.focus({ preventScroll: true });
+                        setTimeout(function() {
+                            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                            input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                            input.blur();
+                        }, 30);
+                    } else {
+                        input.focus({ preventScroll: true });
+                        setTimeout(function() {
+                            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                            input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                            
+                            // Επιστροφή του focus στο custom πεδίο που γράφεις
+                            if (window.parent.__arenaSeamlessInput) {
+                                window.parent.__arenaSeamlessInput.focus({ preventScroll: true });
+                            }
+                        }, 10);
+                    }
                 }
                 trySubmit(5);
             }
@@ -915,6 +1094,24 @@ def init_arena_module(get_engine, run_query, run_write_query,
                     fire('input[aria-label="arena_mc_input"]', idx + ':' + Date.now());
                 }
             });
+            window.parent.__arenaFire = fire;
+        })();
+        </script>
+        """, height=0)
+
+    def render_seamless_input_container():
+        st.markdown('<div id="seamless-input-container"></div>', unsafe_allow_html=True)
+        components.html("""
+        <script>
+        (function(){
+            const doc = window.parent.document;
+            const container = doc.getElementById('seamless-input-container');
+            const inp = window.parent.__arenaSeamlessInput;
+            if(container && inp && inp.parentElement !== container) {
+                inp.style.display = 'block';
+                container.appendChild(inp);
+                setTimeout(() => inp.focus(), 10);
+            }
         })();
         </script>
         """, height=0)
@@ -930,7 +1127,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
             const roundKey = {json.dumps(round_key)};
             const gameType = {json.dumps(game_type)};
             
-            /* ΑΦΑΙΡΕΘΗΚΕ ΤΟ EARLY RETURN. Ανανεώνουμε το interval σε κάθε rerun! */
             if (doc.__arenaRoundKey !== roundKey) {{
                 doc.__arenaRoundKey = roundKey;
                 doc.__arenaTimedOut = false;
@@ -939,21 +1135,9 @@ def init_arena_module(get_engine, run_query, run_write_query,
             if (doc.__arenaInterval) clearInterval(doc.__arenaInterval);
 
             function fireTimeout() {{
-                function trySubmit(retries) {{
-                    const inp = doc.querySelector('input[aria-label="{input_aria}"]');
-                    if (!inp) {{ if (retries > 0) setTimeout(function(){{ trySubmit(retries - 1); }}, 80); return; }}
-                    const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-                    setter.call(inp, roundKey + ':' + Date.now());
-                    inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    inp.focus({{ preventScroll: true }}); 
-                    setTimeout(function() {{
-                        inp.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
-                        inp.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
-                        inp.blur(); 
-                    }}, 30);
+                if (window.parent.__arenaFire) {{
+                    window.parent.__arenaFire('input[aria-label="{input_aria}"]', roundKey + ':' + Date.now());
                 }}
-                trySubmit(5);
             }}
 
             function tick() {{
@@ -993,21 +1177,9 @@ def init_arena_module(get_engine, run_query, run_write_query,
             if (doc.__arenaRevealTimeout) clearTimeout(doc.__arenaRevealTimeout);
 
             function fireContinue() {{
-                function trySubmit(retries) {{
-                    const inp = doc.querySelector('input[aria-label="arena_reveal_continue_input"]');
-                    if (!inp) {{ if (retries > 0) setTimeout(function(){{ trySubmit(retries - 1); }}, 80); return; }}
-                    const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-                    setter.call(inp, key + ':' + Date.now());
-                    inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    inp.focus({{ preventScroll: true }}); 
-                    setTimeout(function() {{
-                        inp.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
-                        inp.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
-                        inp.blur(); 
-                    }}, 30);
+                if (window.parent.__arenaFire) {{
+                    window.parent.__arenaFire('input[aria-label="arena_reveal_continue_input"]', key + ':' + Date.now());
                 }}
-                trySubmit(5);
             }}
             doc.__arenaRevealTimeout = setTimeout(fireContinue, {delay_ms});
         }})();
@@ -1027,21 +1199,9 @@ def init_arena_module(get_engine, run_query, run_write_query,
             if (doc.__arenaLetterPollInterval) clearInterval(doc.__arenaLetterPollInterval);
 
             function ping() {{
-                function trySubmit(retries) {{
-                    const inp = doc.querySelector('input[aria-label="arena_letter_poll_input"]');
-                    if (!inp) {{ if (retries > 0) setTimeout(function(){{ trySubmit(retries - 1); }}, 80); return; }}
-                    const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-                    setter.call(inp, key + ':' + Date.now());
-                    inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    inp.focus({{ preventScroll: true }});
-                    setTimeout(function() {{
-                        inp.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
-                        inp.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
-                        inp.blur();
-                    }}, 30);
+                if (window.parent.__arenaFire) {{
+                    window.parent.__arenaFire('input[aria-label="arena_letter_poll_input"]', key + ':' + Date.now());
                 }}
-                trySubmit(3);
             }}
             doc.__arenaLetterPollInterval = setInterval(ping, {every_ms});
         }})();
@@ -1122,15 +1282,12 @@ def init_arena_module(get_engine, run_query, run_write_query,
             start_key = f"arena_round_start_{session['id']}_{session['current_round']}"
             started_at = st.session_state.get(start_key, time.time())
             elapsed_ms = int((time.time() - started_at) * 1000)
-            # In hard mode, multiple-choice is only reachable via a spent hint.
-            # In easy mode, multiple-choice IS the base mode, so it's not a "hint".
             used_hint = pool.get("difficulty") != "easy"
             round_key = f"{session['id']}_{session['current_round']}"
             result = _resolve(is_correct=is_correct, used_hint=used_hint, time_taken_ms=elapsed_ms,
                                advance_view=False, ctx=(pool, session, round_row))
             if result is None: return
             points, is_last = result
-            # Hold on this round one extra beat so the player sees right/wrong before advancing.
             st.session_state["_arena_mc_reveal"] = dict(
                 round_key=round_key, options=options, chosen_idx=idx,
                 correct_name=correct_name, is_correct=is_correct,
@@ -1150,7 +1307,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
         st.text_input("arena_mc_input", key="arena_mc_state",
                        label_visibility="collapsed", on_change=on_mc_click)
 
-        # ---- Letter Roulette: rally timeout / blitz timeout / turn poll ----
+        # ---- Letter Roulette / Discography Duel: rally timeout / blitz timeout / turn poll ----
 
         def on_letter_rally_timeout():
             val = st.session_state.get("arena_letter_rally_timeout_state")
@@ -1158,13 +1315,10 @@ def init_arena_module(get_engine, run_query, run_write_query,
             ctx = _current_context()
             if not ctx: return
             pool, session, _round_row = ctx
-            if pool.get("game_type") != "letter" or pool.get("letter_version") != "rally":
+            if pool.get("game_type") not in _DUEL_GAME_TYPES or pool.get("letter_version") != "rally":
                 return
             if pool["status"] != "active":
                 return
-            # Only the currently-active player's own timer ending the round
-            # should end the match — stale ticks from a turn that already
-            # resolved should no-op.
             if pool["turn_user_id"] != session["user_id"]:
                 return
             _end_letter_rally(pool, loser_user_id=session["user_id"])
@@ -1176,15 +1330,13 @@ def init_arena_module(get_engine, run_query, run_write_query,
             ctx = _current_context()
             if not ctx: return
             pool, session, _round_row = ctx
-            if pool.get("game_type") != "letter" or pool.get("letter_version") != "blitz":
+            if pool.get("game_type") not in _DUEL_GAME_TYPES or pool.get("letter_version") != "blitz":
                 return
             if session["status"] == "in_progress":
                 _end_letter_blitz_session(pool["id"], session["user_id"])
             st.rerun()
 
         def on_letter_poll():
-            # No-op: merely firing this on_change makes Streamlit rerun the
-            # script, which re-reads turn_user_id fresh from the DB.
             pass
 
         st.text_input("arena_letter_rally_timeout_input", key="arena_letter_rally_timeout_state",
@@ -1298,7 +1450,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
     }}
     .arena-mc-option:hover {{ border-color: {GREEN}; background: rgba(29,185,84,0.12); transform: translateY(-2px); }}
 
-    /* ΝΕΟ: οθόνη αποκάλυψης απάντησης (σωστό/λάθος) */
     .arena-reveal-msg {{
         text-align: center; font-weight: 700; font-size: 1.05rem;
         padding: 0.7rem 1rem; border-radius: 12px; margin-bottom: 1.1rem;
@@ -1314,15 +1465,25 @@ def init_arena_module(get_engine, run_query, run_write_query,
     .arena-reveal-correct-tile {{ background: rgba(29,185,84,0.18) !important; border-color: {GREEN} !important; color: {GREEN} !important; }}
     .arena-reveal-wrong-tile {{ background: rgba(239,68,68,0.16) !important; border-color: #ef4444 !important; color: #f87171 !important; }}
 
-    /* ΝΕΟ: Κεντραρισμένο κείμενο στο input πεδίο */
     div.st-key-arena_modal_content div[data-testid="stTextInput"] input {{
         text-align: center !important;
         font-size: 1.1rem !important;
         font-weight: 600 !important;
         padding: 1rem !important;
     }}
+    
+    /* HIDE THE HIDDEN SEAMLESS STREAMLIT INPUT */
+    /* HIDE THE HIDDEN SEAMLESS STREAMLIT INPUT */
+    div[data-testid="stTextInput"]:has(input[aria-label="arena_hidden_guess_input"]) {{
+        position: absolute !important;
+        opacity: 0 !important;
+        width: 1px !important;
+        height: 1px !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
+        z-index: -999 !important;
+    }}
 
-    /* ΝΕΟ: Segmented-control labels/spacing (αντικατάσταση των st.radio) */
     .arena-segment-label {{
         font-size: 0.78rem;
         font-weight: 700;
@@ -1346,7 +1507,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         transform: translateY(-1px);
     }}
 
-    /* ΝΕΟ: κυκλικό, "αιωρούμενο" κουμπί κλεισίματος πάνω-δεξιά αντί για ολόκληρη σειρά */
     div.st-key-arena_close_btn {{
         position: absolute !important;
         top: 1.15rem !important;
@@ -1371,8 +1531,21 @@ def init_arena_module(get_engine, run_query, run_write_query,
         color: {TEXT} !important;
         transform: rotate(90deg) !important;
     }}
+    /* 🔴 ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ ΤΟΥ STREAMLIT "RERUN DIMMING" 🔴 */
+    [data-stale="true"] {{
+        opacity: 1 !important;
+        filter: none !important;
+        pointer-events: auto !important;
+        transition: none !important;
+    }}
 
-    /* ΝΕΟ: "Guess the Album Tracks" — λίστα κομματιών & στοιχεία εισαγωγής */
+    div[data-testid="stAppViewBlockContainer"],
+    div[data-testid="stVerticalBlock"],
+    div[data-testid="stElementContainer"] {{
+        opacity: 1 !important;
+        transition: none !important;
+    }}
+
     .arena-track-list {{
         display: flex; flex-direction: column; gap: 0.5rem;
         margin: 1.2rem 0 1.4rem; max-height: 260px; overflow-y: auto; padding-right: 4px;
@@ -1390,7 +1563,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
     .arena-track-missed {{ background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); }}
     .arena-track-missed .arena-track-name {{ color: #f87171; }}
 
-    /* ΝΕΟ: Letter Roulette — letter badge, found-songs chips, waiting state */
     .arena-letter-badge {{
         width: 84px; height: 84px; margin: 0 auto 1.4rem; border-radius: 20px;
         background: linear-gradient(135deg, {GREEN} 0%, #12793a 100%);
@@ -1479,11 +1651,9 @@ def init_arena_module(get_engine, run_query, run_write_query,
         with st.container(key="arena_modal_overlay"):
             with st.container(key="arena_modal_content"):
 
-                # Κουμπί κλεισίματος — αιωρούμενο πάνω-δεξιά (θέση μέσω CSS)
                 if st.button("✕", key="arena_close_btn"):
                     _close_arena()
 
-                # Περιεχόμενο
                 if view == "mode":
                     _render_mode_select(selected_user_id)
                 elif view == "game":
@@ -1540,9 +1710,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
     def _segment_control(label: str, options: list[tuple], state_key: str, default,
                           accent_colors: dict | None = None):
-        """Renders a row of toggle buttons standing in for a radio group.
-        options: list of (value, display_label) tuples.
-        accent_colors: optional {value: hex_color} for the selected state — falls back to GREEN."""
         if state_key not in st.session_state:
             st.session_state[state_key] = default
         accent_colors = accent_colors or {}
@@ -1577,39 +1744,57 @@ def init_arena_module(get_engine, run_query, run_write_query,
         mode = st.session_state.get("arena_mode", "solo")
         friend_user_id = None
 
-        # ─── Letter Roulette has an entirely different setup screen:
-        # no round count / difficulty, just Rally vs Blitz and (in Friends
-        # mode) a friend filtered down to those with a shared eligible pool.
-        if game_type == "letter":
+        if game_type in _DUEL_GAME_TYPES:
             if mode == "friends":
                 other_usernames = [u for u in user_dict.keys() if user_dict[u] != user_id]
                 candidate_ids = [user_dict[u] for u in other_usernames]
-                playable_ids = set(_letter_eligible_friend_ids(user_id, candidate_ids))
+                if game_type == "letter":
+                    playable_ids = set(_letter_eligible_friend_ids(user_id, candidate_ids))
+                else:
+                    playable_ids = set(_discog_eligible_friend_ids(user_id, candidate_ids))
                 playable = [u for u in other_usernames if user_dict[u] in playable_ids]
                 if not playable:
-                    st.info("No friend shares enough overlapping-letter listening history yet.")
+                    msg = ("No friend shares enough overlapping-letter listening history yet."
+                           if game_type == "letter" else
+                           "No friend shares enough listening history with a common artist yet.")
+                    st.info(msg)
                     return
                 friend_username = st.selectbox("Duel who?", playable, key="arena_friend_select")
                 friend_user_id = user_dict[friend_username]
 
+            version_key = "arena_letter_version_seg" if game_type == "letter" else "arena_discog_version_seg"
             letter_version = _segment_control(
                 "Version",
                 [("rally", "🏓 Rally"), ("blitz", "⚡ Blitz")],
-                "arena_letter_version_seg", "blitz",
+                version_key, "blitz",
             )
-            caption = (
-                f"{RALLY_TURN_SECONDS}s per turn, alternating. Miss the clock, or run out "
-                f"of valid songs, and you're out."
-                if letter_version == "rally" else
-                f"{BLITZ_SECONDS}s on the clock. Rarer songs in your history score more."
-            )
+            if game_type == "letter":
+                caption = (
+                    f"{RALLY_TURN_SECONDS}s per turn, alternating. Miss the clock, or run out "
+                    f"of valid songs, and you're out."
+                    if letter_version == "rally" else
+                    f"{BLITZ_SECONDS}s on the clock. Rarer songs in your history score more."
+                )
+            else:
+                caption = (
+                    f"{RALLY_TURN_SECONDS}s per turn, alternating. Name a song by the chosen "
+                    f"artist that hasn't been said yet, or you're out."
+                    if letter_version == "rally" else
+                    f"{BLITZ_SECONDS}s on the clock. Name as many songs by the artist as you "
+                    f"can — rarer deep cuts score more."
+                )
             st.markdown(f'<div class="arena-segment-caption">{caption}</div>', unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Spin the Letter", key="arena_letter_start_btn", type="primary", use_container_width=True):
-                pool_id = create_pool(user_id, "letter", 0, mode, friend_user_id, "hard", letter_version)
+            btn_label = "Spin the Letter" if game_type == "letter" else "Pick an Artist"
+            btn_key = "arena_letter_start_btn" if game_type == "letter" else "arena_discog_start_btn"
+            if st.button(btn_label, key=btn_key, type="primary", use_container_width=True):
+                pool_id = create_pool(user_id, game_type, 0, mode, friend_user_id, "hard", letter_version)
                 if pool_id is None:
-                    st.error("Couldn't find a letter with enough eligible songs — try again after streaming more.")
+                    err = ("Couldn't find a letter with enough eligible songs — try again after streaming more."
+                           if game_type == "letter" else
+                           "Couldn't find an artist with enough eligible songs — try again after streaming more.")
+                    st.error(err)
                     return
                 session = get_or_create_session(pool_id, user_id)
                 st.session_state["arena_pool_id"] = pool_id
@@ -1762,47 +1947,35 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 )
         st.markdown(f'<div class="arena-track-list">{rows_html}</div>', unsafe_allow_html=True)
 
-        # Nonce-suffixed key so the input visibly clears after every guess
-        nonce_key = f"arena_tracks_nonce_{round_key}"
-        nonce = st.session_state.get(nonce_key, 0)
-        guess_key = f"arena_tracks_guess_{round_key}_{nonce}"
-
+        # SEAMLESS INPUT PROCESSOR
         def _on_guess_change():
-            guess_val = st.session_state.get(guess_key, "")
-            if not guess_val.strip():
-                return
-            
-            # OPTIMIZED: Removed 4 redundant DB calls. We reuse outer-scope variables 
-            # (session, pool, round_row, tracks, found_map) directly.
+            val = st.session_state.get("arena_hidden_guess_tracks", "")
+            if not val: return
+            guess_val = val.split("::")[0].strip()
+            if not guess_val: return
             
             for trk in tracks:
-                if trk["track_id"] in found_map:
-                    continue
-                
+                if trk["track_id"] in found_map: continue
                 if _answer_matches(guess_val, trk["track_name"]):
                     elapsed_ms = int((time.time() - started_at) * 1000)
                     pts = submit_track_answer(session, pool, round_row, trk, elapsed_ms)
-                    
                     if pts > 0:
                         st.toast(f"✅ {trk['track_name']} (+{pts} pts)", icon="🎯")
-                        # Update the local dictionary to track progression instantly
                         found_map[trk["track_id"]] = {"points_earned": pts}
-                        
-                        # Immediately close out the round if the album is complete
                         if len(found_map) >= len(tracks):
                             st.session_state["_arena_tracks_reveal"] = session["current_round"]
                             finalize_track_round(session, pool, round_row)
                     break
-                    
-            st.session_state[nonce_key] = nonce + 1
+            st.session_state["arena_hidden_guess_tracks"] = ""
 
+        # 1. HIDE the real Streamlit input via CSS
         st.text_input(
-            "Type a track name…", key=guess_key,
-            placeholder="Type a track name and press Enter…",
+            "arena_hidden_guess_input", key="arena_hidden_guess_tracks",
             label_visibility="collapsed", on_change=_on_guess_change
         )
+        # 2. Render the container for our seamless JS input
+        render_seamless_input_container()
 
-        # Changed from [1, 2] to [1, 2, 1] to center the button
         _, c_pass, _ = st.columns([1, 2, 1])
         with c_pass:
             if st.button("🏳️ Give up on this album", key=f"arena_tracks_giveup_{round_key}", use_container_width=True):
@@ -1811,8 +1984,31 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 st.rerun()
 
     # ─────────────────────────────────────────────────────────────────
-    # Letter Roulette — gameplay UI (Rally / Blitz)
+    # Letter Roulette / Discography Duel — gameplay UI (Rally / Blitz)
     # ─────────────────────────────────────────────────────────────────
+
+    def _duel_badge_html(pool: dict) -> str:
+        """Renders the round 'badge' — a big letter tile for Letter Roulette,
+        or the artist's photo (falling back to initials) for Discography Duel."""
+        if pool.get("game_type") == "discog":
+            name = pool.get("target_artist_name") or "?"
+            img = pool.get("target_artist_image")
+            if img:
+                return (
+                    f'<div class="arena-letter-badge" style="padding:0;overflow:hidden;">'
+                    f'<img src="{escape(img)}" style="width:100%;height:100%;object-fit:cover;" />'
+                    f'</div>'
+                )
+            initials = "".join(w[0] for w in name.split()[:2]).upper() or "?"
+            return f'<div class="arena-letter-badge" style="font-size:1.7rem;">{escape(initials)}</div>'
+        return f'<div class="arena-letter-badge">{escape(pool.get("target_letter") or "?")}</div>'
+
+    def _duel_title_html(pool: dict) -> str:
+        """Artist name caption shown under the badge for Discography Duel."""
+        if pool.get("game_type") == "discog":
+            name = escape(pool.get("target_artist_name") or "Unknown artist")
+            return f'<div class="arena-subtitle" style="margin-bottom:0.6rem;">{name}</div>'
+        return ""
 
     def _render_letter_rally(user_id: int, pool: dict):
         if pool["status"] == "completed":
@@ -1824,13 +2020,17 @@ def init_arena_module(get_engine, run_query, run_write_query,
         used_ids = _get_used_letter_song_ids(pool["id"])
         is_my_turn = pool["turn_user_id"] == user_id
         opponent_id = pool["friend_user_id"] if pool["mode"] == "friends" else None
+        game_meta = GAME_META.get(pool.get("game_type"), GAME_META["letter"])
 
         st.markdown(
-            f'<div class="arena-kicker-wrap"><span class="arena-kicker">🏓 Rally</span></div>'
+            f'<div class="arena-kicker-wrap"><span class="arena-kicker">{game_meta["icon"]} Rally</span></div>'
             f'<div class="arena-title">Turn {pool["turn_number"]}</div>',
             unsafe_allow_html=True
         )
-        st.markdown(f'<div class="arena-letter-badge">{escape(pool["target_letter"])}</div>', unsafe_allow_html=True)
+        st.markdown(_duel_badge_html(pool), unsafe_allow_html=True)
+        badge_caption = _duel_title_html(pool)
+        if badge_caption:
+            st.markdown(badge_caption, unsafe_allow_html=True)
 
         found_chips = "".join(
             f'<span class="arena-found-chip">{escape(s["song_name"])}</span>'
@@ -1862,24 +2062,29 @@ def init_arena_module(get_engine, run_query, run_write_query,
                                    input_aria="arena_letter_rally_timeout_input")
 
         session = get_or_create_session(pool["id"], user_id)
-        guess_key = f"arena_letter_rally_guess_{turn_key}"
-
+        
+        # SEAMLESS INPUT PROCESSOR
         def _on_submit():
-            guess_val = st.session_state.get(guess_key, "")
+            val = st.session_state.get("arena_hidden_guess_rally", "")
+            if not val: return
+            guess_val = val.split("::")[0].strip()
+            if not guess_val: return
+            
             song = _find_letter_match(guess_val, pool_songs, used_ids)
             if not song:
-                st.toast("Not a valid, unused song for this letter.", icon="❌")
-                return
-            ok = _record_letter_answer(pool["id"], session["id"], song, pool["turn_number"])
-            if not ok:
-                st.toast("That one was just claimed — try another!", icon="⚠️")
-                return
-            st.toast(f"✅ {song['song_name']} (+{song['points']} pts)", icon="🎯")
-            _advance_letter_turn(pool)
+                st.toast("Not a valid, unused song for this round.", icon="❌")
+            else:
+                ok = _record_letter_answer(pool["id"], session["id"], song, pool["turn_number"])
+                if not ok:
+                    st.toast("That one was just claimed — try another!", icon="⚠️")
+                else:
+                    st.toast(f"✅ {song['song_name']} (+{song['points']} pts)", icon="🎯")
+                    _advance_letter_turn(pool)
+            
+            st.session_state["arena_hidden_guess_rally"] = ""
 
-        st.text_input("Your song", key=guess_key, label_visibility="collapsed",
-                      placeholder=f"A song starting with '{pool['target_letter']}'…",
-                      on_change=_on_submit)
+        st.text_input("arena_hidden_guess_input", key="arena_hidden_guess_rally", label_visibility="collapsed", on_change=_on_submit)
+        render_seamless_input_container()
 
         if st.button("🏳️ I've got nothing", key=f"arena_letter_rally_giveup_{turn_key}", use_container_width=True):
             _end_letter_rally(pool, loser_user_id=user_id)
@@ -1896,14 +2101,18 @@ def init_arena_module(get_engine, run_query, run_write_query,
             return
 
         used_ids = _get_used_letter_song_ids(pool["id"])
+        game_meta = GAME_META.get(pool.get("game_type"), GAME_META["letter"])
 
         st.markdown(
-            f'<div class="arena-kicker-wrap"><span class="arena-kicker">⚡ Blitz</span></div>'
+            f'<div class="arena-kicker-wrap"><span class="arena-kicker">{game_meta["icon"]} Blitz</span></div>'
             f'<div class="arena-title">Score: {session["total_score"]}</div>'
             f'<div class="arena-subtitle">Found {session["correct_count"]} songs</div>',
             unsafe_allow_html=True
         )
-        st.markdown(f'<div class="arena-letter-badge">{escape(pool["target_letter"])}</div>', unsafe_allow_html=True)
+        st.markdown(_duel_badge_html(pool), unsafe_allow_html=True)
+        badge_caption = _duel_title_html(pool)
+        if badge_caption:
+            st.markdown(badge_caption, unsafe_allow_html=True)
 
         mine = run_write_query(
             "SELECT song_name FROM arena_letter_answers WHERE pool_id=:p AND session_id=:s ORDER BY answered_at",
@@ -1929,23 +2138,24 @@ def init_arena_module(get_engine, run_query, run_write_query,
             st.rerun()
             return
 
-        nonce_key = f"arena_letter_blitz_nonce_{blitz_key}"
-        nonce = st.session_state.get(nonce_key, 0)
-        guess_key = f"arena_letter_blitz_guess_{blitz_key}_{nonce}"
-
+        # SEAMLESS INPUT PROCESSOR
         def _on_submit():
-            guess_val = st.session_state.get(guess_key, "")
+            val = st.session_state.get("arena_hidden_guess_blitz", "")
+            if not val: return
+            guess_val = val.split("::")[0].strip()
+            if not guess_val: return
+            
             song = _find_letter_match(guess_val, pool_songs, used_ids)
             if song:
                 if _record_letter_answer(pool["id"], session_id, song, None):
                     st.toast(f"✅ {song['song_name']} (+{song['points']} pts)", icon="🎯")
                 else:
                     st.toast("That one was just claimed — keep going!", icon="⚠️")
-            st.session_state[nonce_key] = nonce + 1
+                    
+            st.session_state["arena_hidden_guess_blitz"] = ""
 
-        st.text_input("Your song", key=guess_key, label_visibility="collapsed",
-                      placeholder=f"Type songs starting with '{pool['target_letter']}'…",
-                      on_change=_on_submit)
+        st.text_input("arena_hidden_guess_input", key="arena_hidden_guess_blitz", label_visibility="collapsed", on_change=_on_submit)
+        render_seamless_input_container()
 
     def _render_letter_gameplay(user_id: int, pool_id: int, pool: dict, session_id: int):
         if pool.get("letter_version") == "rally":
@@ -1963,11 +2173,10 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
         pool = get_pool(pool_id)
 
-        if pool.get("game_type") == "letter":
+        if pool.get("game_type") in _DUEL_GAME_TYPES:
             _render_letter_gameplay(user_id, pool_id, pool, session_id)
             return
 
-        # ΕΛΕΓΧΟΣ ΓΙΑ TRACKS REVEAL
         tracks_reveal_no = st.session_state.get("_arena_tracks_reveal")
         if pool.get("game_type") == "tracks" and tracks_reveal_no:
             rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
@@ -1982,7 +2191,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
         rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
         session = dict(rows[0])
 
-        # A multiple-choice answer was just submitted — show right/wrong before moving on.
         reveal = st.session_state.get("_arena_mc_reveal")
         if reveal and reveal.get("round_key") == f"{session_id}_{session['current_round'] - 1}":
             _render_mc_reveal(pool, session, reveal)
@@ -2037,7 +2245,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
             guess = st.text_input("Your guess", key=f"arena_guess_{round_key}", label_visibility="collapsed",
                                    placeholder="Type the exact name…")
             
-            # Δυναμικό κεντραρισμένο layout για τα κουμπιά
             cols = st.columns(3) if hints_used < hint_budget else st.columns(2)
             
             with cols[0]:
@@ -2083,7 +2290,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
             with c_pass:
                 if st.button("⏭️ Pass", key=f"arena_pass_mc_{round_key}", use_container_width=True):
                     elapsed_ms = int((time.time() - started_at) * 1000)
-                    # Only counts as a "spent hint" in hard mode; in easy mode MC is the default.
                     points = submit_round_answer(session, pool, round_row, False, not easy_mode, elapsed_ms)
                     st.toast("Round Skipped!", icon="⏭️")
                     if session["current_round"] >= pool["round_count"]:
@@ -2092,7 +2298,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
                     st.rerun()
 
     def _render_letter_recap(user_id: int, pool: dict, session: dict):
-        meta = GAME_META["letter"]
+        meta = GAME_META.get(pool.get("game_type"), GAME_META["letter"])
         version_label = "🏓 Rally" if pool.get("letter_version") == "rally" else "⚡ Blitz"
         _modal_header(f'{meta["icon"]} {meta["label"]}', "🏁 Recap", version_label)
 
@@ -2134,7 +2340,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
         if st.button("Play Again", key="arena_letter_play_again_btn", type="primary", use_container_width=True):
             st.query_params["arena_view"] = "mode"
             for k in ("arena_pool_id", "arena_session_id", "arena_mode", "arena_game_type",
-                      "arena_letter_version_seg"):
+                      "arena_letter_version_seg", "arena_discog_version_seg"):
                 st.session_state.pop(k, None)
             st.rerun()
 
@@ -2147,7 +2353,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
         recap = get_recap(session_id)
         session, pool = recap["session"], recap["pool"]
 
-        if pool.get("game_type") == "letter":
+        if pool.get("game_type") in _DUEL_GAME_TYPES:
             _render_letter_recap(user_id, pool, session)
             return
 
