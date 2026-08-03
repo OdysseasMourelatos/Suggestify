@@ -10,6 +10,7 @@ import time
 import difflib
 import datetime
 import re
+import unicodedata
 from html import escape
 from types import SimpleNamespace
 
@@ -65,6 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_arena_pools_host   ON arena_pools(host_user_id);
 CREATE INDEX IF NOT EXISTS idx_arena_pools_friend ON arena_pools(friend_user_id);
 
 ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS difficulty VARCHAR(10) NOT NULL DEFAULT 'hard';
+ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS reveal_mode VARCHAR(20) NOT NULL DEFAULT 'blurred';
 
 CREATE TABLE IF NOT EXISTS arena_pool_rounds (
     id                BIGSERIAL PRIMARY KEY,
@@ -489,7 +491,8 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
     def create_pool(host_user_id: int, game_type: str, round_count: int,
                      mode: str, friend_user_id: int | None = None,
-                     difficulty: str = "hard", letter_version: str | None = None) -> int | None:
+                     difficulty: str = "hard", letter_version: str | None = None,
+                     reveal_mode: str = "blurred") -> int | None:
         if difficulty not in ("easy", "hard"):
             difficulty = "hard"
 
@@ -507,13 +510,13 @@ def init_arena_module(get_engine, run_query, run_write_query,
             rows = run_write_query("""
                 INSERT INTO arena_pools
                     (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id,
-                     target_letter, valid_pool, pool_size, letter_version, turn_user_id)
+                     target_letter, valid_pool, pool_size, letter_version, turn_user_id, reveal_mode)
                 VALUES (:mode, 'letter', 0, 'hard', 0, :host, :friend,
-                        :letter, :pool, :psize, :lv, :turn_user)
+                        :letter, :pool, :psize, :lv, :turn_user, :rmode)
                 RETURNING id
             """, dict(mode=mode, host=host_user_id, friend=friend_user_id,
                       letter=target_letter, pool=json.dumps(letter_pool), psize=len(letter_pool),
-                      lv=lv, turn_user=host_user_id if lv == "rally" else None))
+                      lv=lv, turn_user=host_user_id if lv == "rally" else None, rmode=reveal_mode))
             return rows[0]["id"]
 
         if game_type == "discog":
@@ -534,14 +537,14 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 INSERT INTO arena_pools
                     (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id,
                      target_artist_id, target_artist_name, target_artist_image,
-                     valid_pool, pool_size, letter_version, turn_user_id)
+                     valid_pool, pool_size, letter_version, turn_user_id, reveal_mode)
                 VALUES (:mode, 'discog', 0, 'hard', 0, :host, :friend,
-                        :aid, :aname, :aimg, :pool, :psize, :lv, :turn_user)
+                        :aid, :aname, :aimg, :pool, :psize, :lv, :turn_user, :rmode)
                 RETURNING id
             """, dict(mode=mode, host=host_user_id, friend=friend_user_id,
                       aid=artist_id, aname=artist_name, aimg=artist_image,
                       pool=json.dumps(discog_pool), psize=len(discog_pool),
-                      lv=lv, turn_user=host_user_id if lv == "rally" else None))
+                      lv=lv, turn_user=host_user_id if lv == "rally" else None, rmode=reveal_mode))
             return rows[0]["id"]
 
         hint_budget = HINT_BUDGET[round_count]
@@ -606,11 +609,11 @@ def init_arena_module(get_engine, run_query, run_write_query,
                         tracklists_by_item[(uid, aid)] = group.to_dict("records")
 
             rows = run_write_query("""
-                INSERT INTO arena_pools (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id)
-                VALUES (:mode, :game_type, :round_count, :difficulty, :hint_budget, :host_user_id, :friend_user_id)
+                INSERT INTO arena_pools (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id, reveal_mode)
+                VALUES (:mode, :game_type, :round_count, :difficulty, :hint_budget, :host_user_id, :friend_user_id, :reveal_mode)
                 RETURNING id
             """, dict(mode=mode, game_type=game_type, round_count=round_count, difficulty=difficulty,
-                      hint_budget=hint_budget, host_user_id=host_user_id, friend_user_id=friend_user_id))
+                      hint_budget=hint_budget, host_user_id=host_user_id, friend_user_id=friend_user_id, reveal_mode=reveal_mode))
             pool_id = rows[0]["id"]
 
             for i, item in enumerate(chosen, start=1):
@@ -658,11 +661,11 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 it["_pool"] = host_pool
 
         rows = run_write_query("""
-            INSERT INTO arena_pools (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id)
-            VALUES (:mode, :game_type, :round_count, :difficulty, :hint_budget, :host_user_id, :friend_user_id)
+            INSERT INTO arena_pools (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id, reveal_mode)
+            VALUES (:mode, :game_type, :round_count, :difficulty, :hint_budget, :host_user_id, :friend_user_id, :reveal_mode)
             RETURNING id
         """, dict(mode=mode, game_type=game_type, round_count=round_count, difficulty=difficulty,
-                  hint_budget=hint_budget, host_user_id=host_user_id, friend_user_id=friend_user_id))
+                  hint_budget=hint_budget, host_user_id=host_user_id, friend_user_id=friend_user_id, reveal_mode=reveal_mode))
         pool_id = rows[0]["id"]
 
         item_type = "album" if game_type == "cover" else "artist"
@@ -956,26 +959,36 @@ def init_arena_module(get_engine, run_query, run_write_query,
     # Free-text matching (Fuzzy + Regex Normalization)
     # ─────────────────────────────────────────────────────────────────
 
+    def _remove_accents(input_str: str) -> str:
+        """Αφαιρεί τόνους και διακριτικά (π.χ. é -> e, ά -> α)"""
+        nfkd_form = unicodedata.normalize('NFKD', input_str)
+        return u"".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
     def _normalize_string(text: str) -> str:
         t = text.lower()
         t = re.sub(r'\(.*?\)', '', t)
         t = re.sub(r'\[.*?\]', '', t)
         t = re.sub(r'\b(?:feat\.?|ft\.?)\b.*', '', t)
+        t = _remove_accents(t)
         return t.strip()
 
     def _answer_matches(guess: str, correct: str) -> bool:
         if not guess.strip(): return False
         
-        # Clean guess: only alphanumeric
-        g = re.sub(r'[^a-z0-9]', '', guess.lower())
+        # 1. Αφαιρούμε τόνους από τη μαντεψιά
+        g_clean = _remove_accents(guess.lower())
+        
+        # 2. Το \w κρατάει γράμματα από ΟΛΕΣ τις γλώσσες και αριθμούς. 
+        # Αφαιρούμε σημεία στίξης και κενά.
+        g = re.sub(r'[^\w]', '', g_clean).replace('_', '')
         if not g: return False
 
-        # Clean correct string & generate target parts
+        # 3. Καθαρίζουμε τον σωστό τίτλο και τον σπάμε σε κομμάτια (αν έχει / ή -)
         c_norm = _normalize_string(correct)
         c_parts = [c_norm] + re.split(r'[/|\-]', c_norm)
         
         for part in c_parts:
-            p = re.sub(r'[^a-z0-9]', '', part)
+            p = re.sub(r'[^\w]', '', part).replace('_', '')
             if not p: continue
             
             if g == p: 
@@ -1117,7 +1130,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
         """, height=0)
 
     def render_round_timer_script(round_key: str, started_at_ms: float, duration_sec: int, game_type: str,
-                                   input_aria: str = "arena_timeout_input"):
+                                   reveal_mode: str = "blurred", corner: str = "top left", input_aria: str = "arena_timeout_input"):
         components.html(f"""
         <script>
         (function() {{
@@ -1126,6 +1139,8 @@ def init_arena_module(get_engine, run_query, run_write_query,
             const durationMs = {duration_sec * 1000};
             const roundKey = {json.dumps(round_key)};
             const gameType = {json.dumps(game_type)};
+            const revealMode = {json.dumps(reveal_mode)};
+            const corner = {json.dumps(corner)};
             
             if (doc.__arenaRoundKey !== roundKey) {{
                 doc.__arenaRoundKey = roundKey;
@@ -1148,8 +1163,14 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 
                 if (bar) bar.style.width = ((1 - frac) * 100) + '%';
                 
-                if (img && gameType !== 'tracks' && gameType !== 'letter_rally' && gameType !== 'letter_blitz') {{
-                    img.style.filter = 'blur(' + (22 * (1 - frac)) + 'px)';
+                if (img && (gameType === 'cover' || gameType === 'artist')) {{
+                    if (revealMode === 'blurred') {{
+                        img.style.filter = 'blur(' + (22 * (1 - frac)) + 'px)';
+                    }} else if (revealMode === 'corners') {{
+                        const currentScale = 1 + (3 * (1 - frac)); // Scales from 4.0 down to 1.0
+                        img.style.transformOrigin = corner;
+                        img.style.transform = 'scale(' + currentScale + ')';
+                    }}
                 }}
                 
                 if (frac >= 1 && !doc.__arenaTimedOut) {{
@@ -1441,7 +1462,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
     .arena-progress-track {{ width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; margin-bottom: 1rem; }}
     .arena-progress-bar {{ height: 100%; width: 100%; background: {GREEN}; transition: width 0.15s linear; }}
     .arena-reveal-frame {{ width: 100%; aspect-ratio: 1; max-width: 280px; margin: 0 auto 1.5rem; border-radius: 16px; overflow: hidden; background: {BG}; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
-    .arena-reveal-frame img {{ width: 100%; height: 100%; object-fit: cover; transition: filter 0.15s linear; }}
+    .arena-reveal-frame img {{ width: 100%; height: 100%; object-fit: cover; transition: filter 0.15s linear, transform 0.15s linear; }}
     .arena-mc-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin: 1rem 0 1.6rem; }}
     .arena-mc-option {{
         background: rgba(255,255,255,0.05); border: 1px solid {BORDER}; border-radius: 12px;
@@ -1570,6 +1591,52 @@ def init_arena_module(get_engine, run_query, run_write_query,
         font-size: 2.6rem; font-weight: 900; color: #05130a;
         box-shadow: 0 10px 30px rgba(29,185,84,0.35);
     }}
+
+    /* ─── Reveal spin: plays once when the badge (letter / artist) first
+       appears, so choosing the round feels like a little roulette spin ─── */
+    .arena-badge-spin-wrap {{
+        position: relative;
+        width: 84px; height: 84px;
+        margin: 0 auto 1.4rem;
+    }}
+    .arena-badge-spin-wrap .arena-letter-badge {{
+        margin: 0;
+        position: relative;
+        z-index: 2;
+    }}
+    .arena-badge-spin-ring {{
+        position: absolute;
+        inset: -12px;
+        border-radius: 26px;
+        background: conic-gradient(from 0deg, transparent 0%, {GREEN} 35%, #ffffff 50%, {GREEN} 65%, transparent 100%);
+        opacity: 0;
+        z-index: 1;
+        pointer-events: none;
+    }}
+    .arena-badge-spin-ring.arena-ring-active {{
+        animation: arenaRingSpin 1.5s linear 1, arenaRingFade 1.6s ease-out 1;
+    }}
+    @keyframes arenaRingSpin {{
+        from {{ transform: rotate(0deg); }}
+        to   {{ transform: rotate(1080deg); }}
+    }}
+    @keyframes arenaRingFade {{
+        0%   {{ opacity: 0; }}
+        8%   {{ opacity: 1; }}
+        75%  {{ opacity: 1; }}
+        100% {{ opacity: 0; }}
+    }}
+    .arena-letter-badge.arena-badge-spin {{
+        animation: arenaBadgeSpin 1.5s cubic-bezier(0.16, 0.86, 0.3, 1) 1;
+    }}
+    @keyframes arenaBadgeSpin {{
+        0%   {{ transform: rotate(0deg) scale(1); filter: blur(0px); }}
+        12%  {{ filter: blur(3px); }}
+        55%  {{ transform: rotate(1080deg) scale(1.12); filter: blur(2px); }}
+        85%  {{ transform: rotate(1440deg) scale(1.15); filter: blur(0px); }}
+        100% {{ transform: rotate(1440deg) scale(1); filter: blur(0px); }}
+    }}
+
     .arena-found-list {{ display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.8rem 0 1.2rem; justify-content: center; }}
     .arena-found-chip {{
         background: rgba(29,185,84,0.12); border: 1px solid rgba(29,185,84,0.35); color: {GREEN};
@@ -1818,15 +1885,19 @@ def init_arena_module(get_engine, run_query, run_write_query,
         )
 
         difficulty = "hard"
+        reveal_mode = "blurred"
         if game_type != "tracks":
             st.markdown("<div style='height:1.4rem;'></div>", unsafe_allow_html=True)
 
-            difficulty = _segment_control(
-                "Difficulty",
-                [("easy", "🟢 Easy"), ("hard", "🔴 Hard")],
-                "arena_difficulty_seg", "hard",
-                accent_colors={"easy": GREEN, "hard": "#ef4444"},
-            )
+            if game_type in ("cover", "artist"):
+                c_diff, c_rev = st.columns(2)
+                with c_diff:
+                    difficulty = _segment_control("Difficulty", [("easy", "🟢 Easy"), ("hard", "🔴 Hard")], "arena_difficulty_seg", "hard", accent_colors={"easy": GREEN, "hard": "#ef4444"})
+                with c_rev:
+                    reveal_mode = _segment_control("Reveal Style", [("blurred", "💧 Blurred"), ("corners", "🔲 Corners")], "arena_reveal_mode_seg", "blurred")
+            else:
+                difficulty = _segment_control("Difficulty", [("easy", "🟢 Easy"), ("hard", "🔴 Hard")], "arena_difficulty_seg", "hard", accent_colors={"easy": GREEN, "hard": "#ef4444"})
+
             caption = ("Always 4 multiple-choice options — no typing required."
                        if difficulty == "easy" else
                        "Type the exact name. Stuck? Spend a hint to reveal 4 options.")
@@ -1841,7 +1912,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Start Game", key="arena_start_btn", type="primary", use_container_width=True):
             game_type = st.session_state["arena_game_type"]
-            pool_id = create_pool(user_id, game_type, round_count, mode, friend_user_id, difficulty)
+            pool_id = create_pool(user_id, game_type, round_count, mode, friend_user_id, difficulty, None, reveal_mode)
             session = get_or_create_session(pool_id, user_id)
             st.session_state["arena_pool_id"] = pool_id
             st.session_state["arena_session_id"] = session["id"]
@@ -1987,21 +2058,62 @@ def init_arena_module(get_engine, run_query, run_write_query,
     # Letter Roulette / Discography Duel — gameplay UI (Rally / Blitz)
     # ─────────────────────────────────────────────────────────────────
 
+    def render_badge_spin_script(spin_key: str | int):
+        """Plays the one-time reveal spin on the badge (letter tile / artist
+        photo) the first time it mounts for this pool. Uses a flag stored on
+        the parent document so it survives Streamlit reruns and never
+        replays mid-game — only the very first time a player sees it."""
+        components.html(f"""
+        <script>
+        (function() {{
+            const doc = window.parent.document;
+            const flagKey = '__arenaBadgeSpun_' + {json.dumps(str(spin_key))};
+            if (doc[flagKey]) return;
+
+            function trySpin(retries) {{
+                const badge = doc.querySelector('.arena-badge-spin-wrap .arena-letter-badge');
+                const ring = doc.querySelector('.arena-badge-spin-ring');
+                if (!badge) {{
+                    if (retries > 0) setTimeout(function() {{ trySpin(retries - 1); }}, 60);
+                    return;
+                }}
+                doc[flagKey] = true;
+                badge.classList.add('arena-badge-spin');
+                if (ring) ring.classList.add('arena-ring-active');
+                setTimeout(function() {{
+                    badge.classList.remove('arena-badge-spin');
+                    if (ring) ring.classList.remove('arena-ring-active');
+                }}, 1650);
+            }}
+            trySpin(10);
+        }})();
+        </script>
+        """, height=0)
+
     def _duel_badge_html(pool: dict) -> str:
         """Renders the round 'badge' — a big letter tile for Letter Roulette,
-        or the artist's photo (falling back to initials) for Discography Duel."""
+        or the artist's photo (falling back to initials) for Discography Duel.
+        Wrapped so a one-time spin/reveal effect can be layered on top."""
         if pool.get("game_type") == "discog":
             name = pool.get("target_artist_name") or "?"
             img = pool.get("target_artist_image")
             if img:
-                return (
+                inner = (
                     f'<div class="arena-letter-badge" style="padding:0;overflow:hidden;">'
                     f'<img src="{escape(img)}" style="width:100%;height:100%;object-fit:cover;" />'
                     f'</div>'
                 )
-            initials = "".join(w[0] for w in name.split()[:2]).upper() or "?"
-            return f'<div class="arena-letter-badge" style="font-size:1.7rem;">{escape(initials)}</div>'
-        return f'<div class="arena-letter-badge">{escape(pool.get("target_letter") or "?")}</div>'
+            else:
+                initials = "".join(w[0] for w in name.split()[:2]).upper() or "?"
+                inner = f'<div class="arena-letter-badge" style="font-size:1.7rem;">{escape(initials)}</div>'
+        else:
+            inner = f'<div class="arena-letter-badge">{escape(pool.get("target_letter") or "?")}</div>'
+        return (
+            f'<div class="arena-badge-spin-wrap">'
+            f'<div class="arena-badge-spin-ring"></div>'
+            f'{inner}'
+            f'</div>'
+        )
 
     def _duel_title_html(pool: dict) -> str:
         """Artist name caption shown under the badge for Discography Duel."""
@@ -2028,6 +2140,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
             unsafe_allow_html=True
         )
         st.markdown(_duel_badge_html(pool), unsafe_allow_html=True)
+        render_badge_spin_script(f"{pool['id']}")
         badge_caption = _duel_title_html(pool)
         if badge_caption:
             st.markdown(badge_caption, unsafe_allow_html=True)
@@ -2110,6 +2223,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
             unsafe_allow_html=True
         )
         st.markdown(_duel_badge_html(pool), unsafe_allow_html=True)
+        render_badge_spin_script(f"{pool['id']}_{user_id}")
         badge_caption = _duel_title_html(pool)
         if badge_caption:
             st.markdown(badge_caption, unsafe_allow_html=True)
@@ -2228,14 +2342,27 @@ def init_arena_module(get_engine, run_query, run_write_query,
             st.session_state[start_key] = time.time()
         started_at = st.session_state[start_key]
 
+        reveal_mode = pool.get("reveal_mode", "blurred")
+        corner_key = f"arena_corner_{session_id}_{session['current_round']}"
+        if corner_key not in st.session_state:
+            st.session_state[corner_key] = random.choice(["top left", "top right", "bottom left", "bottom right"])
+        corner = st.session_state[corner_key]
+
+        img_style = ""
+        if pool.get("game_type") in ("cover", "artist"):
+            if reveal_mode == "blurred":
+                img_style = "filter: blur(22px);"
+            else:
+                img_style = f"transform-origin: {corner}; transform: scale(4);"
+
         st.markdown(f'''
         <div class="arena-progress-track"><div class="arena-progress-bar" id="arena-progress-bar"></div></div>
-        <div class="arena-reveal-frame"><img id="arena-reveal-img" src="{escape(round_row["image_url"] or "")}" /></div>
+        <div class="arena-reveal-frame"><img id="arena-reveal-img" src="{escape(round_row["image_url"] or "")}" style="{img_style}" /></div>
         ''', unsafe_allow_html=True)
 
         round_key = f"{session_id}_{session['current_round']}"
         dur_sec = get_round_duration(pool.get("game_type", "cover"))
-        render_round_timer_script(round_key, started_at * 1000, dur_sec, pool.get("game_type", "cover"))
+        render_round_timer_script(round_key, started_at * 1000, dur_sec, pool.get("game_type", "cover"), reveal_mode, corner)
 
         hint_key = f"arena_hint_{session_id}_{session['current_round']}"
         hint_active = st.session_state.get(hint_key, False)
