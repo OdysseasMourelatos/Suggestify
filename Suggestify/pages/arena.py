@@ -76,6 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_arena_pools_friend ON arena_pools(friend_user_id)
 
 ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS difficulty VARCHAR(10) NOT NULL DEFAULT 'hard';
 ALTER TABLE arena_pools ADD COLUMN IF NOT EXISTS reveal_mode VARCHAR(20) NOT NULL DEFAULT 'blurred';
+ALTER TABLE arena_stats_questions ADD COLUMN IF NOT EXISTS option_counts JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS arena_pool_rounds (
     id                BIGSERIAL PRIMARY KEY,
@@ -717,73 +718,92 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 if len(top_albums) >= 4: valid_cats.append(("album", top_albums))
 
                 if not valid_cats:
-                    # Fallback αν δεν έχει δεδομένα
                     q_type, q_text = "most", "Not enough listening history yet!"
-                    options, correct_idx, base_pts = ["N/A"] * 4, 0, 100
+                    options, option_counts, correct_idx, base_pts = ["N/A"] * 4, [0] * 4, 0, 100
                 else:
                     cat_name, cat_data = random.choice(valid_cats)
                     sample = random.sample(cat_data, 4)
                     sample.sort(key=lambda x: x['c'], reverse=True) # Highest to lowest streams
                     
                     q_type = random.choice(["most", "least", "exact", "threshold"])
+                    option_counts = []
                     
                     if q_type == "most":
+                        correct_name = sample[0]['name']
                         q_text = f"Which of these {cat_name}s have you streamed the MOST?"
+                        
+                        random.shuffle(sample)
                         options = [s['name'] for s in sample]
-                        correct_idx = 0
+                        option_counts = [s['c'] for s in sample]
+                        correct_idx = options.index(correct_name)
                         base_pts = STATS_QUESTION_POINTS["most"]
                         
                     elif q_type == "least":
+                        correct_name = sample[-1]['name']
                         q_text = f"Which of these {cat_name}s have you streamed the LEAST?"
+                        
+                        random.shuffle(sample)
                         options = [s['name'] for s in sample]
-                        random.shuffle(options)
-                        correct_idx = options.index(sample[-1]['name'])
+                        option_counts = [s['c'] for s in sample]
+                        correct_idx = options.index(correct_name)
                         base_pts = STATS_QUESTION_POINTS["least"]
                         
                     elif q_type == "exact":
                         target = sample[0]
-                        q_text = f"How many times have you streamed the {cat_name} '{target['name']}'?"
-                        correct_ans = target['c']
+                        exact_ans = target['c']
+                        rounded_ans = int(round(exact_ans, -1)) if exact_ans >= 10 else exact_ans
+                        
+                        q_text = f"Approximately how many times have you streamed the {cat_name} '{target['name']}'?"
+                        
                         wrong_opts = [
-                            correct_ans + random.randint(5, 20), 
-                            max(1, correct_ans - random.randint(1, 4)), 
-                            correct_ans + random.randint(21, 50)
+                            rounded_ans + random.choice([10, 20, 50]), 
+                            max(1, rounded_ans - random.choice([10, 20])), 
+                            int(rounded_ans * random.choice([1.5, 2.0]))
                         ]
-                        options = [str(x) for x in [correct_ans] + wrong_opts]
-                        random.shuffle(options)
-                        correct_idx = options.index(str(correct_ans))
+                        opts_set = {rounded_ans}
+                        for w in wrong_opts:
+                            while w in opts_set: w += 10
+                            opts_set.add(w)
+                            
+                        options_ints = list(opts_set)
+                        random.shuffle(options_ints)
+                        options = [str(x) for x in options_ints]
+                        option_counts = [exact_ans] * 4 # Pass exact number strictly for the reveal UI
+                        correct_idx = options_ints.index(rounded_ans)
                         base_pts = STATS_QUESTION_POINTS["exact"]
                         
                     else: # threshold
-                        # Ελέγχουμε αν υπάρχει ξεκάθαρη διαφορά στα streams για να βγάλουμε "more/less"
                         if random.choice([True, False]) and sample[0]['c'] > sample[1]['c']:
                             target = sample[0]
-                            threshold = random.randint(sample[1]['c'] + 1, target['c'])
-                            if threshold == target['c']: threshold -= 1
-                            q_text = f"Which of these {cat_name}s have you streamed MORE than {max(1, threshold)} times?"
-                            options = [s['name'] for s in sample]
-                            random.shuffle(options)
-                            correct_idx = options.index(target['name'])
+                            exact_t = random.randint(sample[1]['c'] + 1, target['c'])
+                            if exact_t == target['c']: exact_t -= 1
+                            t = int(round(exact_t, -1)) if exact_t >= 20 else exact_t
+                            if t >= target['c'] or t <= sample[1]['c']: t = exact_t
+                            
+                            q_text = f"Which of these {cat_name}s have you streamed MORE than {max(1, t)} times?"
+                            correct_name = target['name']
                         elif sample[-2]['c'] > sample[-1]['c']:
                             target = sample[-1]
-                            threshold = random.randint(target['c'] + 1, sample[-2]['c'])
-                            q_text = f"Which of these {cat_name}s have you streamed LESS than {threshold} times?"
-                            options = [s['name'] for s in sample]
-                            random.shuffle(options)
-                            correct_idx = options.index(target['name'])
-                        else:
-                            # Fallback σε "most" αν υπάρχουν ισοβαθμίες που χαλάνε το threshold 
-                            q_text = f"Which of these {cat_name}s have you streamed the MOST?"
-                            options = [s['name'] for s in sample]
-                            correct_idx = 0
+                            exact_t = random.randint(target['c'] + 1, sample[-2]['c'])
+                            t = int(round(exact_t, -1)) if exact_t >= 20 else exact_t
+                            if t <= target['c'] or t >= sample[-2]['c']: t = exact_t
                             
+                            q_text = f"Which of these {cat_name}s have you streamed LESS than {t} times?"
+                            correct_name = target['name']
+                        else:
+                            q_text = f"Which of these {cat_name}s have you streamed the MOST?"
+                            correct_name = sample[0]['name']
+                            
+                        random.shuffle(sample)
+                        options = [s['name'] for s in sample]
+                        option_counts = [s['c'] for s in sample]
+                        correct_idx = options.index(correct_name)
                         base_pts = STATS_QUESTION_POINTS["threshold"]
 
                 run_write_query("""
-                    INSERT INTO arena_stats_questions (pool_id, round_number, question_type, question_text, options, correct_index, base_points)
-                    VALUES (:pid, :rn, :qtype, :qtext, :opts, :cidx, :bpts)
-                """, dict(pid=pool_id, rn=i, qtype=q_type, qtext=q_text, opts=json.dumps(options), cidx=correct_idx, bpts=base_pts))
-
+                    INSERT INTO arena_stats_questions (pool_id, round_number, question_type, question_text, options, correct_index, base_points, option_counts)
+                    VALUES (:pid, :rn, :qtype, :qtext, :opts, :cidx, :bpts, :ocounts)
+                """, dict(pid=pool_id, rn=i, qtype=q_type, qtext=q_text, opts=json.dumps(options), cidx=correct_idx, bpts=base_pts, ocounts=json.dumps(option_counts)))
             return pool_id
         
         host_pool = _eligible_pool(host_user_id, game_type)
@@ -1557,10 +1577,13 @@ def init_arena_module(get_engine, run_query, run_write_query,
             is_last = session["current_round"] >= pool["round_count"]
             if is_last:
                 finalize_session(session["id"])
+            raw_counts = q.get("option_counts", "[]")
+            opt_counts = json.loads(raw_counts) if isinstance(raw_counts, str) else raw_counts
+            
             st.session_state["_arena_stats_reveal"] = dict(
-                round_key=round_key, options=q["options"], chosen_idx=idx,
+                round_key=round_key, options=q["options"], option_counts=opt_counts, chosen_idx=idx,
                 correct_index=q["correct_index"], is_correct=is_correct,
-                points=points, is_last=is_last, question_text=q["question_text"],
+                points=points, is_last=is_last, question_text=q["question_text"], question_type=q.get("question_type", "")
             )
 
         def on_stats_timeout():
@@ -1580,10 +1603,13 @@ def init_arena_module(get_engine, run_query, run_write_query,
             is_last = session["current_round"] >= pool["round_count"]
             if is_last:
                 finalize_session(session["id"])
+            raw_counts = q.get("option_counts", "[]")
+            opt_counts = json.loads(raw_counts) if isinstance(raw_counts, str) else raw_counts
+
             st.session_state["_arena_stats_reveal"] = dict(
-                round_key=round_key, options=q["options"], chosen_idx=-1,
+                round_key=round_key, options=q["options"], option_counts=opt_counts, chosen_idx=-1,
                 correct_index=q["correct_index"], is_correct=False,
-                points=points, is_last=is_last, question_text=q["question_text"],
+                points=points, is_last=is_last, question_text=q["question_text"], question_type=q.get("question_type", "")
             )
 
         st.text_input("arena_stats_mc_input", key="arena_stats_mc_state",
@@ -2377,15 +2403,28 @@ def init_arena_module(get_engine, run_query, run_write_query,
         st.markdown(f'<div class="arena-stats-question">{escape(reveal["question_text"])}</div>', unsafe_allow_html=True)
 
         opts_html = ""
+        opts_html = ""
+        option_counts = reveal.get("option_counts", [])
+        q_type = reveal.get("question_type", "")
+        
         for i, o in enumerate(reveal["options"]):
             cls = "arena-reveal-option"
             if i == reveal["correct_index"]:
                 cls += " arena-reveal-correct-tile"
             elif i == reveal["chosen_idx"]:
                 cls += " arena-reveal-wrong-tile"
-            opts_html += f'<div class="{cls}">{escape(o)}</div>'
+                
+            count_html = ""
+            if option_counts and len(option_counts) > i:
+                if q_type == "exact":
+                    if i == reveal["correct_index"]:
+                        count_html = f'<div style="font-size:0.8rem; opacity:0.8; margin-top:0.3rem;">Exact: {option_counts[i]} streams</div>'
+                else:
+                    count_html = f'<div style="font-size:0.8rem; opacity:0.8; margin-top:0.3rem;">{option_counts[i]} streams</div>'
+                    
+            opts_html += f'<div class="{cls}">{escape(o)}{count_html}</div>'
+            
         st.markdown(f'<div class="arena-mc-grid">{opts_html}</div>', unsafe_allow_html=True)
-
         render_reveal_continue_script(reveal["round_key"])
 
     def _render_stats_gameplay(user_id: int, pool_id: int, pool: dict, session_id: int):
