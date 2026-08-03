@@ -25,6 +25,7 @@ RALLY_TURN_SECONDS = 60         # Letter Roulette / Discography Duel — Rally: 
 BLITZ_SECONDS = 120             # Letter Roulette / Discography Duel — Blitz: single countdown
 LETTER_MIN_POOL = 6             # a letter needs >= this many eligible songs to be selectable
 DISCOG_MIN_POOL = 6             # an artist needs >= this many eligible songs to be selectable
+STATS_MIN_SONGS = 12            # min distinct streamed songs before Streaming Stats unlocks
 
 ELIGIBILITY_FLOOR = 15          # min eligible items per game_type before Arena unlocks for a user
 HINT_BUDGET = {5: 1, 10: 2, 20: 4}
@@ -34,12 +35,20 @@ FUZZY_MATCH_THRESHOLD = 0.82    # difflib ratio for free-text answers
 EASY_SCORE_MULTIPLIER = 0.8     # slight point discount for the always-multiple-choice mode
 PERFECT_ALBUM_BONUS_FRAC = 0.2  # +20% bonus points when 100% of an album's tracks are found
 
+STATS_QUESTION_POINTS = {
+    "most": 100,       # "which of these have you streamed the most?"
+    "least": 100,      # "...the least?"
+    "threshold": 120,  # "which of these have you streamed more than N times?"
+    "exact": 150,      # "how many times have you streamed X?"
+}
+
 GAME_META = {
     "cover":  {"icon": "🖼️", "label": "Guess the Cover",  "desc": "Album art, progressively revealed."},
     "artist": {"icon": "🎤", "label": "Guess the Artist", "desc": "Artist photos, progressively revealed."},
     "tracks": {"icon": "📀", "label": "Guess the Album Tracks", "desc": "Name every track on a full album before the clock runs out."},
     "letter": {"icon": "🔤", "label": "Letter Roulette", "desc": "Name songs starting with a random letter before time runs out."},
     "discog": {"icon": "🎙️", "label": "Discography Duel", "desc": "Name as many songs as you can by a random artist from your library before time runs out."},
+    "stats":  {"icon": "📊", "label": "Streaming Stats", "desc": "Multiple-choice trivia about your own streaming numbers."},
 }
 
 def get_round_duration(game_type: str) -> int:
@@ -120,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_arena_round_answers_session ON arena_round_answer
 -- Κεντρικά Check Constraints 
 ALTER TABLE arena_pools DROP CONSTRAINT IF EXISTS arena_pools_game_type_check;
 ALTER TABLE arena_pools ADD CONSTRAINT arena_pools_game_type_check
-    CHECK (game_type IN ('cover','artist','tracks','letter','discog'));
+    CHECK (game_type IN ('cover','artist','tracks','letter','discog','stats'));
 
 ALTER TABLE arena_pools DROP CONSTRAINT IF EXISTS arena_pools_round_count_check;
 ALTER TABLE arena_pools ADD CONSTRAINT arena_pools_round_count_check
@@ -186,6 +195,22 @@ CREATE TABLE IF NOT EXISTS arena_letter_answers (
 );
 CREATE INDEX IF NOT EXISTS idx_arena_letter_answers_pool    ON arena_letter_answers(pool_id);
 CREATE INDEX IF NOT EXISTS idx_arena_letter_answers_session ON arena_letter_answers(session_id);
+
+-- Streaming Stats — personal-profile trivia questions, generated per pool.
+-- Answers/scoring reuse the generic arena_round_answers table (round_number
+-- is a free-standing counter here, not an FK into arena_pool_rounds).
+CREATE TABLE IF NOT EXISTS arena_stats_questions (
+    id             BIGSERIAL PRIMARY KEY,
+    pool_id        BIGINT NOT NULL REFERENCES arena_pools(id) ON DELETE CASCADE,
+    round_number   INT NOT NULL,
+    question_type  VARCHAR(30) NOT NULL,
+    question_text  TEXT NOT NULL,
+    options        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    correct_index  INT NOT NULL,
+    base_points    INT NOT NULL,
+    CONSTRAINT uq_arena_stats_question UNIQUE (pool_id, round_number)
+);
+CREATE INDEX IF NOT EXISTS idx_arena_stats_questions_pool ON arena_stats_questions(pool_id);
 """
 
 def init_arena_module(get_engine, run_query, run_write_query,
@@ -451,6 +476,11 @@ def init_arena_module(get_engine, run_query, run_write_query,
         out["tracks"] = len(_eligible_albums_pool(user_id)) >= ELIGIBILITY_FLOOR
         out["letter"] = len(_letter_eligible_letters([user_id])) > 0
         out["discog"] = len(_discog_eligible_artists([user_id])) > 0
+        
+        # --- ΠΡΟΣΘΗΚΗ ΓΙΑ ΤΟ STREAMING STATS ---
+        st_df = run_query("SELECT COUNT(DISTINCT song_id) AS c FROM streams WHERE user_id = :uid", {"uid": user_id})
+        out["stats"] = (st_df.iloc[0]["c"] if not st_df.empty else 0) >= STATS_MIN_SONGS
+        
         return out
 
     def _stratified_sample(pool: pd.DataFrame, n: int) -> list[dict]:
@@ -637,7 +667,125 @@ def init_arena_module(get_engine, run_query, run_write_query,
                               track_name=trk["track_name"], track_number=pos, tier=trk["tier"],
                               base_points=TIER_BASE_POINTS[trk["tier"]]))
             return pool_id
+        
+        if game_type == "stats":
+            rows = run_write_query("""
+                INSERT INTO arena_pools (mode, game_type, round_count, difficulty, hint_budget, host_user_id, friend_user_id, reveal_mode)
+                VALUES (:mode, :game_type, :round_count, :difficulty, :hint_budget, :host_user_id, :friend_user_id, :reveal_mode)
+                RETURNING id
+            """, dict(mode=mode, game_type=game_type, round_count=round_count, difficulty=difficulty,
+                      hint_budget=hint_budget, host_user_id=host_user_id, friend_user_id=friend_user_id, reveal_mode=reveal_mode))
+            pool_id = rows[0]["id"]
 
+            # 1. Φέρνουμε Top Artists, Songs και Albums
+            top_artists_df = run_query("""
+                SELECT a.name, COUNT(*) as c 
+                FROM streams s 
+                JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
+                JOIN artists a ON a.id = sa.artist_id
+                WHERE s.user_id = :uid 
+                GROUP BY a.id 
+                ORDER BY c DESC LIMIT 40
+            """, {"uid": host_user_id})
+            top_artists = top_artists_df.to_dict('records') if not top_artists_df.empty else []
+
+            top_songs_df = run_query("""
+                SELECT so.title as name, COUNT(*) as c 
+                FROM streams s 
+                JOIN songs so ON so.id = s.song_id
+                WHERE s.user_id = :uid 
+                GROUP BY so.id 
+                ORDER BY c DESC LIMIT 40
+            """, {"uid": host_user_id})
+            top_songs = top_songs_df.to_dict('records') if not top_songs_df.empty else []
+
+            top_albums_df = run_query("""
+                SELECT al.title as name, COUNT(*) as c 
+                FROM streams s 
+                JOIN songs so ON so.id = s.song_id
+                JOIN albums al ON al.id = so.album_id
+                WHERE s.user_id = :uid 
+                GROUP BY al.id 
+                ORDER BY c DESC LIMIT 40
+            """, {"uid": host_user_id})
+            top_albums = top_albums_df.to_dict('records') if not top_albums_df.empty else []
+
+            for i in range(1, round_count + 1):
+                valid_cats = []
+                if len(top_artists) >= 4: valid_cats.append(("artist", top_artists))
+                if len(top_songs) >= 4: valid_cats.append(("song", top_songs))
+                if len(top_albums) >= 4: valid_cats.append(("album", top_albums))
+
+                if not valid_cats:
+                    # Fallback αν δεν έχει δεδομένα
+                    q_type, q_text = "most", "Not enough listening history yet!"
+                    options, correct_idx, base_pts = ["N/A"] * 4, 0, 100
+                else:
+                    cat_name, cat_data = random.choice(valid_cats)
+                    sample = random.sample(cat_data, 4)
+                    sample.sort(key=lambda x: x['c'], reverse=True) # Highest to lowest streams
+                    
+                    q_type = random.choice(["most", "least", "exact", "threshold"])
+                    
+                    if q_type == "most":
+                        q_text = f"Which of these {cat_name}s have you streamed the MOST?"
+                        options = [s['name'] for s in sample]
+                        correct_idx = 0
+                        base_pts = STATS_QUESTION_POINTS["most"]
+                        
+                    elif q_type == "least":
+                        q_text = f"Which of these {cat_name}s have you streamed the LEAST?"
+                        options = [s['name'] for s in sample]
+                        random.shuffle(options)
+                        correct_idx = options.index(sample[-1]['name'])
+                        base_pts = STATS_QUESTION_POINTS["least"]
+                        
+                    elif q_type == "exact":
+                        target = sample[0]
+                        q_text = f"How many times have you streamed the {cat_name} '{target['name']}'?"
+                        correct_ans = target['c']
+                        wrong_opts = [
+                            correct_ans + random.randint(5, 20), 
+                            max(1, correct_ans - random.randint(1, 4)), 
+                            correct_ans + random.randint(21, 50)
+                        ]
+                        options = [str(x) for x in [correct_ans] + wrong_opts]
+                        random.shuffle(options)
+                        correct_idx = options.index(str(correct_ans))
+                        base_pts = STATS_QUESTION_POINTS["exact"]
+                        
+                    else: # threshold
+                        # Ελέγχουμε αν υπάρχει ξεκάθαρη διαφορά στα streams για να βγάλουμε "more/less"
+                        if random.choice([True, False]) and sample[0]['c'] > sample[1]['c']:
+                            target = sample[0]
+                            threshold = random.randint(sample[1]['c'] + 1, target['c'])
+                            if threshold == target['c']: threshold -= 1
+                            q_text = f"Which of these {cat_name}s have you streamed MORE than {max(1, threshold)} times?"
+                            options = [s['name'] for s in sample]
+                            random.shuffle(options)
+                            correct_idx = options.index(target['name'])
+                        elif sample[-2]['c'] > sample[-1]['c']:
+                            target = sample[-1]
+                            threshold = random.randint(target['c'] + 1, sample[-2]['c'])
+                            q_text = f"Which of these {cat_name}s have you streamed LESS than {threshold} times?"
+                            options = [s['name'] for s in sample]
+                            random.shuffle(options)
+                            correct_idx = options.index(target['name'])
+                        else:
+                            # Fallback σε "most" αν υπάρχουν ισοβαθμίες που χαλάνε το threshold 
+                            q_text = f"Which of these {cat_name}s have you streamed the MOST?"
+                            options = [s['name'] for s in sample]
+                            correct_idx = 0
+                            
+                        base_pts = STATS_QUESTION_POINTS["threshold"]
+
+                run_write_query("""
+                    INSERT INTO arena_stats_questions (pool_id, round_number, question_type, question_text, options, correct_index, base_points)
+                    VALUES (:pid, :rn, :qtype, :qtext, :opts, :cidx, :bpts)
+                """, dict(pid=pool_id, rn=i, qtype=q_type, qtext=q_text, opts=json.dumps(options), cidx=correct_idx, bpts=base_pts))
+
+            return pool_id
+        
         host_pool = _eligible_pool(host_user_id, game_type)
 
         if mode == "friends" and friend_user_id:
@@ -708,6 +856,14 @@ def init_arena_module(get_engine, run_query, run_write_query,
     def get_round(pool_id: int, round_number: int) -> dict | None:
         rows = run_write_query("""
             SELECT * FROM arena_pool_rounds WHERE pool_id=:p AND round_number=:rn
+        """, {"p": pool_id, "rn": round_number})
+        return dict(rows[0]) if rows else None
+
+    # Add the missing stats question fetcher here:
+    def get_stats_question(pool_id: int, round_number: int) -> dict | None:
+        rows = run_write_query("""
+            SELECT * FROM arena_stats_questions 
+            WHERE pool_id=:p AND round_number=:rn
         """, {"p": pool_id, "rn": round_number})
         return dict(rows[0]) if rows else None
 
@@ -887,6 +1043,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
     # ─────────────────────────────────────────────────────────────────
 
     _DUEL_GAME_TYPES = ("letter", "discog")
+    _SOLO_ONLY_GAME_TYPES = ("stats",)
 
     def _load_letter_pool(pool: dict) -> list[dict]:
         key = f"arena_letter_pool_{pool['id']}"
@@ -1003,6 +1160,31 @@ def init_arena_module(get_engine, run_query, run_write_query,
     # ─────────────────────────────────────────────────────────────────
 
     def inject_arena_script():
+        # Εξαφανίζει τα κρυφά inputs και τα zero-height iframes από το UI
+        st.markdown("""
+        <style>
+        /* Κρύβει τα text inputs των workers χωρίς να σπάει το JS focus */
+        div[data-testid="stTextInput"]:has(input[aria-label^="arena_"]) {
+            position: absolute !important;
+            opacity: 0 !important;
+            width: 1px !important;
+            height: 1px !important;
+            overflow: hidden !important;
+            pointer-events: none !important;
+            z-index: -999 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        
+        /* Αφαιρεί το κενό που αφήνουν τα zero-height iframes */
+        div.element-container:has(iframe[height="0"]) {
+            display: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
         components.html("""
         <script>
         (function() {
@@ -1099,6 +1281,14 @@ def init_arena_module(get_engine, run_query, run_write_query,
             }
 
             doc.addEventListener('click', function(e) {
+                const sopt = e.target.closest('.arena-stats-mc-option');
+                if (sopt) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const sidx = sopt.dataset.idx;
+                    fire('input[aria-label="arena_stats_mc_input"]', sidx + ':' + Date.now());
+                    return;
+                }
                 const opt = e.target.closest('.arena-mc-option');
                 if (opt) {
                     e.preventDefault();
@@ -1319,6 +1509,8 @@ def init_arena_module(get_engine, run_query, run_write_query,
             val = st.session_state.get("arena_reveal_continue_state")
             if not val: return
             reveal = st.session_state.pop("_arena_mc_reveal", None)
+            if reveal is None:
+                reveal = st.session_state.pop("_arena_stats_reveal", None)
             if reveal and reveal.get("is_last"):
                 st.query_params["arena_view"] = "recap"
 
@@ -1327,6 +1519,77 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
         st.text_input("arena_mc_input", key="arena_mc_state",
                        label_visibility="collapsed", on_change=on_mc_click)
+
+        # ---- Streaming Stats: MC-click + timeout ----
+
+        def _current_stats_context():
+            pool_id = st.session_state.get("arena_pool_id")
+            session_id = st.session_state.get("arena_session_id")
+            if not pool_id or not session_id: return None
+            pool = get_pool(pool_id)
+            if not pool or pool.get("game_type") != "stats": return None
+            rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
+            if not rows: return None
+            session = dict(rows[0])
+            q = get_stats_question(pool_id, session["current_round"])
+            return pool, session, q
+
+        def on_stats_mc_click():
+            val = st.session_state.get("arena_stats_mc_state")
+            if not val: return
+            parts = val.split(":")
+            if len(parts) < 2: return
+            idx = int(parts[0])
+            ctx = _current_stats_context()
+            if not ctx: return
+            pool, session, q = ctx
+            if q is None: return
+            round_key = f"{session['id']}_{session['current_round']}"
+            if st.session_state.get("_arena_stats_reveal", {}).get("round_key") == round_key:
+                return
+            is_correct = idx == q["correct_index"]
+            start_key = f"arena_round_start_{session['id']}_{session['current_round']}"
+            started_at = st.session_state.get(start_key, time.time())
+            elapsed_ms = int((time.time() - started_at) * 1000)
+            synth_round = {"round_number": session["current_round"],
+                           "base_points": q["base_points"], "owner_user_id": session["user_id"]}
+            points = submit_round_answer(session, pool, synth_round, is_correct, False, elapsed_ms)
+            is_last = session["current_round"] >= pool["round_count"]
+            if is_last:
+                finalize_session(session["id"])
+            st.session_state["_arena_stats_reveal"] = dict(
+                round_key=round_key, options=q["options"], chosen_idx=idx,
+                correct_index=q["correct_index"], is_correct=is_correct,
+                points=points, is_last=is_last, question_text=q["question_text"],
+            )
+
+        def on_stats_timeout():
+            val = st.session_state.get("arena_stats_timeout_state")
+            if not val: return
+            ctx = _current_stats_context()
+            if not ctx: return
+            pool, session, q = ctx
+            if q is None: return
+            round_key = f"{session['id']}_{session['current_round']}"
+            if st.session_state.get("_arena_stats_reveal", {}).get("round_key") == round_key:
+                return
+            dur_sec = get_round_duration(pool.get("game_type", "stats"))
+            synth_round = {"round_number": session["current_round"],
+                           "base_points": q["base_points"], "owner_user_id": session["user_id"]}
+            points = submit_round_answer(session, pool, synth_round, False, False, dur_sec * 1000)
+            is_last = session["current_round"] >= pool["round_count"]
+            if is_last:
+                finalize_session(session["id"])
+            st.session_state["_arena_stats_reveal"] = dict(
+                round_key=round_key, options=q["options"], chosen_idx=-1,
+                correct_index=q["correct_index"], is_correct=False,
+                points=points, is_last=is_last, question_text=q["question_text"],
+            )
+
+        st.text_input("arena_stats_mc_input", key="arena_stats_mc_state",
+                       label_visibility="collapsed", on_change=on_stats_mc_click)
+        st.text_input("arena_stats_timeout_input", key="arena_stats_timeout_state",
+                       label_visibility="collapsed", on_change=on_stats_timeout)
 
         # ---- Letter Roulette / Discography Duel: rally timeout / blitz timeout / turn poll ----
 
@@ -1464,12 +1727,25 @@ def init_arena_module(get_engine, run_query, run_write_query,
     .arena-reveal-frame {{ width: 100%; aspect-ratio: 1; max-width: 280px; margin: 0 auto 1.5rem; border-radius: 16px; overflow: hidden; background: {BG}; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
     .arena-reveal-frame img {{ width: 100%; height: 100%; object-fit: cover; transition: filter 0.15s linear, transform 0.15s linear; }}
     .arena-mc-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin: 1rem 0 1.6rem; }}
-    .arena-mc-option {{
+    .arena-mc-option, .arena-stats-mc-option {{
         background: rgba(255,255,255,0.05); border: 1px solid {BORDER}; border-radius: 12px;
         padding: 1rem; text-align: center; font-weight: 600; color: {TEXT}; cursor: pointer;
         transition: all 0.15s ease;
     }}
-    .arena-mc-option:hover {{ border-color: {GREEN}; background: rgba(29,185,84,0.12); transform: translateY(-2px); }}
+    .arena-mc-option:hover, .arena-stats-mc-option:hover {{ border-color: {GREEN}; background: rgba(29,185,84,0.12); transform: translateY(-2px); }}
+
+    .arena-stats-question {{
+        font-size: 1.08rem;
+        font-weight: 700;
+        color: {TEXT};
+        text-align: center;
+        line-height: 1.45;
+        margin: 0.2rem 0 1.4rem;
+        padding: 0.9rem 1rem;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.035);
+        border: 1px solid {BORDER};
+    }}
 
     .arena-reveal-msg {{
         text-align: center; font-weight: 700; font-size: 1.05rem;
@@ -1759,9 +2035,11 @@ def init_arena_module(get_engine, run_query, run_write_query,
 
     def _render_game_select(user_id: int):
         _modal_header("🎧 Suggestify", "Choose a game")
+        mode = st.session_state.get("arena_mode", "solo")
         eligible = is_arena_eligible(user_id)
         for game_type, meta in GAME_META.items():
             ok = eligible.get(game_type, False)
+            solo_only_blocked = game_type in _SOLO_ONLY_GAME_TYPES and mode == "friends"
             with st.container():
                 cols = st.columns([4, 1])
                 cols[0].markdown(
@@ -1769,8 +2047,14 @@ def init_arena_module(get_engine, run_query, run_write_query,
                     f"<span style='color:{TEXT_MID};font-size:0.85rem;'>{meta['desc']}</span>",
                     unsafe_allow_html=True
                 )
-                disabled = not ok
-                if cols[1].button("Play" if ok else "Not enough data", key=f"arena_game_{game_type}", disabled=disabled):
+                disabled = (not ok) or solo_only_blocked
+                if solo_only_blocked:
+                    btn_label = "Solo only"
+                elif not ok:
+                    btn_label = "Not enough data"
+                else:
+                    btn_label = "Play"
+                if cols[1].button(btn_label, key=f"arena_game_{game_type}", disabled=disabled):
                     st.session_state["arena_game_type"] = game_type
                     st.query_params["arena_view"] = "rounds"
                     st.rerun()
@@ -1870,7 +2154,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 st.rerun()
             return
 
-        if mode == "friends":
+        if mode == "friends" and game_type not in _SOLO_ONLY_GAME_TYPES:
             other_usernames = [u for u in user_dict.keys() if user_dict[u] != user_id]
             if not other_usernames:
                 st.info("No other users to duel yet.")
@@ -1879,14 +2163,22 @@ def init_arena_module(get_engine, run_query, run_write_query,
             friend_user_id = user_dict[friend_username]
 
         round_count = _segment_control(
-            "How many albums?" if game_type == "tracks" else "How many rounds?",
+            "How many albums?" if game_type == "tracks" else
+            ("How many questions?" if game_type == "stats" else "How many rounds?"),
             [(5, "5"), (10, "10"), (20, "20")],
             "arena_round_count_seg", 10,
         )
 
         difficulty = "hard"
         reveal_mode = "blurred"
-        if game_type != "tracks":
+        if game_type == "stats":
+            st.markdown("<div style='height:1.4rem;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="arena-segment-caption">Multiple-choice questions about your own streaming '
+                f'numbers — songs, albums, and artists. Pick the right answer before the clock runs out.</div>',
+                unsafe_allow_html=True
+            )
+        elif game_type != "tracks":
             st.markdown("<div style='height:1.4rem;'></div>", unsafe_allow_html=True)
 
             if game_type in ("cover", "artist"):
@@ -1913,6 +2205,9 @@ def init_arena_module(get_engine, run_query, run_write_query,
         if st.button("Start Game", key="arena_start_btn", type="primary", use_container_width=True):
             game_type = st.session_state["arena_game_type"]
             pool_id = create_pool(user_id, game_type, round_count, mode, friend_user_id, difficulty, None, reveal_mode)
+            if pool_id is None:
+                st.error("Couldn't build this round — try again after streaming a bit more.")
+                return
             session = get_or_create_session(pool_id, user_id)
             st.session_state["arena_pool_id"] = pool_id
             st.session_state["arena_session_id"] = session["id"]
@@ -2053,6 +2348,95 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 st.session_state["_arena_tracks_reveal"] = session["current_round"]
                 finalize_track_round(session, pool, round_row)
                 st.rerun()
+
+    # ─────────────────────────────────────────────────────────────────
+    # Streaming Stats — trivia about the user's own listening numbers
+    # ─────────────────────────────────────────────────────────────────
+
+    def _render_stats_reveal(pool: dict, session: dict, reveal: dict):
+        game_meta = GAME_META["stats"]
+        answered_round_no = session["current_round"] - 1
+        st.markdown(
+            f'<div class="arena-kicker-wrap"><span class="arena-kicker">{game_meta["icon"]} {game_meta["label"]}</span></div>'
+            f'<div class="arena-title">Question {answered_round_no} <span style="font-size: 1.2rem; color: {TEXT_DIM};">/ {pool["round_count"]}</span></div>',
+            unsafe_allow_html=True
+        )
+
+        if reveal["is_correct"]:
+            st.markdown(
+                f'<div class="arena-reveal-msg arena-reveal-correct">✅ Correct! +{reveal.get("points", 0)} pts</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            correct_text = reveal["options"][reveal["correct_index"]]
+            st.markdown(
+                f'<div class="arena-reveal-msg arena-reveal-wrong">❌ Not quite — it was <b>{escape(correct_text)}</b></div>',
+                unsafe_allow_html=True
+            )
+
+        st.markdown(f'<div class="arena-stats-question">{escape(reveal["question_text"])}</div>', unsafe_allow_html=True)
+
+        opts_html = ""
+        for i, o in enumerate(reveal["options"]):
+            cls = "arena-reveal-option"
+            if i == reveal["correct_index"]:
+                cls += " arena-reveal-correct-tile"
+            elif i == reveal["chosen_idx"]:
+                cls += " arena-reveal-wrong-tile"
+            opts_html += f'<div class="{cls}">{escape(o)}</div>'
+        st.markdown(f'<div class="arena-mc-grid">{opts_html}</div>', unsafe_allow_html=True)
+
+        render_reveal_continue_script(reveal["round_key"])
+
+    def _render_stats_gameplay(user_id: int, pool_id: int, pool: dict, session_id: int):
+        rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
+        session = dict(rows[0])
+
+        reveal = st.session_state.get("_arena_stats_reveal")
+        if reveal and reveal.get("round_key") == f"{session_id}_{session['current_round'] - 1}":
+            _render_stats_reveal(pool, session, reveal)
+            return
+
+        if session["current_round"] > pool["round_count"]:
+            finalize_session(session_id)
+            st.query_params["arena_view"] = "recap"
+            st.rerun()
+            return
+
+        q = get_stats_question(pool_id, session["current_round"])
+        if q is None:
+            finalize_session(session_id)
+            st.query_params["arena_view"] = "recap"
+            st.rerun()
+            return
+
+        game_meta = GAME_META["stats"]
+        st.markdown(
+            f'<div class="arena-kicker-wrap"><span class="arena-kicker">{game_meta["icon"]} {game_meta["label"]}</span></div>'
+            f'<div class="arena-title">Question {session["current_round"]} '
+            f'<span style="font-size: 1.2rem; color: {TEXT_DIM};">/ {pool["round_count"]}</span></div>'
+            f'<div class="arena-subtitle">Score: <b>{session["total_score"]}</b></div>',
+            unsafe_allow_html=True
+        )
+
+        start_key = f"arena_round_start_{session_id}_{session['current_round']}"
+        if start_key not in st.session_state:
+            st.session_state[start_key] = time.time()
+        started_at = st.session_state[start_key]
+
+        st.markdown('<div class="arena-progress-track"><div class="arena-progress-bar" id="arena-progress-bar"></div></div>',
+                    unsafe_allow_html=True)
+        round_key = f"{session_id}_{session['current_round']}"
+        render_round_timer_script(round_key, started_at * 1000, REVEAL_SECONDS_DEFAULT, "stats",
+                                   input_aria="arena_stats_timeout_input")
+
+        st.markdown(f'<div class="arena-stats-question">{escape(q["question_text"])}</div>', unsafe_allow_html=True)
+
+        opts_html = "".join(
+            f'<div class="arena-stats-mc-option" data-idx="{i}">{escape(o)}</div>'
+            for i, o in enumerate(q["options"])
+        )
+        st.markdown(f'<div class="arena-mc-grid">{opts_html}</div>', unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────────────────────────
     # Letter Roulette / Discography Duel — gameplay UI (Rally / Blitz)
@@ -2291,6 +2675,10 @@ def init_arena_module(get_engine, run_query, run_write_query,
             _render_letter_gameplay(user_id, pool_id, pool, session_id)
             return
 
+        if pool.get("game_type") == "stats":
+            _render_stats_gameplay(user_id, pool_id, pool, session_id)
+            return
+
         tracks_reveal_no = st.session_state.get("_arena_tracks_reveal")
         if pool.get("game_type") == "tracks" and tracks_reveal_no:
             rows = run_write_query("SELECT * FROM arena_sessions WHERE id=:id", {"id": session_id})
@@ -2498,7 +2886,10 @@ def init_arena_module(get_engine, run_query, run_write_query,
         else:
             c2.metric("Correct", f"{session['correct_count']}/{pool['round_count']}")
         c3.metric("Best Round", session["best_round_score"])
-        if pool.get("difficulty") == "easy":
+        if pool.get("game_type") == "stats":
+            accuracy = round(100 * session["correct_count"] / max(1, pool["round_count"]))
+            c4.metric("Accuracy", f"{accuracy}%")
+        elif pool.get("difficulty") == "easy":
             c4.metric("Difficulty", "🟢 Easy")
         else:
             c4.metric("Hints Used", f"{session['hints_used']}/{pool['hint_budget']}")
