@@ -41,7 +41,7 @@ public class DatabaseManager {
             );
         """;
 
-        String createArtistsTable = "CREATE TABLE IF NOT EXISTS artists (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL, image_url VARCHAR(500));";
+        String createArtistsTable = "CREATE TABLE IF NOT EXISTS artists (id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL, image_url VARCHAR(500), spotify_id VARCHAR(50) UNIQUE, popularity INT DEFAULT 0, genres TEXT);";
 
         String createAlbumsTable = """
             CREATE TABLE IF NOT EXISTS albums (
@@ -51,7 +51,8 @@ public class DatabaseManager {
                 primary_genre VARCHAR(100),
                 total_tracks INT,
                 label VARCHAR(255),
-                is_explicit BOOLEAN DEFAULT FALSE
+                is_explicit BOOLEAN DEFAULT FALSE,
+                spotify_id VARCHAR(50) UNIQUE
             );
         """;
 
@@ -66,7 +67,14 @@ public class DatabaseManager {
                 release_date DATE,
                 primary_genre VARCHAR(100),
                 is_explicit BOOLEAN DEFAULT FALSE,
-                preview_url VARCHAR(500)
+                preview_url VARCHAR(500),
+                spotify_id VARCHAR(50) UNIQUE,
+                popularity INT DEFAULT 0,
+                tempo NUMERIC(6,3),
+                energy NUMERIC(4,3),
+                danceability NUMERIC(4,3),
+                valence NUMERIC(4,3),
+                acousticness NUMERIC(4,3)
             );
         """;
 
@@ -267,13 +275,13 @@ public class DatabaseManager {
             stmt.execute(createAlbumGenresTable);
             stmt.execute(createStreamsTable);
 
-            // Εκτέλεση των νέων πινάκων για Ratings
+            // Εκτέλεση των πινάκων για Ratings
             stmt.execute(createTriggerFunction);
             stmt.execute(createSongRatingsTable);
             stmt.execute(createAlbumRatingsTable);
             stmt.execute(createArtistRatingsTable);
 
-            // ── ΕΚΤΕΛΕΣΗ ΤΩΝ ΝΕΩΝ ΠΙΝΑΚΩΝ ΓΙΑ ΤΟ ARENA ──
+            // ── ΕΚΤΕΛΕΣΗ ΤΩΝ ΠΙΝΑΚΩΝ ΓΙΑ ΤΟ ARENA ──
             stmt.execute(createArenaPoolsTable);
             stmt.execute(createArenaPoolRoundsTable);
             stmt.execute(createArenaSessionsTable);
@@ -282,6 +290,35 @@ public class DatabaseManager {
             try {
                 stmt.execute("ALTER TABLE songs ADD CONSTRAINT unique_song_uri UNIQUE (track_uri);");
             } catch (Exception ignored) {
+            }
+
+            // ── MIGRATION: ΠΡΟΣΘΗΚΗ ΤΩΝ ΝΕΩΝ ΣΤΗΛΩΝ ΣΕ ΥΠΑΡΧΟΥΣΑ ΒΑΣΗ ──
+            try {
+                // 1. Βασικά Spotify IDs
+                stmt.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS spotify_id VARCHAR(50) UNIQUE;");
+                stmt.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_id VARCHAR(50) UNIQUE;");
+                stmt.execute("ALTER TABLE albums ADD COLUMN IF NOT EXISTS spotify_id VARCHAR(50) UNIQUE;");
+                
+                // 2. Audio Features (Spotify)
+                stmt.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS popularity INT DEFAULT 0;");
+                stmt.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS tempo NUMERIC(6,3);");
+                stmt.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS energy NUMERIC(4,3);");
+                stmt.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS danceability NUMERIC(4,3);");
+                stmt.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS valence NUMERIC(4,3);");
+                stmt.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS acousticness NUMERIC(4,3);");
+                
+                // 3. Artist Metadata (Spotify)
+                stmt.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS popularity INT DEFAULT 0;");
+                stmt.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS genres TEXT;");
+                
+                // 4. Δημιουργία Indexes για ταχύτητα
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_songs_spotify_id ON songs(spotify_id);");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_id ON artists(spotify_id);");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_id ON albums(spotify_id);");
+                
+                System.out.println("✅ Spotify Ultimate Migration completed successfully!");
+            } catch (Exception e) {
+                System.out.println("ℹ️ Spotify Migration check: " + e.getMessage());
             }
 
         } catch (Exception e) {

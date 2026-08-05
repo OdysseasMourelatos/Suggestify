@@ -40,6 +40,9 @@ STATS_QUESTION_POINTS = {
     "least": 100,      # "...the least?"
     "threshold": 120,  # "which of these have you streamed more than N times?"
     "exact": 150,      # "how many times have you streamed X?"
+    "artist_top": 130,   # "Which is Drake's #1 most streamed track?"
+    "artist_outlier": 160, # "Which of these songs by Drake is NOT in your Top 5?"
+    "global_outlier": 180, # "Which of these artists/songs is NOT in your Top 10?"
 }
 
 GAME_META = {
@@ -678,15 +681,15 @@ def init_arena_module(get_engine, run_query, run_write_query,
                       hint_budget=hint_budget, host_user_id=host_user_id, friend_user_id=friend_user_id, reveal_mode=reveal_mode))
             pool_id = rows[0]["id"]
 
-            # 1. Φέρνουμε Top Artists, Songs και Albums
+            # Βασικά pools για γενικές ερωτήσεις
             top_artists_df = run_query("""
-                SELECT a.name, COUNT(*) as c 
+                SELECT a.id, a.name, COUNT(*) as c 
                 FROM streams s 
                 JOIN song_artists sa ON sa.song_id = s.song_id AND sa.is_feature = FALSE
                 JOIN artists a ON a.id = sa.artist_id
                 WHERE s.user_id = :uid 
-                GROUP BY a.id 
-                ORDER BY c DESC LIMIT 40
+                GROUP BY a.id, a.name 
+                ORDER BY c DESC LIMIT 2000
             """, {"uid": host_user_id})
             top_artists = top_artists_df.to_dict('records') if not top_artists_df.empty else []
 
@@ -695,8 +698,8 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 FROM streams s 
                 JOIN songs so ON so.id = s.song_id
                 WHERE s.user_id = :uid 
-                GROUP BY so.id 
-                ORDER BY c DESC LIMIT 40
+                GROUP BY so.id, so.title 
+                ORDER BY c DESC LIMIT 2000
             """, {"uid": host_user_id})
             top_songs = top_songs_df.to_dict('records') if not top_songs_df.empty else []
 
@@ -706,32 +709,117 @@ def init_arena_module(get_engine, run_query, run_write_query,
                 JOIN songs so ON so.id = s.song_id
                 JOIN albums al ON al.id = so.album_id
                 WHERE s.user_id = :uid 
-                GROUP BY al.id 
-                ORDER BY c DESC LIMIT 40
+                GROUP BY al.id, al.title 
+                ORDER BY c DESC LIMIT 2000
             """, {"uid": host_user_id})
             top_albums = top_albums_df.to_dict('records') if not top_albums_df.empty else []
 
-            for i in range(1, round_count + 1):
-                valid_cats = []
-                if len(top_artists) >= 4: valid_cats.append(("artist", top_artists))
-                if len(top_songs) >= 4: valid_cats.append(("song", top_songs))
-                if len(top_albums) >= 4: valid_cats.append(("album", top_albums))
+            # Pre-fetch για Artist Deep Dives (παίρνουμε τραγούδια ανά καλλιτέχνη για τους top καλλιτέχνες)
+            artist_tracks_map = {}
+            if top_artists:
+                top_artist_ids = [a['id'] for a in top_artists[:15]] # Κοιτάμε τους top 15 καλλιτέχνες
+                at_df = run_query("""
+                    SELECT sa.artist_id, so.title, COUNT(*) as c
+                    FROM streams s
+                    JOIN song_artists sa ON sa.song_id = s.song_id
+                    JOIN songs so ON so.id = s.song_id
+                    WHERE s.user_id = :uid AND sa.artist_id IN :aids
+                    GROUP BY sa.artist_id, so.id, so.title
+                    ORDER BY sa.artist_id, c DESC
+                """, {"uid": host_user_id, "aids": tuple(top_artist_ids)})
+                
+                if not at_df.empty:
+                    for aid, group in at_df.groupby("artist_id"):
+                        artist_tracks_map[aid] = group.to_dict('records')
 
-                if not valid_cats:
-                    q_type, q_text = "most", "Not enough listening history yet!"
-                    options, option_counts, correct_idx, base_pts = ["N/A"] * 4, [0] * 4, 0, 100
-                else:
+            for i in range(1, round_count + 1):
+                # Καθορίζουμε ποιους τύπους ερωτήσεων μπορούμε να υποστηρίξουμε σε αυτόν τον γύρο
+                available_qtypes = ["most", "least", "exact", "threshold"]
+                
+                valid_artist_deep_dives = [aid for aid, trks in artist_tracks_map.items() if len(trks) >= 6]
+                if valid_artist_deep_dives:
+                    available_qtypes.extend(["artist_top", "artist_outlier"])
+                if len(top_artists) >= 12:
+                    available_qtypes.append("global_outlier")
+
+                q_type = random.choice(available_qtypes)
+                option_counts = []
+
+                # --- 1. ARTIST TOP TRACK ---
+                if q_type == "artist_top" and valid_artist_deep_dives:
+                    chosen_aid = random.choice(valid_artist_deep_dives)
+                    artist_name = next(a['name'] for a in top_artists if a['id'] == chosen_aid)
+                    trks = artist_tracks_map[chosen_aid]
+                    
+                    target = trks[0] # Το #1 τραγούδι του
+                    others = random.sample(trks[1:], min(3, len(trks) - 1))
+                    
+                    sample = [target] + others
+                    random.shuffle(sample)
+                    
+                    q_text = f"Which is your #1 most streamed song by {artist_name}?"
+                    options = [s['title'] for s in sample]
+                    option_counts = [s['c'] for s in sample]
+                    correct_idx = options.index(target['title'])
+                    base_pts = STATS_QUESTION_POINTS["artist_top"]
+
+                # --- 2. ARTIST OUTLIER (NOT in Top 5) ---
+                elif q_type == "artist_outlier" and valid_artist_deep_dives:
+                    chosen_aid = random.choice(valid_artist_deep_dives)
+                    artist_name = next(a['name'] for a in top_artists if a['id'] == chosen_aid)
+                    trks = artist_tracks_map[chosen_aid]
+                    
+                    if len(trks) >= 8:
+                        top_pool = trks[:5]
+                        deeper_pool = trks[5:]
+                        
+                        target_wrong = random.sample(top_pool, 3) # 3 από το top 5 (λάθος απαντήσεις για το ποιο ΔΕΝ ανήκει)
+                        target_right = random.choice(deeper_pool) # 1 από πιο κάτω (αυτό είναι που ΔΕΝ είναι στο top 5)
+                        
+                        sample = target_wrong + [target_right]
+                        random.shuffle(sample)
+                        
+                        q_text = f"Which of these songs by {artist_name} is NOT in your Top 5 most played for him?"
+                        options = [s['title'] for s in sample]
+                        option_counts = [s['c'] for s in sample]
+                        correct_idx = options.index(target_right['title'])
+                        base_pts = STATS_QUESTION_POINTS["artist_outlier"]
+                    else:
+                        q_type = "most" # Fallback αν δεν έχει αρκετά τραγούδια ο καλλιτέχνης
+
+                # --- 3. GLOBAL OUTLIER (NOT in Top 10 Artists) ---
+                elif q_type == "global_outlier" and len(top_artists) >= 12:
+                    top_10 = top_artists[:10]
+                    tier_low = top_artists[10:]
+                    
+                    target_right = random.choice(top_10) # Αυτός ΕΙΝΑΙ στο top 10 (ή το αντίθετο ανάλογα με την ερώτηση)
+                    # Ας το κάνουμε: "Ποιος από αυτούς ΔΕΝ είναι στο Top 10 σου;"
+                    target_wrong_3 = random.sample(top_10, 3)
+                    target_right_1 = random.choice(tier_low)
+                    
+                    sample = target_wrong_3 + [target_right_1]
+                    random.shuffle(sample)
+                    
+                    q_text = "Which of these artists is NOT in your All-Time Top 10?"
+                    options = [a['name'] for a in sample]
+                    option_counts = [a['c'] for a in sample]
+                    correct_idx = options.index(target_right_1['name'])
+                    base_pts = STATS_QUESTION_POINTS["global_outlier"]
+
+                # --- 4. STANDARD STATS (Most, Least, Exact, Threshold) ---
+                if q_type in ["most", "least", "exact", "threshold"]:
+                    valid_cats = []
+                    if len(top_artists) >= 4: valid_cats.append(("artist", top_artists))
+                    if len(top_songs) >= 4: valid_cats.append(("song", top_songs))
+                    if len(top_albums) >= 4: valid_cats.append(("album", top_albums))
+
                     cat_name, cat_data = random.choice(valid_cats)
                     sample = random.sample(cat_data, 4)
-                    sample.sort(key=lambda x: x['c'], reverse=True) # Highest to lowest streams
-                    
-                    q_type = random.choice(["most", "least", "exact", "threshold"])
-                    option_counts = []
+                    sample.sort(key=lambda x: x['c'], reverse=True)
                     
                     if q_type == "most":
                         correct_name = sample[0]['name']
                         q_text = f"Which of these {cat_name}s have you streamed the MOST?"
-                        
                         random.shuffle(sample)
                         options = [s['name'] for s in sample]
                         option_counts = [s['c'] for s in sample]
@@ -741,7 +829,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
                     elif q_type == "least":
                         correct_name = sample[-1]['name']
                         q_text = f"Which of these {cat_name}s have you streamed the LEAST?"
-                        
                         random.shuffle(sample)
                         options = [s['name'] for s in sample]
                         option_counts = [s['c'] for s in sample]
@@ -752,7 +839,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
                         target = sample[0]
                         exact_ans = target['c']
                         rounded_ans = int(round(exact_ans, -1)) if exact_ans >= 10 else exact_ans
-                        
                         q_text = f"Approximately how many times have you streamed the {cat_name} '{target['name']}'?"
                         
                         wrong_opts = [
@@ -768,7 +854,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
                         options_ints = list(opts_set)
                         random.shuffle(options_ints)
                         options = [str(x) for x in options_ints]
-                        option_counts = [exact_ans] * 4 # Pass exact number strictly for the reveal UI
+                        option_counts = [exact_ans] * 4
                         correct_idx = options_ints.index(rounded_ans)
                         base_pts = STATS_QUESTION_POINTS["exact"]
                         
@@ -779,7 +865,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
                             if exact_t == target['c']: exact_t -= 1
                             t = int(round(exact_t, -1)) if exact_t >= 20 else exact_t
                             if t >= target['c'] or t <= sample[1]['c']: t = exact_t
-                            
                             q_text = f"Which of these {cat_name}s have you streamed MORE than {max(1, t)} times?"
                             correct_name = target['name']
                         elif sample[-2]['c'] > sample[-1]['c']:
@@ -787,7 +872,6 @@ def init_arena_module(get_engine, run_query, run_write_query,
                             exact_t = random.randint(target['c'] + 1, sample[-2]['c'])
                             t = int(round(exact_t, -1)) if exact_t >= 20 else exact_t
                             if t <= target['c'] or t >= sample[-2]['c']: t = exact_t
-                            
                             q_text = f"Which of these {cat_name}s have you streamed LESS than {t} times?"
                             correct_name = target['name']
                         else:
@@ -804,6 +888,7 @@ def init_arena_module(get_engine, run_query, run_write_query,
                     INSERT INTO arena_stats_questions (pool_id, round_number, question_type, question_text, options, correct_index, base_points, option_counts)
                     VALUES (:pid, :rn, :qtype, :qtext, :opts, :cidx, :bpts, :ocounts)
                 """, dict(pid=pool_id, rn=i, qtype=q_type, qtext=q_text, opts=json.dumps(options), cidx=correct_idx, bpts=base_pts, ocounts=json.dumps(option_counts)))
+
             return pool_id
         
         host_pool = _eligible_pool(host_user_id, game_type)
