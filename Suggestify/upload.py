@@ -335,7 +335,7 @@ if st.session_state.upload_state == "idle":
             spotify_auth_url = f"https://accounts.spotify.com/authorize?{urllib.parse.urlencode(auth_params)}"
             
             st.markdown(f"""
-            <a href="{spotify_auth_url}" target="_self" style="display: block; text-align: center; background: #1DB954; color: #000; font-weight: 800; font-size: 1rem; text-decoration: none; border-radius: 999px; padding: 0.8rem 2rem; transition: all 0.2s ease; box-shadow: 0 4px 24px rgba(29,185,84,0.25);">
+            <a href="{spotify_auth_url}" target="_top" style="display: block; text-align: center; background: #1DB954; color: #000; font-weight: 800; font-size: 1rem; text-decoration: none; border-radius: 999px; padding: 0.8rem 2rem; transition: all 0.2s ease; box-shadow: 0 4px 24px rgba(29,185,84,0.25);">
                 Connect with Spotify
             </a>
             """, unsafe_allow_html=True)
