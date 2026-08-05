@@ -6,3 +6,4 @@ psycopg2-binary
 requests
 pillow
 matplotlib
+starlette==0.39.2
