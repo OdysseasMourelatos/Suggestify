@@ -14,7 +14,7 @@ _LAYOUT_BASE = dict(
     legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)"),
     hoverlabel=dict(bgcolor="#1C1C1C", bordercolor="rgba(255,255,255,0.1)", font=dict(color=TEXT, size=13)),
     dragmode=False,
-    height=320, 
+    height=400, 
     autosize=True,
 )
 

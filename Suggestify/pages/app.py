@@ -182,6 +182,16 @@ st.markdown("""
         overflow: hidden !important;
         opacity: 0.01 !important;
     }
+    .st-key-system_hidden_zone {
+        position: fixed !important;
+        top: -9999px !important;
+        left: -9999px !important;
+        height: 0 !important;
+        width: 0 !important;
+        overflow: hidden !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -470,11 +480,11 @@ def hidden_bump_worker():
     st.text_input("hidden_bump_input", key="hidden_bump_state", label_visibility="collapsed", on_change=on_bump_change)
 
 # Καλούμε και τους 2 workers
-hidden_rate_worker()
-hidden_bump_worker()
-
-A.inject_arena_script()
-A.arena_hidden_worker()
+with st.container(key="system_hidden_zone"):
+    hidden_rate_worker()
+    hidden_bump_worker()
+    A.inject_arena_script()
+    A.arena_hidden_worker()
 
 def render_dimension_detail(extra_where: str, extra_params: dict, type_label: str, title: str, subtitle: str, icon: str, image_url: str = None, redirect_info: dict = None):
     header_df = run_query(f"""
