@@ -722,31 +722,51 @@ div[data-testid="stPopoverBody"] button {
         min-height: 2.1rem !important;
     }
 
+    /* ΠΡΟΣΘΗΚΗ: Βάζουμε τα φίλτρα (Search, Sort, Limit) και τα Month/Hour δίπλα-δίπλα */
+    div[data-testid="stColumns"]:has([data-baseweb="select"]),
+    div[data-testid="stColumns"]:has([data-testid="stTextInput"]) {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+        align-items: flex-end !important;
+    }
+    div[data-testid="stColumns"]:has([data-baseweb="select"]) > div[data-testid="column"],
+    div[data-testid="stColumns"]:has([data-testid="stTextInput"]) > div[data-testid="column"] {
+        flex: 1 1 calc(50% - 6px) !important;
+        min-width: 0 !important;
+        width: auto !important;
+    }
+    /* Το Search Box να πιάνει όλο το πλάτος, τα υπόλοιπα από κάτω 50-50 */
+    div[data-testid="stColumns"]:has([data-testid="stTextInput"]) > div[data-testid="column"]:first-child {
+        flex: 1 1 100% !important;
+    }
+
     /* ─── FILTER BAR: clean 2x2 grid, Spotify-style, nothing clipped ─── */
     .st-key-filter_bar_row div[data-testid="stHorizontalBlock"],
     .st-key-filter_bar_row div[data-testid="stColumns"] {
         align-items: flex-end;
-        gap: 0.75rem !important;
-        padding: 0 0 1rem 0 !important; 
+        gap: 6px !important;
+        padding: 0 0 0.5rem 0 !important; 
         border-top: none !important; /* Βγάζουμε τη γραμμή που έπιανε χώρο */
     }
     .filter-label {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: VAR_TEXT_DIM;
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.15rem;
     }
 
     /* Μικραίνουμε το ύψος των inputs (select & dates) */
     div[data-baseweb="select"] > div, 
     div[data-testid="stDateInput"] input {
-        min-height: 38px !important;
-        height: 38px !important;
-        font-size: 0.85rem !important;
+        min-height: 32px !important;
+        height: 32px !important;
+        font-size: 0.75rem !important;
         border-radius: 8px !important;
-        padding: 0 0.75rem !important;
+        padding: 0 0.5rem !important;
         background: rgba(255,255,255,0.04) !important;
         border: 1px solid VAR_BORDER !important;
         color: VAR_TEXT !important;
@@ -817,8 +837,10 @@ div[data-testid="stPopoverBody"] button {
 
     /* ─── SEARCH INPUTS ─── */
     div[data-testid="stTextInput"] input {
-        font-size: 0.85rem !important;
-        padding: 0.6rem 0.8rem !important;
+        font-size: 0.75rem !important;
+        padding: 0.4rem 0.6rem !important;
+        height: 32px !important;
+        min-height: 32px !important;
     }
 
     /* Toolbar wrapping for mobile */
@@ -861,7 +883,7 @@ div[data-testid="stPopoverBody"] button {
         width: 100% !important;
         padding: 4px !important;
     }
-        .st-key-share_row div[data-testid="stHorizontalBlock"],
+    .st-key-share_row div[data-testid="stHorizontalBlock"],
     .st-key-share_row div[data-testid="stColumns"] {
         width: 100% !important;
         min-width: 0 !important;
@@ -879,8 +901,10 @@ div[data-testid="stPopoverBody"] button {
     .st-key-share_row div[data-testid="column"]:last-child button,
     .st-key-share_row div[data-testid="stColumn"]:last-child button {
         width: 100% !important;
-        height: 42px !important;
-        font-size: 0.82rem !important;
+        height: 34px !important; /* Smaller Height */
+        min-height: 34px !important;
+        font-size: 0.75rem !important; /* Smaller Font */
+        padding: 0 4px !important;
     }
 }
 
@@ -888,8 +912,8 @@ div[data-testid="stPopoverBody"] button {
 @media (max-width: 23.75em) {
     .st-key-filter_bar_row [data-testid="column"],
     .st-key-filter_bar_row [data-testid="stColumn"] {
-        flex: 1 1 100% !important;
-        min-width: 100% !important;
+        flex: 1 1 48% !important; /* Changed from 100% to keep side-by-side */
+        min-width: 48% !important;
         max-width: 100% !important;
     }
 }
