@@ -947,65 +947,34 @@ div[data-testid="stPopoverBody"] button {
 }
 
 /* ========================================================
-   MOBILE OVERRIDES (Floating Dock + Popover menu)
+   MOBILE OVERRIDES (Static Menu under filters)
    ======================================================== */
 @media (max-width: 48em) {
-    /* Μετατροπή της μπάρας σε Floating Dock στο κάτω μέρος */
+    /* ΕΞΑΦΑΝΙΣΗ της οριζόντιας μπάρας των Desktop */
+    div[data-testid="stVerticalBlock"] > div:has(.st-key-tab_nav_row),
     .st-key-tab_nav_row {
-        position: fixed !important;
-        bottom: 2rem !important;
-        top: auto !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        z-index: 99999 !important;
-        
-        background: rgba(18, 18, 18, 0.65) !important;
-        backdrop-filter: blur(30px) saturate(200%) !important;
-        -webkit-backdrop-filter: blur(30px) saturate(200%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 999px !important;
-        padding: 0.4rem 0.5rem !important;
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255,255,255,0.05) !important;
-        
-        width: max-content !important;
+        display: none !important;
+        height: 0 !important;
         margin: 0 !important;
+        padding: 0 !important;
     }
 
-    .st-key-tab_nav_row div[data-testid="stHorizontalBlock"],
-    .st-key-tab_nav_row div[data-testid="stColumns"] {
-        width: max-content !important;
-        align-items: center !important;
-    }
-
-    .st-key-tab_nav_row [data-testid="column"],
-    .st-key-tab_nav_row [data-testid="stColumn"] {
-        width: auto !important;
-        flex: 0 0 auto !important;
-    }
-
-    .st-key-tab_nav_row div[data-testid="stButton"] button {
-        width: auto !important;
-        padding: 0.4rem 1.25rem !important;
-        min-height: 2.4rem !important;
-    }
-
-    .st-key-tab_nav_row div[data-testid="stButton"] button:hover {
-        transform: scale(1.05) !important;
-    }
-
-    .st-key-tab_nav_row div[data-testid="stButton"] button[kind="primary"]:hover {
-        box-shadow: 0 6px 20px VAR_GREEN_GLOW !important;
-    }
-
-    /* Mobile Floating Menu (Όταν τα tabs είναι πολλά και μπαίνουν στο dropdown) */
+    /* ΕΜΦΑΝΙΣΗ του Dropdown Μενού στο κινητό ΩΣ ΣΤΑΘΕΡΟ (Static) */
+    div[data-testid="stVerticalBlock"] > div:has(.st-key-tab_nav_mobile),
     .st-key-tab_nav_mobile {
-        position: fixed !important;
-        bottom: 2rem !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        z-index: 99999 !important;
-        width: max-content !important;
         display: block !important;
+        position: relative !important; /* Ακυρώνει κάθε fixed συμπεριφορά */
+        transform: none !important;
+        left: 0 !important;
+        bottom: 0 !important;
+        z-index: 10 !important;
+        width: 100% !important;
+        margin: 0.5rem 0 1.5rem 0 !important;
+    }
+    
+    .st-key-tab_nav_mobile > div,
+    .st-key-tab_nav_mobile button {
+        width: 100% !important;
     }
 }
 
