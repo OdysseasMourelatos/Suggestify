@@ -951,7 +951,7 @@ div[data-testid="stPopoverBody"] button {
    ======================================================== */
 @media (max-width: 48em) {
     /* ΕΞΑΦΑΝΙΣΗ της οριζόντιας μπάρας των Desktop */
-    div[data-testid="stVerticalBlock"] > div:has(.st-key-tab_nav_row),
+    div[data-testid="stVerticalBlock"] > div:has(> .st-key-tab_nav_row),
     .st-key-tab_nav_row {
         display: none !important;
         height: 0 !important;
@@ -960,21 +960,28 @@ div[data-testid="stPopoverBody"] button {
     }
 
     /* ΕΜΦΑΝΙΣΗ του Dropdown Μενού στο κινητό ΩΣ ΣΤΑΘΕΡΟ (Static) */
-    div[data-testid="stVerticalBlock"] > div:has(.st-key-tab_nav_mobile),
+    div[data-testid="stVerticalBlock"] > div:has(> .st-key-tab_nav_mobile) {
+        display: block !important;
+        margin: 0.2rem 0 0.5rem 0 !important; /* Ρυθμίζουμε τα κενά ΜΟΝΟ στο εξωτερικό κουτί */
+        padding: 0 !important;
+    }
+    
     .st-key-tab_nav_mobile {
         display: block !important;
-        position: relative !important; /* Ακυρώνει κάθε fixed συμπεριφορά */
+        position: relative !important; 
         transform: none !important;
         left: 0 !important;
         bottom: 0 !important;
         z-index: 10 !important;
         width: 100% !important;
-        margin: 0.5rem 0 1.5rem 0 !important;
+        margin: 0 !important; /* ΜΗΔΕΝΙΖΟΥΜΕ το εσωτερικό margin για να μην διπλασιάζεται */
+        padding: 0 !important;
     }
     
     .st-key-tab_nav_mobile > div,
     .st-key-tab_nav_mobile button {
         width: 100% !important;
+        margin: 0 !important;
     }
 }
 
