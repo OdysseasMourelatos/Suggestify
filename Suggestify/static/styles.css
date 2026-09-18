@@ -44,16 +44,23 @@ div[data-testid="stColumns"] {
     gap: 0.5rem !important;
 }
 
-/* ─── PAGE TRANSITIONS ─── */
+/* ─── PAGE TRANSITIONS ───
+   FIX: αφαιρέθηκε το `transform` (translateY) από τα keyframes.
+   Οποιοδήποτε ancestor έχει transform (ακόμα κι ένα «άκακο» translateY(0)
+   στο τέλος ενός animation με fill-mode forwards/both) μετατρέπεται
+   αυτόματα σε containing block για τα position:fixed παιδιά του.
+   Αυτό ήταν που "παγίδευε" το floating tab dock (Overview κ.λπ.) στο
+   κινητό και το έκανε να εμφανίζεται στη μέση της σελίδας αντί να
+   μένει κολλημένο κάτω-κάτω, κάτω από τα Share Stats / Rating Off.
+   Το fade + blur κρατάει το ίδιο οπτικό αποτέλεσμα εισόδου χωρίς να
+   σπάει το position:fixed πουθενά στην εφαρμογή. */
 @keyframes pageEnter {
     from {
         opacity: 0;
-        transform: translateY(16px);
         filter: blur(3px);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
         filter: blur(0px);
     }
 }
@@ -61,12 +68,10 @@ div[data-testid="stColumns"] {
 @keyframes pageExit {
     from {
         opacity: 1;
-        transform: translateY(0) scale(1);
         filter: blur(0px);
     }
     to {
         opacity: 0;
-        transform: translateY(-10px) scale(0.98);
         filter: blur(4px);
     }
 }
