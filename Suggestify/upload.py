@@ -482,22 +482,31 @@ elif st.session_state.upload_state == "processing":
             java_env["SPOTIFY_CLIENT_SECRET"] = st.secrets["SPOTIFY_CLIENT_SECRET"]
 
         try:
-            # Αποσυνδέουμε ΠΛΗΡΩΣ τα tasks (stdout/stderr στο DEVNULL) 
-            kwargs = {
-                "env": java_env,
-                "stdout": subprocess.DEVNULL,
-                "stderr": subprocess.DEVNULL,
-            }
+            tasks = [
+                "com.Suggestify.ImageUpdater",
+                "com.Suggestify.ArtistImageUpdater",
+                "com.Suggestify.GenreEnricher",
+                "com.Suggestify.TrackMetadataEnricher",
+                "com.Suggestify.AlbumMetadataEnricher"
+            ]
+            
             if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                # Για Windows (τοπικά)
+                kwargs = {
+                    "env": java_env,
+                    "creationflags": subprocess.CREATE_NO_WINDOW,
+                    "stdout": subprocess.DEVNULL,
+                    "stderr": subprocess.DEVNULL
+                }
+                for task in tasks:
+                    subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, task, user_to_process], **kwargs)
             else:
-                kwargs["start_new_session"] = True
-
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ImageUpdater", user_to_process], **kwargs)
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ArtistImageUpdater", user_to_process], **kwargs)
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.GenreEnricher", user_to_process], **kwargs)
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.TrackMetadataEnricher", user_to_process], **kwargs)
-            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.AlbumMetadataEnricher", user_to_process], **kwargs)
+                # Για Linux / Streamlit Cloud: Απόλυτη αποσύνδεση
+                # Το nohup και το & στο τέλος λένε στο Linux να τρέξει το process στο παρασκήνιο
+                # και να μην το κλείσει ΠΟΤΕ, ακόμα κι αν το Streamlit/Python τερματίσει.
+                for task in tasks:
+                    cmd = f"nohup java -cp {JAVA_JAR_PATH} {task} '{user_to_process}' > /dev/null 2>&1 &"
+                    subprocess.Popen(cmd, shell=True, env=java_env)
             
         except Exception as e:
             print(f"Background tasks failed: {e}")
