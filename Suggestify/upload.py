@@ -212,6 +212,7 @@ LOG_STEPS = [
 ]
 
 def save_uploaded_file(uploaded_file) -> str:
+    uploaded_file.seek(0)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     tmp.write(uploaded_file.getbuffer())
     tmp.close()
