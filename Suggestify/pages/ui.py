@@ -97,11 +97,6 @@ def inject_custom_css():
     .main .block-container {{ padding-top: 1rem !important; margin-top: -4.8rem !important; }}
     div[data-testid="stDecoration"] {{ display: none !important; }}
     div[data-testid="stToolbar"] {{ display: none !important; }}
-
-    @media (max-width: 768px) {{
-        div[data-testid="stPlotlyChart"] {{ height: 240px !important; }}
-        div[data-testid="stPlotlyChart"] > div {{ height: 240px !important; }}
-    }}
     div[data-testid="stVerticalBlock"] {{ gap: 0.2rem !important; }}
     div[data-testid="column"] {{ gap: 0.5rem !important; }}
     header {{ display: none !important; }}

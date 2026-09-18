@@ -1000,7 +1000,7 @@ with st.container(key="top_bar_wrapper"):
                 }}
                 .st-key-share_row div[data-testid="column"],
                 .st-key-share_row div[data-testid="stColumn"] {{
-                    flex: 1 1 50% !important; width: 50% !important;
+                    flex: 1 !important; width: 0 !important; overflow: hidden !important;
                 }}
                 .st-key-share_row div[data-testid="column"]:first-child::after,
                 .st-key-share_row div[data-testid="stColumn"]:first-child::after {{ display: none !important; }}

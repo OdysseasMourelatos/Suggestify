@@ -869,14 +869,6 @@ div[data-testid="stPopoverBody"] button {
         height: 42px !important;
         font-size: 0.82rem !important;
     }
-
-    .js-plotly-plot, .plotly-graph-div, .svg-container {
-        min-height: 260px !important;
-        width: 100% !important;
-    }
-    .js-plotly-plot .main-svg {
-        width: 100% !important;
-    }
 }
 
 /* Extra-small phones (iPhone SE etc.) — drop to single column filters */
