@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 from config import *
 
+# charts.py
 _LAYOUT_BASE = dict(
     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
     font=dict(family="Inter, sans-serif", color=TEXT_DIM, size=12),
@@ -13,6 +14,8 @@ _LAYOUT_BASE = dict(
     legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)"),
     hoverlabel=dict(bgcolor="#1C1C1C", bordercolor="rgba(255,255,255,0.1)", font=dict(color=TEXT, size=13)),
     dragmode=False,
+    height=320, 
+    autosize=True,
 )
 
 def themed(fig: go.Figure, **extra) -> go.Figure:
@@ -55,7 +58,7 @@ def chart_heatmap(df: pd.DataFrame) -> go.Figure:
         hoverongaps=False, xgap=3, ygap=3, hovertemplate="<b>%{y}</b> at <b>%{x}:00</b><br>%{z} streams<extra></extra>"
     ))
     return themed(fig, xaxis_title="Hour", yaxis_title="", margin=dict(t=20, b=50, l=60, r=20),
-                  height=300, yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True, autorange="reversed"))
+                yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.08)", zeroline=False, fixedrange=True, autorange="reversed"))
 
 def chart_bar(x, y, xlabel: str) -> go.Figure:
     max_val = max(y) if y else 0

@@ -5,10 +5,7 @@ import pandas as pd
 import datetime
 from sqlalchemy import create_engine, text
 
-try:
-    CONNECTION_STRING = st.secrets["DATABASE_URL"]
-except KeyError:
-    CONNECTION_STRING = "postgresql://postgres.pxpplxyszvrzubdqykmw:dKPJjO2jZtkmwjYh@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require"
+CONNECTION_STRING = st.secrets["DATABASE_URL"]
 
 @st.cache_resource
 def get_engine():

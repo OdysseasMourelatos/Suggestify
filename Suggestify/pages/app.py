@@ -684,7 +684,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             GROUP BY 1 ORDER BY 1
         """, {**F, **extra_params})
         if not df_t.empty:
-            st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+            st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
         st.markdown('</div>', unsafe_allow_html=True)
 
     with ch2:
@@ -700,7 +700,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
         if not df_h.empty:
             st.plotly_chart(
                 chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
-                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
             )
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -718,7 +718,7 @@ def render_dimension_detail(extra_where: str, extra_params: dict, type_label: st
             dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
             st.plotly_chart(
                 chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
             )
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -848,13 +848,34 @@ with st.container(key="top_bar_wrapper"):
 
             /* ─── BASE ELEMENTS (Κοινά) ─── */
             .st-key-top_bar_wrapper .brand-title {{
-                font-size: 1.3rem !important;
+                font-size: 1.9rem !important;
                 font-weight: 800 !important;
                 letter-spacing: -0.02em;
                 gap: 0.45rem;
                 white-space: nowrap;
             }}
-            .st-key-top_bar_wrapper .brand-title span {{ font-size: 1.55rem !important; }}
+            .st-key-top_bar_wrapper .brand-title span {{ font-size: 2.2rem !important; }}
+
+            .st-key-share_row [data-testid="stVerticalBlock"] {{
+                height: 100% !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+            }}
+            .st-key-share_row [data-testid="column"] {{
+                display: flex !important;
+                align-items: stretch !important;
+            }}
+            .st-key-share_row button {{
+                height: 38px !important;
+                min-height: 38px !important;
+                box-sizing: border-box !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                margin: 0 !important;
+                width: 100% !important;
+            }}
 
             .st-key-top_bar_wrapper .filter-label {{
                 font-size: 0.6rem !important;
@@ -1283,7 +1304,7 @@ if detail_type and detail_id:
                     GROUP BY 1 ORDER BY 1
                 """, {"id": detail_id, **F})
                 if not df_t.empty:
-                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with c2:
@@ -1299,7 +1320,7 @@ if detail_type and detail_id:
                 if not df_h.empty:
                     st.plotly_chart(
                         chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
-                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1499,7 +1520,7 @@ if detail_type and detail_id:
                     GROUP BY 1 ORDER BY 1
                 """, {"aid": detail_id, **F})
                 if not df_t.empty:
-                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                    st.plotly_chart(chart_trend(df_t), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with ch2:
@@ -1516,7 +1537,7 @@ if detail_type and detail_id:
                 if not df_h.empty:
                     st.plotly_chart(
                         chart_bar(df_h["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_h["stream_count"].tolist(), "Hour"),
-                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1535,7 +1556,7 @@ if detail_type and detail_id:
                     dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
                     st.plotly_chart(
                         chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1738,7 +1759,7 @@ if detail_type and detail_id:
                 """, {"aid": detail_id, **F})
                 
                 if not df_album_total_trend.empty:
-                    st.plotly_chart(chart_trend(df_album_total_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                    st.plotly_chart(chart_trend(df_album_total_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 # --- 2. ΥΠΑΡΧΟΝ: Εξέλιξη των Top 5 Tracks ---
@@ -1766,7 +1787,7 @@ if detail_type and detail_id:
                 """, {"aid": detail_id, **F})
                 
                 if not df_album_trend.empty:
-                    st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                    st.plotly_chart(chart_multi_trend(df_album_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 # --- 3. ΥΠΑΡΧΟΝ: Peak Hours ---
@@ -1783,7 +1804,7 @@ if detail_type and detail_id:
                 if not df_hours.empty:
                     st.plotly_chart(
                         chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
-                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1802,7 +1823,7 @@ if detail_type and detail_id:
                     dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
                     st.plotly_chart(
                         chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                        use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
                     )
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2108,7 +2129,7 @@ elif current_tab == "overview":
         GROUP BY 1 ORDER BY 1;
     """, F)
     if not df_trend.empty:
-        st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+        st.plotly_chart(chart_trend(df_trend), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
     st.markdown('</div>', unsafe_allow_html=True)
 
 elif current_tab == "tracks":
@@ -2571,7 +2592,7 @@ elif current_tab == "habits":
         GROUP BY 1, 2;
     """, F)
     if not df_heatmap.empty:
-        st.plotly_chart(chart_heatmap(df_heatmap), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+        st.plotly_chart(chart_heatmap(df_heatmap), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
     st.markdown('</div>', unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
@@ -2587,7 +2608,7 @@ elif current_tab == "habits":
         if not df_hours.empty:
             st.plotly_chart(
                 chart_bar(df_hours["hour"].apply(lambda h: f"{h:02d}:00").tolist(), df_hours["stream_count"].tolist(), "Hour"),
-                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
             )
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2604,7 +2625,7 @@ elif current_tab == "habits":
             dow_map = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
             st.plotly_chart(
                 chart_bar(df_days["dow"].map(dow_map).tolist(), df_days["stream_count"].tolist(), "Day"),
-                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
             )
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2673,7 +2694,7 @@ elif current_tab == "habits":
                     df_tod_chart["stream_count"].tolist(),
                     [TOD_META[t]["color"] for t in df_tod_chart["time_of_day"]]
                 ),
-                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}
+                use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True}
             )
             st.markdown('</div>', unsafe_allow_html=True)
         render_time_of_day_cards(df_tod)
@@ -2690,7 +2711,7 @@ elif current_tab == "habits":
         """, F)
         st.markdown('<div class="chart-container"><div class="chart-title">📈 Streams per Year</div>', unsafe_allow_html=True)
         if not df_years.empty:
-            st.plotly_chart(chart_year_bar(df_years), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+            st.plotly_chart(chart_year_bar(df_years), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
             df_years_list = df_years.copy()
             df_years_list["year_str"] = df_years_list["year"].astype(str)
             df_years_list["subtitle"] = "Year"
@@ -2766,7 +2787,7 @@ elif current_tab == "habits":
                     hovertemplate="<b>%{x}</b><br>%{y:,} streams<br>%{customdata:,.1f}h listened<extra></extra>"
                 ))
                 st.plotly_chart(themed(fig_decade, xaxis_title="", yaxis_title="Streams", bargap=0.3),
-                                 use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+                                 use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False, "responsive": True})
             else:
                 st.markdown('<div class="empty-state"><div class="icon">📭</div>No release-date data yet</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)

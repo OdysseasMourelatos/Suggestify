@@ -94,7 +94,14 @@ def inject_custom_css():
     }}
 
     .block-container {{ padding: 1rem 2rem 6rem !important; max-width: 100% !important; }}
-    .main .block-container {{ padding-top: 1rem !important; margin-top: -3.6rem !important; }}
+    .main .block-container {{ padding-top: 1rem !important; margin-top: -4.8rem !important; }}
+    div[data-testid="stDecoration"] {{ display: none !important; }}
+    div[data-testid="stToolbar"] {{ display: none !important; }}
+
+    @media (max-width: 768px) {{
+        div[data-testid="stPlotlyChart"] {{ height: 240px !important; }}
+        div[data-testid="stPlotlyChart"] > div {{ height: 240px !important; }}
+    }}
     div[data-testid="stVerticalBlock"] {{ gap: 0.2rem !important; }}
     div[data-testid="column"] {{ gap: 0.5rem !important; }}
     header {{ display: none !important; }}
@@ -152,7 +159,7 @@ def inject_custom_css():
     .st-key-tab_nav_row {{
         z-index: 40 !important;
     }}
-    
+        
     div[data-testid="stButton"] button {{ transition: all 0.2s ease !important; }}
     div[data-testid="stButton"] button[kind="secondary"]:hover {{ background: var(--dynamic-color-hover) !important; color: var(--dynamic-color) !important; transform: translateY(-1px) !important; border-color: var(--dynamic-color-dim) !important; }}
     div[data-testid="stButton"] button[kind="primary"]:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px var(--dynamic-color-glow) !important; }}
