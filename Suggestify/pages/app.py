@@ -990,31 +990,51 @@ with st.container(key="top_bar_wrapper"):
 
                 /* Διορθώνει το στρίμωγμα του Share Row */
                 .st-key-share_row {{
-                    display: flex !important; width: 100% !important;
-                    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.09);
-                    border-radius: 12px; padding: 4px;
+                    display: flex !important;
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    box-sizing: border-box !important;
+                    overflow: hidden !important;
+                    background: rgba(255,255,255,0.045);
+                    border: 1px solid rgba(255,255,255,0.09);
+                    border-radius: 12px;
+                    padding: 4px;
                 }}
                 .st-key-share_row div[data-testid="stHorizontalBlock"],
                 .st-key-share_row div[data-testid="stColumns"] {{
-                    display: flex !important; flex-direction: row !important; width: 100% !important; gap: 4px !important;
+                    display: flex !important;
+                    flex-direction: row !important;
+                    flex-wrap: nowrap !important;
+                    width: 100% !important;
+                    min-width: 0 !important;
+                    gap: 4px !important;
                 }}
                 .st-key-share_row div[data-testid="column"],
                 .st-key-share_row div[data-testid="stColumn"] {{
-                    flex: 1 !important; width: 0 !important; overflow: hidden !important;
+                    flex: 1 1 0 !important;
+                    width: auto !important;
+                    min-width: 0 !important;
+                    max-width: 50% !important;
+                    overflow: hidden !important;
                 }}
                 .st-key-share_row div[data-testid="column"]:first-child::after,
                 .st-key-share_row div[data-testid="stColumn"]:first-child::after {{ display: none !important; }}
 
-                /* Ξεπαγιδεύει το Tab Dropdown από το να πέφτει πάνω στα κουμπιά */
-                .st-key-tab_nav_mobile {{
-                    position: static !important;
-                    transform: none !important;
+                .st-key-quick_rate_toggle button,
+                .st-key-share_row button {{
                     width: 100% !important;
-                    margin: 0 0 16px 0 !important;
-                    display: block !important;
+                    min-width: 0 !important;
+                    padding: 0 8px !important;
+                    font-size: 0.75rem !important;
+                    overflow: hidden !important;
+                    text-overflow: ellipsis !important;
                 }}
-                .st-key-tab_nav_mobile > div, .st-key-tab_nav_mobile button {{
-                    width: 100% !important;
+                .st-key-share_row button p,
+                .st-key-share_row button div {{
+                    min-width: 0 !important;
+                    overflow: hidden !important;
+                    text-overflow: ellipsis !important;
+                    white-space: nowrap !important;
                 }}
             }}
             </style>

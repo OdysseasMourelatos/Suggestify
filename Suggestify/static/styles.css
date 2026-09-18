@@ -7,6 +7,10 @@ html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"], [data-te
     background: #000000 !important;
     color: VAR_TEXT !important;
 }
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    overflow-x: hidden !important;
+    max-width: 100vw !important;
+}
 #MainMenu, footer { visibility: hidden; }
 
 /* Kill Streamlit's default header bar + colored decoration strip entirely
@@ -852,15 +856,19 @@ div[data-testid="stPopoverBody"] button {
         width: 100% !important;
         padding: 4px !important;
     }
-    .st-key-share_row div[data-testid="stHorizontalBlock"],
+        .st-key-share_row div[data-testid="stHorizontalBlock"],
     .st-key-share_row div[data-testid="stColumns"] {
         width: 100% !important;
+        min-width: 0 !important;
+        flex-wrap: nowrap !important;
         display: flex !important;
     }
     .st-key-share_row div[data-testid="column"],
     .st-key-share_row div[data-testid="stColumn"] {
-        flex: 1 1 50% !important;
-        width: 50% !important;
+        flex: 1 1 0 !important;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: 50% !important;
     }
     .st-key-quick_rate_toggle button,
     .st-key-share_row div[data-testid="column"]:last-child button,
