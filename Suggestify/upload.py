@@ -378,8 +378,10 @@ if st.session_state.upload_state == "idle":
                 else:
                     safe_user = username_input.strip().replace("'", "").replace('"', '')
                     
-                    kill_cmd = f"pkill -9 -f 'com.Suggestify.* {safe_user}'"
-                    os.system(kill_cmd)
+                    if sys.platform == "win32":
+                        os.system(f'wmic process where "commandline like \'%com.Suggestify.% {safe_user}%\'" call terminate >nul 2>&1')
+                    else:
+                        os.system(f"pkill -9 -f 'com.Suggestify.* {safe_user}'")
                     
                     st.session_state.saved_zip_path = save_uploaded_file(uploaded)
                     st.session_state.username_to_import = username_input.strip()
@@ -387,7 +389,6 @@ if st.session_state.upload_state == "idle":
                     st.session_state.progress_pct = 0
                     st.session_state.log_lines = []
                     st.rerun()
-
     st.markdown("""
     <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
         <div class="step-card" style="flex: 1; background: rgba(255,255,255,0.025); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 1rem 0.85rem; text-align: center;">
@@ -482,31 +483,12 @@ elif st.session_state.upload_state == "processing":
             java_env["SPOTIFY_CLIENT_SECRET"] = st.secrets["SPOTIFY_CLIENT_SECRET"]
 
         try:
-            tasks = [
-                "com.Suggestify.ImageUpdater",
-                "com.Suggestify.ArtistImageUpdater",
-                "com.Suggestify.GenreEnricher",
-                "com.Suggestify.TrackMetadataEnricher",
-                "com.Suggestify.AlbumMetadataEnricher"
-            ]
-            
-            if sys.platform == "win32":
-                # Για Windows (τοπικά)
-                kwargs = {
-                    "env": java_env,
-                    "creationflags": subprocess.CREATE_NO_WINDOW,
-                    "stdout": subprocess.DEVNULL,
-                    "stderr": subprocess.DEVNULL
-                }
-                for task in tasks:
-                    subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, task, user_to_process], **kwargs)
-            else:
-                # Για Linux / Streamlit Cloud: Απόλυτη αποσύνδεση
-                # Το nohup και το & στο τέλος λένε στο Linux να τρέξει το process στο παρασκήνιο
-                # και να μην το κλείσει ΠΟΤΕ, ακόμα κι αν το Streamlit/Python τερματίσει.
-                for task in tasks:
-                    cmd = f"nohup java -cp {JAVA_JAR_PATH} {task} '{user_to_process}' > /dev/null 2>&1 &"
-                    subprocess.Popen(cmd, shell=True, env=java_env)
+            # Ξεκινάνε ΚΑΝΟΝΙΚΑ όπως τα είχες στην αρχή, που δούλευαν τέλεια!
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ImageUpdater", user_to_process], creationflags=flags, env=java_env)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.ArtistImageUpdater", user_to_process], creationflags=flags, env=java_env)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.GenreEnricher", user_to_process], creationflags=flags, env=java_env)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.TrackMetadataEnricher", user_to_process], creationflags=flags, env=java_env)
+            subprocess.Popen(["java", "-cp", JAVA_JAR_PATH, "com.Suggestify.AlbumMetadataEnricher", user_to_process], creationflags=flags, env=java_env)
             
         except Exception as e:
             print(f"Background tasks failed: {e}")
